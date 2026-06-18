@@ -229,20 +229,16 @@ func isExported(name string) bool {
 	return r >= 'A' && r <= 'Z'
 }
 
-func checkCrossPackageAccess(curPkg, defPkg *types.Package, objName string) error {
+func checkExportedVisibility(obj types.Object, curPkg *types.Package) error {
+	defPkg := obj.Pkg()
 	if defPkg == nil || curPkg == defPkg {
 		return nil
 	}
-	if !isExported(objName) {
-		return fmt.Errorf("cross-package unexported: %s (pkg: %s)", objName, defPkg.Path())
+	if !isExported(obj.Name()) {
+		return fmt.Errorf("cross-package unexported: %s (pkg: %s)", obj.Name(), defPkg.Path())
 	}
 	return nil
 }
-
-func checkObjectFull(obj types.Object, curPkg *packages.Package) error {
-	return checkCrossPackageAccess(curPkg.Types, obj.Pkg(), obj.Name())
-}
-
 func uniqueAlias(pkgPath string, existing map[string]bool) string {
 	parts := strings.Split(pkgPath, "/")
 	if len(parts) == 0 {
@@ -839,7 +835,7 @@ func (e *Extractor) checkFreeVarVisibility(vars []*ast.Ident, curPkg *packages.P
 	for _, ident := range vars {
 		obj := curPkg.TypesInfo.ObjectOf(ident)
 		if obj != nil {
-			if err := checkObjectFull(obj, curPkg); err != nil {
+			if err := checkExportedVisibility(obj, curPkg.Types); err != nil {
 				return err
 			}
 		}
@@ -850,7 +846,7 @@ func (e *Extractor) checkFreeVarVisibility(vars []*ast.Ident, curPkg *packages.P
 func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error {
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
 	if obj != nil {
-		if err := checkObjectFull(obj, curPkg); err != nil {
+		if err := checkExportedVisibility(obj, curPkg.Types); err != nil {
 			return err
 		}
 	}
