@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
-	"go/constant"
 	"go/format"
 	"go/printer"
 	"go/types"
@@ -46,22 +45,21 @@ type GenTarget struct {
 }
 
 type Node struct {
-	Name       string
-	Func       string
-	FuncPkg    string
-	RetType    string
-	Args       []string
-	IsInvoke   bool
-	IsSupply   bool
-	Value      string
-	HasError   bool
-	IsClosure  bool
-	FreeVars   []*ast.Ident
+	Name      string
+	Func      string
+	FuncPkg   string
+	RetType   string
+	Args      []string
+	IsInvoke  bool
+	IsSupply  bool
+	Value     string
+	HasError  bool
+	IsClosure bool
+
 	ClosureDef string
 	UsedPkgs   []string
 	PkgPath    string
 
-	IsClosureParam []bool
 	IsConstArg     []bool
 	ConstLitValues []string
 	IsContextArg   []bool
@@ -86,9 +84,6 @@ type extractedItem struct {
 
 	ClosureParamNames []string
 	ClosureParamTypes []types.Type
-
-	// 新增：标记每个参数是否为闭包参数（true）还是自由变量（false）
-	IsClosureParam []bool
 
 	// 新增：常量信息（仅对自由变量有效）
 	IsConstArg     []bool
@@ -544,7 +539,7 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 		return err
 	}
 
-	argTypes, isClosureParam, isConstArg, litValues := e.buildArgTypesAndFlags(paramTypes, paramTypeStrs, freeTypes, freeIsConst, freeLitValues)
+	argTypes, isConstArg, litValues := e.buildArgTypesAndFlags(paramTypes, paramTypeStrs, freeTypes, freeIsConst, freeLitValues)
 
 	hasErr := sigHasError(sig)
 	retType, err := e.determineReturnType(funcLit, sig, isInvoke, curPkg)
@@ -568,7 +563,7 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	idx := len(e.items)
 	item := e.buildExtractedItem(funcName, argTypes, isInvoke, hasErr, curPkg, funcLit,
 		freeVars, freeTypes, freeTypeStrs, paramNames, paramTypes,
-		isClosureParam, isConstArg, litValues, retType, isContextArg)
+		isConstArg, litValues, retType, isContextArg)
 
 	e.items = append(e.items, item)
 	if !isInvoke && retType != "" {
@@ -601,21 +596,11 @@ func (e *Extractor) extractClosureParams(funcLit *ast.FuncLit, curPkg *packages.
 	return names, typesList, typeStrs
 }
 
-func (e *Extractor) buildArgTypesAndFlags(paramTypes []types.Type, paramTypeStrs []string, freeTypes []types.Type, freeIsConst []bool, freeLitValues []string) ([]string, []bool, []bool, []string) {
+func (e *Extractor) buildArgTypesAndFlags(paramTypes []types.Type, paramTypeStrs []string, freeTypes []types.Type, freeIsConst []bool, freeLitValues []string) ([]string, []bool, []string) {
 	argTypes := make([]string, 0, len(paramTypes)+len(freeTypes))
-	for _, s := range paramTypeStrs {
-		argTypes = append(argTypes, s)
-	}
+	argTypes = append(argTypes, paramTypeStrs...)
 	for _, t := range freeTypes {
 		argTypes = append(argTypes, e.getTypeFullName(t))
-	}
-
-	isClosureParam := make([]bool, 0, len(paramTypes)+len(freeTypes))
-	for range paramTypes {
-		isClosureParam = append(isClosureParam, true)
-	}
-	for range freeTypes {
-		isClosureParam = append(isClosureParam, false)
 	}
 
 	isConstArg := make([]bool, 0, len(paramTypes)+len(freeTypes))
@@ -633,7 +618,7 @@ func (e *Extractor) buildArgTypesAndFlags(paramTypes []types.Type, paramTypeStrs
 			litValues = append(litValues, "")
 		}
 	}
-	return argTypes, isClosureParam, isConstArg, litValues
+	return argTypes, isConstArg, litValues
 }
 
 func (e *Extractor) determineReturnType(funcLit *ast.FuncLit, sig *types.Signature, isInvoke bool, curPkg *packages.Package) (string, error) {
@@ -662,7 +647,7 @@ func (e *Extractor) generateFuncName(isInvoke bool) string {
 func (e *Extractor) buildExtractedItem(funcName string, argTypes []string, isInvoke, hasErr bool, curPkg *packages.Package, funcLit *ast.FuncLit,
 	freeVars []*ast.Ident, freeTypes []types.Type, freeTypeStrs []string,
 	paramNames []string, paramTypes []types.Type,
-	isClosureParam, isConstArg []bool, litValues []string, retType string, isContextArg []bool) extractedItem {
+	isConstArg []bool, litValues []string, retType string, isContextArg []bool) extractedItem {
 
 	item := extractedItem{
 		FuncName:          funcName,
@@ -678,7 +663,6 @@ func (e *Extractor) buildExtractedItem(funcName string, argTypes []string, isInv
 		FreeTypeStrings:   freeTypeStrs,
 		ClosureParamNames: paramNames,
 		ClosureParamTypes: paramTypes,
-		IsClosureParam:    isClosureParam,
 		IsConstArg:        isConstArg,
 		ConstLitValues:    litValues,
 		IsContextArg:      isContextArg,
@@ -848,25 +832,6 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 	})
 
 	return freeVars, freeTypes, freeTypeStrs, isConst, litValues
-}
-
-func (e *Extractor) constToLit(val constant.Value, typ types.Type) string {
-	switch val.Kind() {
-	case constant.Bool:
-		v := constant.BoolVal(val)
-		return fmt.Sprintf("%t", v)
-	case constant.String:
-		v := constant.StringVal(val)
-		return fmt.Sprintf("%q", v)
-	case constant.Int:
-		v, _ := constant.Int64Val(val)
-		return fmt.Sprintf("%d", v)
-	case constant.Float:
-		v, _ := constant.Float64Val(val)
-		return fmt.Sprintf("%v", v)
-	default:
-		return constant.StringVal(val)
-	}
 }
 
 func (e *Extractor) checkFreeVarVisibility(vars []*ast.Ident, curPkg *packages.Package) error {
@@ -1145,13 +1110,13 @@ func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) []strin
 
 func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) Node {
 	node := Node{
-		Func:         it.FuncName,
-		FuncPkg:      it.PkgAlias,
-		Args:         argNames,
-		IsInvoke:     true,
-		HasError:     it.HasError,
-		IsClosure:    it.IsClosure,
-		FreeVars:     it.FreeVars,
+		Func:      it.FuncName,
+		FuncPkg:   it.PkgAlias,
+		Args:      argNames,
+		IsInvoke:  true,
+		HasError:  it.HasError,
+		IsClosure: it.IsClosure,
+
 		PkgPath:      it.Pkg.PkgPath,
 		IsContextArg: it.IsContextArg,
 	}
@@ -1163,7 +1128,6 @@ func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) Node {
 		node.ClosureDef = closureDef
 		node.UsedPkgs = usedPkgs
 		// 也要传递 IsClosureParam, IsConstArg, ConstLitValues
-		node.IsClosureParam = it.IsClosureParam
 		node.IsConstArg = it.IsConstArg
 		node.ConstLitValues = it.ConstLitValues
 	}
@@ -1193,18 +1157,18 @@ func (e *Extractor) buildProviderNode(it extractedItem, argNames []string, name 
 		}
 	}
 	return Node{
-		Name:           name,
-		Func:           it.FuncName,
-		FuncPkg:        it.PkgAlias,
-		RetType:        it.RetType,
-		Args:           argNames,
-		HasError:       it.HasError,
-		IsClosure:      it.IsClosure,
-		FreeVars:       it.FreeVars,
-		ClosureDef:     closureDef,
-		UsedPkgs:       usedPkgs,
-		PkgPath:        it.Pkg.PkgPath,
-		IsClosureParam: it.IsClosureParam,
+		Name:      name,
+		Func:      it.FuncName,
+		FuncPkg:   it.PkgAlias,
+		RetType:   it.RetType,
+		Args:      argNames,
+		HasError:  it.HasError,
+		IsClosure: it.IsClosure,
+
+		ClosureDef: closureDef,
+		UsedPkgs:   usedPkgs,
+		PkgPath:    it.Pkg.PkgPath,
+
 		IsConstArg:     it.IsConstArg,
 		ConstLitValues: it.ConstLitValues,
 		IsContextArg:   it.IsContextArg,
@@ -1220,52 +1184,6 @@ func buildCallArgs(node Node) []string {
 		}
 	}
 	return args
-}
-
-// ----------------------------------------------------------------------------
-// 类型重写、别名替换、闭包生成
-// ----------------------------------------------------------------------------
-
-func (e *Extractor) rewriteTypeNames(block *ast.BlockStmt, pkg *packages.Package, usedPkgs *map[string]bool) *ast.BlockStmt {
-	newNode := astutil.Apply(block,
-		func(c *astutil.Cursor) bool {
-			n := c.Node()
-			if ident, ok := n.(*ast.Ident); ok {
-				obj := pkg.TypesInfo.ObjectOf(ident)
-				if typeName, ok := obj.(*types.TypeName); ok {
-					pkg := typeName.Pkg()
-					if pkg == nil {
-						// 内置类型（如 error, bool），不处理
-						return true
-					}
-					pkgPath := pkg.Path()
-					if pkgPath == e.mainPkgPath {
-						return true
-					}
-					alias, found := e.pkgAliasMap[pkgPath]
-					if !found {
-						parts := strings.Split(pkgPath, "/")
-						alias = parts[len(parts)-1]
-					}
-					if usedPkgs != nil {
-						(*usedPkgs)[pkgPath] = true
-					}
-					sel := &ast.SelectorExpr{
-						X:   ast.NewIdent(alias),
-						Sel: ast.NewIdent(ident.Name),
-					}
-					c.Replace(sel)
-					return false
-				}
-			}
-			return true
-		},
-		nil,
-	)
-	if blk, ok := newNode.(*ast.BlockStmt); ok {
-		return blk
-	}
-	return block
 }
 
 func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
@@ -1792,11 +1710,12 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 		return
 	}
 	full := fullFuncName(node.FuncPkg, node.Func)
-	args := strings.Join(node.Args, ", ")
+	args := buildCallArgs(node)
+	argsStr := strings.Join(args, ", ")
 	if node.HasError {
-		fmt.Fprintf(buf, "\t%s, err := %s(%s)\n\tif err != nil { panic(err) }\n", node.Name, full, args)
+		fmt.Fprintf(buf, "\t%s, err := %s(%s)\n\tif err != nil { panic(err) }\n", node.Name, full, argsStr)
 	} else {
-		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, full, args)
+		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, full, argsStr)
 	}
 }
 
