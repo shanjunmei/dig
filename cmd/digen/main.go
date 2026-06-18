@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/format"
 	"go/printer"
 	"go/types"
@@ -58,6 +59,10 @@ type Node struct {
 	ClosureDef string
 	UsedPkgs   []string
 	PkgPath    string
+
+	IsClosureParam []bool
+	IsConstArg     []bool
+	ConstLitValues []string
 }
 
 type extractedItem struct {
@@ -76,6 +81,16 @@ type extractedItem struct {
 	FreeVars        []*ast.Ident
 	FreeTypes       []types.Type
 	FreeTypeStrings []string
+
+	ClosureParamNames []string
+	ClosureParamTypes []types.Type
+
+	// 新增：标记每个参数是否为闭包参数（true）还是自由变量（false）
+	IsClosureParam []bool
+
+	// 新增：常量信息（仅对自由变量有效）
+	IsConstArg     []bool
+	ConstLitValues []string
 }
 
 type Extractor struct {
@@ -503,18 +518,55 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 		return fmt.Errorf("func literal is not a function type")
 	}
 
-	freeVars, freeTypes, freeTypeStrs, err := e.collectFreeVars(funcLit, curPkg)
+	// 提取闭包参数
+	var paramNames []string
+	var paramTypes []types.Type
+	if funcLit.Type.Params != nil {
+		for _, field := range funcLit.Type.Params.List {
+			for _, name := range field.Names {
+				paramNames = append(paramNames, name.Name)
+				paramTypes = append(paramTypes, curPkg.TypesInfo.TypeOf(field.Type))
+			}
+		}
+	}
+
+	// 收集自由变量（包含常量信息）
+	freeVars, freeTypes, freeTypeStrs, freeIsConst, freeLitValues, err := e.collectFreeVarsWithConst(funcLit, curPkg)
 	if err != nil {
 		return err
 	}
 
-	argTypes := make([]string, len(freeTypes))
-	for i, t := range freeTypes {
-		argTypes[i] = e.getTypeFullName(t)
+	// 构建 ArgTypes = paramTypes + freeTypes
+	argTypes := make([]string, 0, len(paramTypes)+len(freeTypes))
+	for _, t := range paramTypes {
+		argTypes = append(argTypes, e.getTypeFullName(t))
+	}
+	for _, t := range freeTypes {
+		argTypes = append(argTypes, e.getTypeFullName(t))
+	}
+
+	// 构建 IsClosureParam
+	isClosureParam := make([]bool, 0, len(paramTypes)+len(freeTypes))
+	for i := 0; i < len(paramTypes); i++ {
+		isClosureParam = append(isClosureParam, true)
+	}
+	for i := 0; i < len(freeTypes); i++ {
+		isClosureParam = append(isClosureParam, false)
+	}
+
+	// 构建常量信息（闭包参数不是常量）
+	isConstArg := make([]bool, 0, len(paramTypes)+len(freeTypes))
+	litValues := make([]string, 0, len(paramTypes)+len(freeTypes))
+	for i := 0; i < len(paramTypes); i++ {
+		isConstArg = append(isConstArg, false)
+		litValues = append(litValues, "")
+	}
+	for i := 0; i < len(freeTypes); i++ {
+		isConstArg = append(isConstArg, freeIsConst[i])
+		litValues = append(litValues, freeLitValues[i])
 	}
 
 	hasErr := sigHasError(sig)
-
 	var retType string
 	if !isInvoke {
 		res := sig.Results()
@@ -535,17 +587,22 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 
 	idx := len(e.items)
 	item := extractedItem{
-		FuncName:        funcName,
-		ArgTypes:        argTypes,
-		IsInvoke:        isInvoke,
-		HasError:        hasErr,
-		Pkg:             curPkg,
-		PkgAlias:        e.collectPkgAlias(curPkg),
-		IsClosure:       true,
-		ClosureLit:      funcLit,
-		FreeVars:        freeVars,
-		FreeTypes:       freeTypes,
-		FreeTypeStrings: freeTypeStrs,
+		FuncName:          funcName,
+		ArgTypes:          argTypes,
+		IsInvoke:          isInvoke,
+		HasError:          hasErr,
+		Pkg:               curPkg,
+		PkgAlias:          e.collectPkgAlias(curPkg),
+		IsClosure:         true,
+		ClosureLit:        funcLit,
+		FreeVars:          freeVars,
+		FreeTypes:         freeTypes,
+		FreeTypeStrings:   freeTypeStrs,
+		ClosureParamNames: paramNames,
+		ClosureParamTypes: paramTypes,
+		IsClosureParam:    isClosureParam,
+		IsConstArg:        isConstArg,
+		ConstLitValues:    litValues,
 	}
 	if !isInvoke {
 		item.RetType = retType
@@ -585,14 +642,14 @@ func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error 
 	return nil
 }
 
-// collectFreeVars 收集闭包中的自由变量（变量和常量）
-func (e *Extractor) collectFreeVars(funcLit *ast.FuncLit, curPkg *packages.Package) ([]*ast.Ident, []types.Type, []string, error) {
+// collectFreeVarsWithConst 收集闭包中的自由变量（变量和常量）
+func (e *Extractor) collectFreeVarsWithConst(funcLit *ast.FuncLit, curPkg *packages.Package) ([]*ast.Ident, []types.Type, []string, []bool, []string, error) {
 	declSet := e.collectDeclarations(funcLit)
-	freeVars, freeTypes, freeTypeStrs := e.collectFreeVarsFromBody(funcLit.Body, curPkg, declSet)
+	freeVars, freeTypes, freeTypeStrs, isConst, litValues := e.collectFreeVarsFromBody(funcLit.Body, curPkg, declSet)
 	if err := e.checkFreeVarVisibility(freeVars, curPkg); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
-	return freeVars, freeTypes, freeTypeStrs, nil
+	return freeVars, freeTypes, freeTypeStrs, isConst, litValues, nil
 }
 
 // ========== 重构后的 collectDeclarations 及辅助 ==========
@@ -653,10 +710,12 @@ func (e *Extractor) collectGenDecls(decl *ast.DeclStmt, declSet map[string]bool)
 
 // ========== 其他 Extractor 方法 ==========
 
-func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *packages.Package, declSet map[string]bool) ([]*ast.Ident, []types.Type, []string) {
+func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *packages.Package, declSet map[string]bool) ([]*ast.Ident, []types.Type, []string, []bool, []string) {
 	var freeVars []*ast.Ident
 	var freeTypes []types.Type
 	var freeTypeStrs []string
+	var isConst []bool
+	var litValues []string
 	seen := make(map[string]bool)
 
 	ast.Inspect(body, func(n ast.Node) bool {
@@ -671,7 +730,6 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 		if _, isDecl := declSet[ident.Name]; isDecl {
 			return true
 		}
-		// 只收集变量和常量，忽略类型名和函数名
 		if _, ok := obj.(*types.Var); !ok {
 			if _, ok := obj.(*types.Const); !ok {
 				return true
@@ -684,10 +742,38 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 		freeVars = append(freeVars, ident)
 		freeTypes = append(freeTypes, obj.Type())
 		freeTypeStrs = append(freeTypeStrs, e.getTypeFullName(obj.Type()))
+
+		// 检查是否为常量
+		if tv, ok := curPkg.TypesInfo.Types[ident]; ok && tv.Value != nil {
+			isConst = append(isConst, true)
+			litValues = append(litValues, e.constToLit(tv.Value, tv.Type))
+		} else {
+			isConst = append(isConst, false)
+			litValues = append(litValues, "")
+		}
 		return true
 	})
 
-	return freeVars, freeTypes, freeTypeStrs
+	return freeVars, freeTypes, freeTypeStrs, isConst, litValues
+}
+
+func (e *Extractor) constToLit(val constant.Value, typ types.Type) string {
+	switch val.Kind() {
+	case constant.Bool:
+		v := constant.BoolVal(val)
+		return fmt.Sprintf("%t", v)
+	case constant.String:
+		v := constant.StringVal(val)
+		return fmt.Sprintf("%q", v)
+	case constant.Int:
+		v, _ := constant.Int64Val(val)
+		return fmt.Sprintf("%d", v)
+	case constant.Float:
+		v, _ := constant.Float64Val(val)
+		return fmt.Sprintf("%v", v)
+	default:
+		return constant.StringVal(val)
+	}
 }
 
 func (e *Extractor) checkFreeVarVisibility(vars []*ast.Ident, curPkg *packages.Package) error {
@@ -989,17 +1075,20 @@ func (e *Extractor) buildProviderNode(it extractedItem, argNames []string, name 
 		}
 	}
 	return Node{
-		Name:       name,
-		Func:       it.FuncName,
-		FuncPkg:    it.PkgAlias,
-		RetType:    it.RetType,
-		Args:       argNames,
-		HasError:   it.HasError,
-		IsClosure:  it.IsClosure,
-		FreeVars:   it.FreeVars,
-		ClosureDef: closureDef,
-		UsedPkgs:   usedPkgs,
-		PkgPath:    it.Pkg.PkgPath,
+		Name:           name,
+		Func:           it.FuncName,
+		FuncPkg:        it.PkgAlias,
+		RetType:        it.RetType,
+		Args:           argNames,
+		HasError:       it.HasError,
+		IsClosure:      it.IsClosure,
+		FreeVars:       it.FreeVars,
+		ClosureDef:     closureDef,
+		UsedPkgs:       usedPkgs,
+		PkgPath:        it.Pkg.PkgPath,
+		IsClosureParam: it.IsClosureParam,
+		IsConstArg:     it.IsConstArg,
+		ConstLitValues: it.ConstLitValues,
 	}
 }
 
@@ -1082,20 +1171,79 @@ func (e *Extractor) typePkg(typ types.Type) *types.Package {
 	}
 }
 func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, error) {
-	params := make([]string, len(it.FreeVars))
 	usedPkgs := make(map[string]bool)
 
-	for i := range it.FreeVars {
-		typ := it.FreeTypes[i]
-		if pkg := e.typePkg(typ); pkg != nil && pkg.Path() != e.mainPkgPath {
+	// 构建参数列表
+	paramList := make([]string, len(it.ArgTypes))
+	freeVarMap := make(map[string]string)
+	paramIdx := 0
+
+	// 1. 闭包原始参数
+	for i := 0; i < len(it.ClosureParamNames); i++ {
+		name := it.ClosureParamNames[i]
+		typStr := e.replacePkgPathWithAlias(it.ArgTypes[paramIdx])
+		paramList[paramIdx] = fmt.Sprintf("%s %s", name, typStr)
+		if pkg := e.typePkg(it.ClosureParamTypes[i]); pkg != nil && pkg.Path() != e.mainPkgPath {
 			usedPkgs[pkg.Path()] = true
 		}
-		typStr := e.replacePkgPathWithAlias(it.FreeTypeStrings[i])
-		params[i] = fmt.Sprintf("p%d %s", i, typStr)
+		paramIdx++
 	}
-	paramStr := strings.Join(params, ", ")
 
-	rewrittenBody := e.rewriteTypeNames(it.ClosureLit.Body, it.Pkg, &usedPkgs)
+	// 2. 自由变量（作为参数）
+	for i := 0; i < len(it.FreeVars); i++ {
+		paramName := fmt.Sprintf("p%d", i)
+		typStr := e.replacePkgPathWithAlias(it.FreeTypeStrings[i])
+		paramList[paramIdx] = fmt.Sprintf("%s %s", paramName, typStr)
+		freeVarMap[it.FreeVars[i].Name] = paramName
+		if pkg := e.typePkg(it.FreeTypes[i]); pkg != nil && pkg.Path() != e.mainPkgPath {
+			usedPkgs[pkg.Path()] = true
+		}
+		paramIdx++
+	}
+
+	paramStr := strings.Join(paramList, ", ")
+
+	// 直接使用原始 Body，用 astutil.Apply 修改变量名和类型名
+	body := it.ClosureLit.Body
+	newNode := astutil.Apply(body,
+		func(c *astutil.Cursor) bool {
+			n := c.Node()
+			// 变量替换：自由变量 -> 参数名
+			if ident, ok := n.(*ast.Ident); ok {
+				if newName, ok := freeVarMap[ident.Name]; ok {
+					// 替换为参数名
+					c.Replace(ast.NewIdent(newName))
+					return false
+				}
+				// 类型重写：类型名替换为别名
+				obj := it.Pkg.TypesInfo.ObjectOf(ident)
+				if typeName, ok := obj.(*types.TypeName); ok {
+					pkgPath := typeName.Pkg().Path()
+					if pkgPath != e.mainPkgPath {
+						alias, found := e.pkgAliasMap[pkgPath]
+						if !found {
+							parts := strings.Split(pkgPath, "/")
+							alias = parts[len(parts)-1]
+						}
+						usedPkgs[pkgPath] = true
+						sel := &ast.SelectorExpr{
+							X:   ast.NewIdent(alias),
+							Sel: ast.NewIdent(ident.Name),
+						}
+						c.Replace(sel)
+						return false
+					}
+				}
+			}
+			return true
+		},
+		nil,
+	)
+
+	rewrittenBody, ok := newNode.(*ast.BlockStmt)
+	if !ok {
+		rewrittenBody = body
+	}
 
 	var bodyBuf strings.Builder
 	if err := printer.Fprint(&bodyBuf, it.Pkg.Fset, rewrittenBody); err != nil {
@@ -1350,7 +1498,15 @@ func writeInvokes(buf *bytes.Buffer, nodes []Node) {
 			continue
 		}
 		if node.IsClosure {
-			argsStr := strings.Join(node.Args, ", ")
+			args := make([]string, len(node.Args))
+			for i, arg := range node.Args {
+				if i < len(node.IsConstArg) && node.IsConstArg[i] {
+					args[i] = node.ConstLitValues[i]
+				} else {
+					args[i] = arg
+				}
+			}
+			argsStr := strings.Join(args, ", ")
 			if node.HasError {
 				fmt.Fprintf(buf, "\t\tif err := %s(%s); err != nil { return err }\n", node.Func, argsStr)
 			} else {
@@ -1417,7 +1573,16 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 		return
 	}
 	if node.IsClosure {
-		argsStr := strings.Join(node.Args, ", ")
+		args := make([]string, len(node.Args))
+		for i, arg := range node.Args {
+			if i < len(node.IsConstArg) && node.IsConstArg[i] {
+				// 是常量，直接使用字面量
+				args[i] = node.ConstLitValues[i]
+			} else {
+				args[i] = arg
+			}
+		}
+		argsStr := strings.Join(args, ", ")
 		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, node.Func, argsStr)
 		return
 	}
