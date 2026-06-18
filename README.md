@@ -1,76 +1,55 @@
-# dig — Code-Generation Zero-Reflection DI Container for Go
-[&#20013;&#25991;](README_zh.md) | **English**
+# dig — Compile-time Code Generation Zero-Reflection DI Container for Go
+[&#20013;&#25991;&#25991;&#26723;](./README_zh.md) | English Docs
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shanjunmei/dig)](https://goreportcard.com/report/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**dig** is a compile-time code generation dependency injection container for Go.
-It eliminates runtime reflection overhead entirely, validates the dependency graph at code generation stage, and provides only four minimal core APIs: `Provide`, `Invoke`, `Supply`, `Module`, following idiomatic Go patterns.
-
-Core design philosophy:
-> Static safety at generation time, zero overhead at runtime, no magic, stay native Go.
+## Core Philosophy
+Compile-time static safety, zero runtime reflection overhead, no runtime magic, fully native Go style.
+All dependency resolution logic is generated into static Go code at build time, runtime only executes plain function calls.
 
 ## Core Advantages
 1. **Zero runtime reflection**
-All dependency resolution logic is generated as plain Go code via `digen`. There is no runtime type inspection, and startup performance matches handwritten initialization logic.
-2. **Strict file isolation via build tags (critical design)**
-Split code into 3 independent files with mutually exclusive build tags to avoid duplicate definition / undefined symbol errors:
-   - `di.go`: Tag `digen` — Only parsed by digen generator, excluded from normal build
-   - `main.go`: No build tag — Shared base types, global variables, business model definitions, compiled in all scenarios
-   - `di_gen.go`: Tag `!digen` — Auto-generated placeholder & runtime entry, excluded during code generation
-3. **Clear separation between `Supply` and `Provide` closure rules (core constraint)**
-   - `dig.Supply`: Accepts package-level global runtime variables
-   - Inline `dig.Provide(func() T)` closures: Only constant literals allowed; **cannot capture local variables inside `InitApp()`**, will cause `undefined` compile errors after generation
-4. **Custom wrapper types resolve primitive type collision**
-Multiple raw `bool` / `time.Duration` cannot be supplied directly; define unique alias types for each business flag to eliminate ambiguous provider errors.
-5. **Built-in Invoke startup callback**
-Register functions to run automatically after all dependencies are ready for server startup, resource warmup and graceful initialization logic.
-6. **Faster code generation than Wire**
-The `digen` CLI uses lightweight custom AST parsing, avoiding Wire’s heavy recursive ProviderSet traversal. Generation time is noticeably shorter for mid/large projects with dozens of services.
-7. **Lightweight dependency footprint**
-Business code only relies on the Go standard library. The CLI generator only depends on official `golang.org/x/tools` for AST analysis, no heavy third-party dependencies.
-8. **Configurable unused constructor policy**
-Three strategies for handling unused constructors:
-- `error`: Fail code generation, force cleanup of redundant constructors
-- `ignore`: Suppress warnings silently
-- `drop`: Remove unused code from the generated file
+All dependency assembly logic is generated as static Go source code via `digen` CLI. No runtime type parsing, no reflection performance loss, startup performance equals handwritten initialization code.
+
+2. **Mutually exclusive build tag 3-file isolation (official standard spec)**
+Split project code into 3 independent files with exclusive build tags to eliminate duplicate definition / undefined symbol compile errors:
+- `di.go` Tag `digen`: Only parsed by digen generator, excluded from normal build & run
+- `main.go` No build tag: Shared base types, global variables, business models, entry `main()`, compiled in all scenarios
+- `di_gen.go` Tag `!digen`: Auto-generated runtime entry file, skipped during code generation
+
+3. **Strict separation rules for Supply & Provide closures (core constraint)**
+- `dig.Supply`: Natively accepts package-level global runtime variables as type providers
+- Inline `dig.Provide(func() T)` anonymous closure: Only constant literals are allowed as free variables; capturing local variables inside `InitApp()` will trigger generator error, avoid undefined symbol after code split
+
+4. **Wrapper type solves primitive type injection conflict**
+Direct injection of raw `bool`/`string`/`time.Duration` will cause duplicate provider conflicts. Define lightweight alias wrapper types for each business scenario, fully recognized and parsed by digen.
+
+5. **Native Invoke post-start callback**
+Dedicated `dig.Invoke()` API, all callback logic will be scheduled after all Supply & Provider instances are created. Designed for route registration, database initialization, service startup and other boot logic.
+
+6. **Earlier dependency error detection**
+Missing dependencies, circular dependencies, duplicate providers are fully validated during `go generate`; errors are exposed at development time instead of panicking online.
+
+7. **3 configurable unused provider policies**
+Support 3 modes to handle unused constructors via command flag `--unused`:
+- `error`: Generation fails and throws error if unused provider exists (default)
+- `ignore`: Keep unused provider with blank assignment `_ = fn()`
+- `drop`: Remove unused provider code directly from generated file
+
+8. **Minimal external dependencies**
+Core library only relies on Go standard library; digen generator only depends on official `golang.org/x/tools` AST toolkit, no heavy third-party dependencies.
+
+9. **Low learning cost**
+Only 4 core APIs: `dig.Build`, `dig.Provide`, `dig.Supply`, `dig.Invoke`; clear build tag & closure constraints, low entry barrier.
+
+10. Tiny final binary size
+No embedded reflection runtime, no redundant framework logic, compiled binary size is close to handwritten initialization code.
 
 ## Mandatory Build Tag Isolation Rules (Must Follow)
-### File Split & Tag Matching
-1. `di.go` (Generator-only init logic)
-   Build tag: `//go:build digen`
-   - Contains only `InitApp()` with `dig.Build()` chain
-   - Parsed exclusively by `digen` during `go generate`
-   - Skipped when building/running normally (tag mismatch)
-2. `main.go` (Shared base code, no build tag)
-   - All custom wrapper types, model structs, global runtime variables, `main()` entry
-   - Compiled in all build modes, visible to both generator and runtime
-3. `di_gen.go` (Auto-generated runtime entry)
-   Build tag: `//go:build !digen`
-   - Auto-overwritten by digen after generate
-   - Provides fallback `InitApp()` for normal runtime execution
-   - Skipped during code generation (tag `!digen` conflicts with generator `--tags=digen`)
-
-### Why Isolation Is Required
-If files share the same build tag or omit tags incorrectly:
-- Duplicate definition error: Two `InitApp()` functions exist in same package
-- Undefined symbol error: Generator cannot access base types / global variables
-- Broken dependency topology parsing in digen
-
-## Installation
-### Step 1: Add library dependency to your project
-```bash
-go get github.com/shanjunmei/dig
-```
-### Step 2: Install code generation CLI tool
-```bash
-go install github.com/shanjunmei/dig/cmd/digen@latest
-```
-Requires Go 1.21+.
-
-## Complete Standard Demo (3 Separated Files)
-### 1. di.go (Generator Only, tag digen)
+### File Split & Tag Matching Rules
+1. `di.go` (Generator-only init logic, tag `digen`)
 ```go
 //go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go -unused=drop --tags=digen
 //go:build digen
@@ -84,38 +63,38 @@ import (
 
 func InitApp() *dig.App {
 	return dig.Build(
-		// Supply accepts package-level global variable defined in main.go
+		// Supply accepts global variables defined in main.go
 		dig.Supply(s),
 
-		// Provide closure only uses constant literals, no outer variable capture
+		// Provide closure only uses constant literals, no outer local variable capture
 		dig.Provide(func() EnableCache { return EnableCache(true) }),
 		dig.Provide(func() QueryTimeout { return QueryTimeout(3 * time.Second) }),
 
 		dig.Provide(NewConfig),
-
-		// All dependencies come from function input params, no local capture
 		dig.Provide(func(t QueryTimeout, um UseMySQL, rm EnableCache) any {
 			if um {
 				return NewMySQLStore(t)
 			}
 			return NewRedisStore(rm)
 		}),
-
 		dig.Provide(NewServer),
 
-		// Invoke only consumes injected parameters
+		// All boot logic executes after all instances are ready
 		dig.Invoke(func(srv *Server, um UseMySQL, ec EnableCache, t QueryTimeout) {
-			println("service launch")
-			println("use_mysql:", bool(um))
-			println("cache_enabled:", bool(ec))
-			println("timeout sec:", time.Duration(t).Seconds())
+			println("service boot complete")
+			println("mysql switch:", bool(um))
+			println("cache enable:", bool(ec))
+			println("query timeout sec:", t.Seconds())
 			_ = srv.Run()
 		}),
 	)
 }
 ```
+- Only contains `InitApp()` with full `dig.Build()` chain
+- Only parsed by digen during `go generate`
+- Skipped during normal `go run` / `go build` due to tag mismatch
 
-### 2. main.go (Shared Base Code, No Build Tag)
+2. `main.go` (Shared base code, no build tag)
 ```go
 package main
 
@@ -124,15 +103,15 @@ import (
 	"time"
 )
 
-// Package global runtime variable, consumed by dig.Supply
+// Global runtime variable consumed by dig.Supply
 var s = UseMySQL(true)
 
-// Unique wrapper types to avoid primitive type collision
+// Unique wrapper types to resolve primitive type injection collision
 type UseMySQL bool
 type EnableCache bool
 type QueryTimeout time.Duration
 
-// Business models & constructors
+// Business model & constructors
 type Config struct {
 	Addr string
 }
@@ -153,8 +132,8 @@ func NewRedisStore(c EnableCache) *RedisStore {
 type Server struct {
 	store any
 }
-func NewServer(s any) *Server {
-	return &Server{store: s}
+func NewServer(store any) *Server {
+	return &Server{store: store}
 }
 func (s *Server) Run() error { return nil }
 
@@ -163,8 +142,10 @@ func main() {
 	_ = app.Run(context.Background())
 }
 ```
+- All custom wrapper types, business structs, global variables, program entry `main()`
+- Compiled under all build modes, visible to both generator and runtime
 
-### 3. di_gen.go (Auto-Generated Runtime Entry, tag !digen)
+3. `di_gen.go` (Auto-generated runtime entry, tag `!digen`)
 ```go
 // Code generated by digen; DO NOT EDIT.
 //go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go -unused=drop --tags=digen
@@ -179,7 +160,7 @@ import (
 	"time"
 )
 
-// Auto-split provider & invoke functions generated by digen
+// Auto-split top-level functions generated by digen for closures
 func __p_1() EnableCache {
 	return EnableCache(true)
 }
@@ -193,10 +174,10 @@ func __p_4(t QueryTimeout, um UseMySQL, rm EnableCache) any {
 	return NewRedisStore(rm)
 }
 func __i_6(srv *Server, um UseMySQL, ec EnableCache, t QueryTimeout) {
-	println("service launch")
-	println("use_mysql:", bool(um))
-	println("cache_enabled:", bool(ec))
-	println("timeout sec:", time.Duration(t).Seconds())
+	println("service boot complete")
+	println("mysql switch:", bool(um))
+	println("cache enable:", bool(ec))
+	println("query timeout sec:", t.Seconds())
 	_ = srv.Run()
 }
 
@@ -213,55 +194,72 @@ func InitApp() *dig.App {
 	})
 }
 ```
+- Automatically overwritten after every `go generate`
+- Provides runtime `InitApp()` implementation for online execution
+- Excluded during code generation due to conflicting `!digen` tag with generator `--tags=digen`
 
-## Generate & Run Commands
+### Consequence of Incorrect Tag Configuration
+Mismatched tags or mixed file logic will trigger fatal compile errors:
+1. Duplicate definition: Two `InitApp()` functions exist in one package
+2. Undefined symbol: Generator cannot resolve base types / global variables
+3. Broken dependency topology parsing inside digen
+
+## Installation Guide
+### 1. Install core library to project
 ```bash
-# Generate DI code
+go get github.com/shanjunmei/dig
+```
+
+### 2. Install digen code generation CLI tool
+```bash
+go install github.com/shanjunmei/dig/cmd/digen@latest
+```
+Minimum Go version requirement: Go 1.21+
+
+## Generation & Runtime Commands
+```bash
+# Generate DI static code
 go generate ./...
-# Or direct digen call
+# Directly call digen tool
 digen -out di_gen.go -unused=drop --tags=digen
 
-# Normal runtime build & run
+# Normal compile & run program
 go run .
 ```
 
-## Comparison with Mainstream DI Frameworks
-| Comparison Item             | dig (This Project) | Google Wire          | Uber dig             | Uber FX              |
-| --------------------------- | ------------------ | -------------------- | -------------------- | -------------------- |
-| Code generation required    | &#9989; digen CLI        | &#9989; wire gen           | &#10060; No                | &#10060; No                |
-| Runtime reflection          | &#10060; None at all      | &#10060; None at all       | &#9989; Heavy reflection  | &#9989; Heavy reflection  |
-| Generation-time full validation | &#9989; Complete | &#9989; Complete | &#10060; Only runtime check | &#10060; Only runtime check |
-| Mutually exclusive build tag file split | &#9989; Official standard | &#9888;&#65039; Not supported | &#10060; Not supported | &#10060; Not supported |
-| Supply supports global runtime variables | &#9989; Native | &#9888;&#65039; Limited | &#10060; Not supported | &#10060; Not supported |
-| Provide closure only constant literals | &#9989; Enforced rule | &#9888;&#65039; Unrestricted capture (scope loss risk) | &#10060; No closure support | &#10060; No closure support |
-| Wrapper type resolve primitive collision | &#9989; Official recommended | &#9888;&#65039; Manual workaround | &#10060; Not supported | &#10060; Not supported |
-| Built-in Invoke startup callback | &#9989; Native | &#10060; Need manual boilerplate | &#10060; Not supported | &#9989; Built-in lifecycle |
-| Unused constructor control  | 3 configurable modes | Silent drop only    | Silent ignore        | Silent ignore        |
-| Business code external deps | Zero (stdlib only) | Zero                 | Multiple             | Multiple heavy deps  |
-| Learning curve              | Very low (4 core APIs + strict tag/supply rules) | Medium verbose syntax | Medium tag & scope rules | High complex lifecycle system |
-| Final binary size           | Tiny, no reflection logic | Tiny | Medium | Largest (embed log/lifecycle/event bus) |
-| Best application scenario   | Projects pursue zero runtime overhead & static safety, multi-file tag isolation, dynamic env flags via Supply | Legacy simple services with strict third-party limits, no tag isolation / runtime variable injection demand | Tiny simple CLI tools, tolerate reflection cost | Large microservices need full lifecycle & plugin ecosystem |
+## Horizontal Comparison With Mainstream Go DI Frameworks
+| Comparison Item | dig (This Project) | Google Wire | Uber dig (Reflection Runtime) | Uber FX (Reflection Runtime) |
+| ---- | ---- | ---- | ---- | ---- |
+| Require code generation | &#9989; digen CLI tool | &#9989; wire gen | &#10134; No code generation workflow | &#10134; No code generation workflow |
+| Runtime reflection exists | &#10060; Zero, pure static generated code | &#10060; Zero, pure static generated code | &#9989; Heavy runtime reflection | &#9989; Heavy runtime reflection |
+| Full dependency validation at generation time | &#9989; Full link check (missing/circular dependency error at dev stage) | &#9989; Full link check at generate time | &#10134; No generate step, only dynamic runtime check | &#10134; No generate step, only dynamic runtime check |
+| Mutually exclusive build tag 3-file isolation spec | &#9989; Official standard, native adapted by digen | &#9989; Natively support build tag, self-implementable 3-file isolation | &#10134; No code generation, no duplicate InitApp conflict, no need this spec | &#10134; No code generation, no duplicate InitApp conflict, no need this spec |
+| Supply native support for package global runtime variables | &#9989; Top-level `dig.Supply` built-in API, out-of-box | &#9888;&#65039; Global var injection supported, no dedicated Supply syntax, verbose writing | &#10060; No matching API, only constructor parameter injection | &#10060; No matching API, only constructor parameter injection |
+| Provide closure constraint: Only constant literals allowed, forbid capturing outer local variables | &#9989; Tool forced validation, error thrown if capture local variables | &#9888;&#65039; No forced validation, arbitrary free variable capture allowed; risk of undefined symbol after generation | &#10134; Anonymous closure Provide syntax unsupported | &#10134; Anonymous closure Provide syntax unsupported |
+| Wrapper type resolve primitive type injection collision | &#9989; Official recommended standard solution, fully parsed by generator | &#9888;&#65039; Syntactically supported, manual type wrapping required, no auxiliary generator check | &#10060; No built-in differentiation logic, identical primitive types cannot be distinguished | &#10060; No built-in differentiation logic, identical primitive types cannot be distinguished |
+| Native Invoke post-boot callback | &#9989; Built-in `dig.Invoke` API dedicated to route register / service startup | &#9888;&#65039; No native API, massive boilerplate code required for manual encapsulation | &#10060; Independent Invoke callback mechanism missing | &#9989; Full built-in lifecycle system (Start/Hook) |
+| Unused constructor control policy | 3 configurable modes: error / ignore / drop (controllable at generate time) | &#9888;&#65039; Silent drop only, no error alert mode | &#10134; Runtime framework, no generate-time control logic, silent ignore | &#10134; Runtime framework, no generate-time control logic, silent ignore |
+| External dependency count of business core library | Zero, only Go standard library | Zero, only Go standard library | Multiple third-party dependencies | Massive heavy dependencies (log, event bus, full lifecycle components) |
+| Learning curve | Extremely low: only 4 core APIs + clear tag / Supply constraints | Medium: simple base API, verbose closure & global var writing, many hidden pitfalls | Medium: need master type tag & scope rules | High: complex full lifecycle & module layered system |
+| Final compiled binary size | Tiny, no embedded reflection runtime logic | Tiny, no embedded reflection runtime logic | Medium, embedded reflection dispatch code | Largest, built-in log, event bus, full lifecycle components |
 
-## CLI Flags for digen
-| Flag      | Description |
-| --------- | ----------- |
-| `-out`    | Output generated file path, default `dig_gen.go` |
-| `-unused` | Policy for unused constructors: `error` / `ignore` / `drop` |
-| `--tags`  | Build tags passed to Go AST parser, exclude runtime generated file during generation |
-| `-debug`  | Print AST parsing debug logs to stdout |
+### Symbol Annotation Explanation
+1. `&#9989;`: Framework natively provides official standard API/spec, out-of-box, no extra adaptation cost
+2. `&#9888;&#65039;`: Syntactically implementable, but tedious workflow with potential compile/runtime risks, no official simplified solution
+3. `&#10060;`: Framework underlying does not support this capability, no corresponding implementation logic
+4. `&#10134;`: Framework positioned as reflection-based runtime DI, no code generation workflow. This item is exclusive spec for code-generation tools; the framework naturally does not require this capability, not a functional defect.
 
-## Lint Standard
-The project provides cross-platform `lint.ps1` static check script aligned with Go Report Card standard:
-1. `gofmt -s -l` format verification
-2. `go vet` official static analysis
-3. `gocyclo -over 15` cyclomatic complexity limit
-4. `ineffassign` unused variable detection
-5. `misspell` English spelling check
+### Key Correction Description For Comparison Table
+1. Build tag 3-file isolation
+This spec is exclusive engineering standard for code-generation DI tools, used to separate generator parsing source (`digen` tag) and online runtime source (`!digen` tag), avoid duplicate definition of `InitApp()`.
+Google Wire natively supports Go build tag, developers can implement identical 3-file isolation manually.
+Uber dig / FX have no code generation step, no two copies of `InitApp()` to conflict, so this isolation spec is unnecessary. The original table mark "not supported" is misleading and revised.
 
-Run lint on Windows PowerShell:
-```powershell
-.\lint.ps1
-```
+2. Runtime framework related items unified semantic adjustment
+All code-generation exclusive features (generate-time validation, 3-file isolation, unused constructor control) are marked `&#10134;` for Uber dig/FX, clarify it's positioning difference rather than function missing.
 
-## License
-MIT License, see `LICENSE` file in repository root.
+3. Objective description for Wire Supply & closure capture
+Wire can pass global variables as dependencies, but has no independent top-level Supply function, writing is verbose. Meanwhile Wire has no free variable capture validation; capturing local variables inside InitApp will lead to `undefined` compile error in generated file, the risk mark is retained objectively.
+
+4. Invoke capability boundary distinction
+dig's `Invoke` is lightweight post-creation callback without heavy lifecycle overhead; FX provides complete lifecycle hook system. The two design targets are different, only objective description of capability form, no subjective pros and cons judgment.
