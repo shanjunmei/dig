@@ -377,27 +377,27 @@ func findBuildCall(fn *ast.FuncDecl, info *types.Info) *ast.CallExpr {
 func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packages.Package) error {
 	obj := resolveFunctionObject(call, curPkg)
 	if obj == nil {
-		return nil
+		return fmt.Errorf("unable to resolve function call")
 	}
 	fn, ok := obj.(*types.Func)
 	if !ok {
-		return nil
+		return fmt.Errorf("resolved object is not a function")
 	}
 	fnPkg := fn.Pkg()
 	if fnPkg == nil {
-		return nil
+		return fmt.Errorf("function has no package")
 	}
 	subPkg, ok := e.pkgMap[fnPkg.Path()]
 	if !ok {
-		return nil
+		return fmt.Errorf("package %s not loaded", fnPkg.Path())
 	}
 	funcDecl := findFuncDecl(subPkg, fn.Name())
 	if funcDecl == nil || funcDecl.Body == nil {
-		return nil
+		return fmt.Errorf("function %s has no body", fn.Name())
 	}
 	modCall := findModuleCallInBlock(funcDecl.Body, subPkg.TypesInfo)
 	if modCall == nil {
-		return nil
+		return fmt.Errorf("function %s does not contain dig.Module", fn.Name())
 	}
 	for _, arg := range modCall.Args {
 		if err := e.extractOptions(arg, subPkg, subPkg); err != nil {
@@ -411,7 +411,8 @@ func (e *Extractor) extractOptions(expr ast.Expr, curPkg, realPkg *packages.Pack
 	expr = ast.Unparen(expr)
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
-		return nil
+		pos := curPkg.Fset.Position(expr.Pos())
+		return fmt.Errorf("at %s: unsupported option expression (must be a direct call to Provide, Invoke, Supply, or Module, got %T)", pos, expr)
 	}
 	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
 		if obj := curPkg.TypesInfo.ObjectOf(sel.Sel); obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == diPkgPath {
