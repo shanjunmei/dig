@@ -726,8 +726,8 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 	var freeVars []*ast.Ident
 	var freeTypes []types.Type
 	var freeTypeStrs []string
-	var isConst []bool
-	var litValues []string
+	var isConst []bool     // 记录是否为常量（用户自定义）
+	var litValues []string // 常量字面量字符串
 	seen := make(map[string]bool)
 
 	ast.Inspect(body, func(n ast.Node) bool {
@@ -742,11 +742,27 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 		if _, isDecl := declSet[ident.Name]; isDecl {
 			return true
 		}
-		if _, ok := obj.(*types.Var); !ok {
-			if _, ok := obj.(*types.Const); !ok {
+
+		// 根据对象类型处理
+		switch obj.(type) {
+		case *types.Var:
+			// 变量 -> 作为自由变量
+		case *types.Const:
+			// 常量：跳过预声明常量，收集用户自定义常量
+			if obj.Pkg() == nil {
+				// 预声明常量（如 true, false, iota）
 				return true
 			}
+			// 用户自定义常量 -> 作为内联常量（不作为依赖）
+			// 但我们仍要记录它，以便在依赖图中跳过，但此处我们直接记录到 isConst 和 litValues 中
+			// 后面通过标记来处理
+			// 为了统一，我们仍然将它放入 freeVars，但通过 isConst 标记，并在依赖图中跳过
+			// 但更好的方式是不放入 freeVars，而是单独存储，但这里我们复用 freeVars 机制，只是标记 isConst=true
+		default:
+			return true // 其他忽略
 		}
+
+		// 如果是预声明常量已经跳过，这里不会到达
 		if seen[ident.Name] {
 			return true
 		}
@@ -755,8 +771,9 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 		freeTypes = append(freeTypes, obj.Type())
 		freeTypeStrs = append(freeTypeStrs, e.getTypeFullName(obj.Type()))
 
-		// 检查是否为常量
+		// 判断是否为常量（用户定义）
 		if tv, ok := curPkg.TypesInfo.Types[ident]; ok && tv.Value != nil {
+			// 是常量，记录字面量
 			isConst = append(isConst, true)
 			litValues = append(litValues, e.constToLit(tv.Value, tv.Type))
 		} else {
@@ -967,7 +984,10 @@ func (e *Extractor) buildDependencyGraph(items []extractedItem) ([][]int, []int,
 		if it.IsSupply {
 			continue
 		}
-		for _, argType := range it.ArgTypes {
+		for j, argType := range it.ArgTypes {
+			if it.IsClosure && len(it.IsConstArg) > j && it.IsConstArg[j] {
+				continue
+			}
 			providerIdx, ok := e.globalProviderMap[argType]
 			if !ok {
 				funcName := fullFuncName(it.Pkg.PkgPath, it.FuncName)
