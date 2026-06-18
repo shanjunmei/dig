@@ -365,7 +365,6 @@ func findBuildCall(fn *ast.FuncDecl, info *types.Info) *ast.CallExpr {
 // ----------------------------------------------------------------------------
 // Extractor 方法
 // ----------------------------------------------------------------------------
-
 func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packages.Package) error {
 	obj := resolveFunctionObject(call, curPkg)
 	if obj == nil {
@@ -387,10 +386,12 @@ func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packa
 	if funcDecl == nil || funcDecl.Body == nil {
 		return fmt.Errorf("function %s has no body", fn.Name())
 	}
-	modCall := findModuleCallInBlock(funcDecl.Body, subPkg.TypesInfo)
-	if modCall == nil {
-		return fmt.Errorf("function %s does not contain dig.Module", fn.Name())
+
+	modCall, err := e.findSingleModuleCall(funcDecl.Body, subPkg.TypesInfo, fn.Name())
+	if err != nil {
+		return err
 	}
+
 	for _, arg := range modCall.Args {
 		if err := e.extractOptions(arg, subPkg, subPkg); err != nil {
 			return err
@@ -399,6 +400,52 @@ func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packa
 	return nil
 }
 
+// findSingleModuleCall 在函数体中查找唯一的 dig.Module 调用，
+// 要求必须恰好有一个，且位于顶层（不在 if/switch/for/select 内）。
+// 返回该调用，若不符合则返回错误。
+func (e *Extractor) findSingleModuleCall(body *ast.BlockStmt, info *types.Info, funcName string) (*ast.CallExpr, error) {
+	var moduleCalls []*ast.CallExpr
+	var moduleInControl []bool
+	var controlDepth int
+
+	astutil.Apply(body,
+		func(c *astutil.Cursor) bool {
+			switch c.Node().(type) {
+			case *ast.IfStmt, *ast.SwitchStmt, *ast.SelectStmt, *ast.ForStmt, *ast.RangeStmt:
+				controlDepth++
+			}
+			if call, ok := c.Node().(*ast.CallExpr); ok {
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+					obj := info.ObjectOf(sel.Sel)
+					if obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == diPkgPath && obj.Name() == "Module" {
+						moduleCalls = append(moduleCalls, call)
+						moduleInControl = append(moduleInControl, controlDepth > 0)
+					}
+				}
+			}
+			return true
+		},
+		func(c *astutil.Cursor) bool {
+			switch c.Node().(type) {
+			case *ast.IfStmt, *ast.SwitchStmt, *ast.SelectStmt, *ast.ForStmt, *ast.RangeStmt:
+				controlDepth--
+			}
+			return true
+		},
+	)
+
+	switch len(moduleCalls) {
+	case 0:
+		return nil, fmt.Errorf("function %s does not contain dig.Module", funcName)
+	case 1:
+		if moduleInControl[0] {
+			return nil, fmt.Errorf("function %s contains dig.Module inside control flow (if/switch/for/select), which is not supported; move it to top level", funcName)
+		}
+		return moduleCalls[0], nil
+	default:
+		return nil, fmt.Errorf("function %s contains multiple dig.Module calls; only one is allowed", funcName)
+	}
+}
 func (e *Extractor) extractOptions(expr ast.Expr, curPkg, realPkg *packages.Package) error {
 	expr = ast.Unparen(expr)
 	call, ok := expr.(*ast.CallExpr)
