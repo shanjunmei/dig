@@ -377,7 +377,7 @@ func findBuildCall(fn *ast.FuncDecl, info *types.Info) *ast.CallExpr {
 func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packages.Package) error {
 	obj := resolveFunctionObject(call, curPkg)
 	if obj == nil {
-		return fmt.Errorf("unable to resolve function call")
+		return fmt.Errorf("cannot resolve function call; ensure it is a named function or method, not a literal or variable")
 	}
 	fn, ok := obj.(*types.Func)
 	if !ok {
@@ -1819,7 +1819,7 @@ func loadAndValidatePackages() (*packages.Package, map[string]*packages.Package,
 		}
 	}
 	if len(errs) > 0 {
-		return nil, nil, fmt.Errorf("package loading failed with errors:\n%s", strings.Join(errs, "\n"))
+		return nil, nil, fmt.Errorf("compilation errors found in packages:\n%s", strings.Join(errs, "\n"))
 	}
 
 	// 主包（第一个）
