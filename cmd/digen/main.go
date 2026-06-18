@@ -485,10 +485,22 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 		return err
 	}
 	alias := e.collectPkgAlias(realPkg)
+
 	res := sig.Results()
-	if res.Len() == 0 {
+	switch res.Len() {
+	case 0:
 		return fmt.Errorf("func %s has no return", name)
+	case 1:
+		//允许 T
+	case 2:
+		if !types.Identical(res.At(1).Type(), types.Universe.Lookup("error").Type()) {
+			return fmt.Errorf("func %s: second return value must be error, got %s", name, res.At(1).Type().String())
+		}
+	default:
+		return fmt.Errorf("func %s: too many return values (%d), only (T) or (T, error) are allowed. "+
+			"If you need to provide multiple types, define a plain struct that bundles them and return that struct.", name, res.Len())
 	}
+
 	retType := e.getTypeFullName(res.At(0).Type())
 	if _, dup := e.globalProviderMap[retType]; dup {
 		return fmt.Errorf("duplicate provide for type %q", retType)
