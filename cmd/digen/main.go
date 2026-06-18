@@ -591,20 +591,20 @@ func (e *Extractor) buildArgTypesAndFlags(paramTypes []types.Type, paramTypeStrs
 	}
 
 	isClosureParam := make([]bool, 0, len(paramTypes)+len(freeTypes))
-	for i := 0; i < len(paramTypes); i++ {
+	for range paramTypes {
 		isClosureParam = append(isClosureParam, true)
 	}
-	for i := 0; i < len(freeTypes); i++ {
+	for range freeTypes {
 		isClosureParam = append(isClosureParam, false)
 	}
 
 	isConstArg := make([]bool, 0, len(paramTypes)+len(freeTypes))
 	litValues := make([]string, 0, len(paramTypes)+len(freeTypes))
-	for i := 0; i < len(paramTypes); i++ {
+	for range paramTypes {
 		isConstArg = append(isConstArg, false)
 		litValues = append(litValues, "")
 	}
-	for i := 0; i < len(freeTypes); i++ {
+	for i := range freeTypes {
 		if i < len(freeIsConst) {
 			isConstArg = append(isConstArg, freeIsConst[i])
 			litValues = append(litValues, freeLitValues[i])
@@ -1217,13 +1217,13 @@ func (e *Extractor) rewriteTypeNames(block *ast.BlockStmt, pkg *packages.Package
 
 func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 	// 处理指针和切片等前缀
-	prefix := ""
+	var prefix strings.Builder
 	for {
 		if strings.HasPrefix(typeStr, "*") {
-			prefix += "*"
+			prefix.WriteString("*")
 			typeStr = typeStr[1:]
 		} else if strings.HasPrefix(typeStr, "[]") {
-			prefix += "[]"
+			prefix.WriteString("[]")
 			typeStr = typeStr[2:]
 		} else {
 			break
@@ -1251,7 +1251,7 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 	for _, p := range pairs {
 		result = strings.ReplaceAll(result, p.path+".", p.alias+".")
 	}
-	return prefix + result
+	return prefix.String() + result
 }
 func (e *Extractor) collectUsedPkgsFromBody(body *ast.BlockStmt, pkg *packages.Package, usedPkgs map[string]bool) {
 	ast.Inspect(body, func(n ast.Node) bool {
