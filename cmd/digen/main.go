@@ -727,8 +727,8 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 	var freeVars []*ast.Ident
 	var freeTypes []types.Type
 	var freeTypeStrs []string
-	var isConst []bool     // 记录是否为常量（用户自定义）
-	var litValues []string // 常量字面量字符串
+	var isConst []bool
+	var litValues []string
 	seen := make(map[string]bool)
 
 	ast.Inspect(body, func(n ast.Node) bool {
@@ -744,26 +744,26 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 			return true
 		}
 
-		// 根据对象类型处理
-		switch obj.(type) {
-		case *types.Var:
-			// 变量 -> 作为自由变量
-		case *types.Const:
-			// 常量：跳过预声明常量，收集用户自定义常量
-			if obj.Pkg() == nil {
-				// 预声明常量（如 true, false, iota）
-				return true
-			}
-			// 用户自定义常量 -> 作为内联常量（不作为依赖）
-			// 但我们仍要记录它，以便在依赖图中跳过，但此处我们直接记录到 isConst 和 litValues 中
-			// 后面通过标记来处理
-			// 为了统一，我们仍然将它放入 freeVars，但通过 isConst 标记，并在依赖图中跳过
-			// 但更好的方式是不放入 freeVars，而是单独存储，但这里我们复用 freeVars 机制，只是标记 isConst=true
-		default:
-			return true // 其他忽略
+		// 预声明常量直接跳过
+		if cObj, ok := obj.(*types.Const); ok && cObj.Pkg() == nil {
+			return true
 		}
 
-		// 如果是预声明常量已经跳过，这里不会到达
+		// 用户自定义常量：只记录字面量，不加入freeVars
+		if _, ok := obj.(*types.Const); ok {
+			if seen[ident.Name] {
+				return true
+			}
+			seen[ident.Name] = true
+			// 常量不存入freeVars，跳过参数生成
+			return true
+		}
+
+		// 仅变量类型才作为自由变量
+		if _, ok := obj.(*types.Var); !ok {
+			return true
+		}
+
 		if seen[ident.Name] {
 			return true
 		}
@@ -771,16 +771,8 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 		freeVars = append(freeVars, ident)
 		freeTypes = append(freeTypes, obj.Type())
 		freeTypeStrs = append(freeTypeStrs, e.getTypeFullName(obj.Type()))
-
-		// 判断是否为常量（用户定义）
-		if tv, ok := curPkg.TypesInfo.Types[ident]; ok && tv.Value != nil {
-			// 是常量，记录字面量
-			isConst = append(isConst, true)
-			litValues = append(litValues, e.constToLit(tv.Value, tv.Type))
-		} else {
-			isConst = append(isConst, false)
-			litValues = append(litValues, "")
-		}
+		isConst = append(isConst, false)
+		litValues = append(litValues, "")
 		return true
 	})
 
@@ -1265,28 +1257,30 @@ func (e *Extractor) typePkg(typ types.Type) *types.Package {
 }
 func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, error) {
 	usedPkgs := make(map[string]bool)
-
-	// 构建参数列表
-	paramList := make([]string, len(it.ArgTypes))
+	paramList := make([]string, 0)
 	freeVarMap := make(map[string]string)
 	paramIdx := 0
 
-	// 1. 闭包原始参数
+	// 1. 先追加原生闭包参数（安全无越界）
 	for i := 0; i < len(it.ClosureParamNames); i++ {
 		name := it.ClosureParamNames[i]
 		typStr := e.replacePkgPathWithAlias(it.ArgTypes[paramIdx])
-		paramList[paramIdx] = fmt.Sprintf("%s %s", name, typStr)
+		paramList = append(paramList, fmt.Sprintf("%s %s", name, typStr))
 		if pkg := e.typePkg(it.ClosureParamTypes[i]); pkg != nil && pkg.Path() != e.mainPkgPath {
 			usedPkgs[pkg.Path()] = true
 		}
 		paramIdx++
 	}
 
-	// 2. 自由变量（作为参数）
+	// 2. 仅非常量自由变量才生成参数，跳过常量
 	for i := 0; i < len(it.FreeVars); i++ {
+		// 边界防护：防止数组下标越界
+		if i >= len(it.IsConstArg) || it.IsConstArg[i] {
+			continue
+		}
 		paramName := fmt.Sprintf("p%d", i)
 		typStr := e.replacePkgPathWithAlias(it.FreeTypeStrings[i])
-		paramList[paramIdx] = fmt.Sprintf("%s %s", paramName, typStr)
+		paramList = append(paramList, fmt.Sprintf("%s %s", paramName, typStr))
 		freeVarMap[it.FreeVars[i].Name] = paramName
 		if pkg := e.typePkg(it.FreeTypes[i]); pkg != nil && pkg.Path() != e.mainPkgPath {
 			usedPkgs[pkg.Path()] = true
@@ -1316,15 +1310,14 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 		rewrittenBody = body
 	}
 
-	// 收集需要加包前缀的类型名（仅针对未限定的标识符）
-	typeNameMap := make(map[string]string) // 原始类型名 -> 别名.类型名
+	// 收集包依赖
+	typeNameMap := make(map[string]string)
 	astutil.Apply(rewrittenBody,
 		func(c *astutil.Cursor) bool {
 			ident, ok := c.Node().(*ast.Ident)
 			if !ok {
 				return true
 			}
-			// 如果是 SelectorExpr 的 Sel，则已限定，跳过
 			if sel, ok := c.Parent().(*ast.SelectorExpr); ok && sel.Sel == ident {
 				return true
 			}
@@ -1337,7 +1330,6 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 						parts := strings.Split(pkg.Path(), "/")
 						alias = parts[len(parts)-1]
 					}
-					// 记录映射，用于字符串替换
 					typeNameMap[ident.Name] = alias + "." + ident.Name
 				}
 			}
@@ -1346,26 +1338,22 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 		nil,
 	)
 
-	// 收集闭包体中使用的类型包（用于导入）
 	e.collectUsedPkgsFromBody(rewrittenBody, it.Pkg, usedPkgs)
 
-	// 打印闭包体
 	var bodyBuf strings.Builder
+	// 捕获打印AST错误，转为返回error，不直接panic
 	if err := printer.Fprint(&bodyBuf, it.Pkg.Fset, rewrittenBody); err != nil {
-		return "", nil, fmt.Errorf("failed to print closure body: %v", err)
+		return "", nil, fmt.Errorf("printer print closure body failed: %w", err)
 	}
 	bodyStr := bodyBuf.String()
 
-	// 使用正则替换独立的类型名标识符（添加包前缀）
+	// 类型别名替换
 	for name, replacement := range typeNameMap {
 		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
 		bodyStr = re.ReplaceAllString(bodyStr, replacement)
 	}
-
-	// 最后替换包路径（将完整包路径替换为别名）
 	bodyStr = e.replacePkgPathWithAlias(bodyStr)
 
-	// 构建最终函数定义
 	var def string
 	if it.RetType != "" {
 		retType := e.replacePkgPathWithAlias(it.RetType)
@@ -1688,15 +1676,14 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 		if node.FuncPkg != "" && !strings.HasPrefix(expr, node.FuncPkg+".") {
 			expr = node.FuncPkg + "." + expr
 		}
-		debugf("[DEBUG generateCode supply] name=%q, expr=%q, FuncPkg=%q", node.Name, expr, node.FuncPkg)
 		fmt.Fprintf(buf, "\t%s := %s\n", node.Name, expr)
 		return
 	}
 	if node.IsClosure {
 		args := make([]string, len(node.Args))
 		for i, arg := range node.Args {
+			// 边界判断，防止数组越界
 			if i < len(node.IsConstArg) && node.IsConstArg[i] {
-				// 是常量，直接使用字面量
 				args[i] = node.ConstLitValues[i]
 			} else {
 				args[i] = arg
