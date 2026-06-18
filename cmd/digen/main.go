@@ -1819,7 +1819,7 @@ func loadAndValidatePackages() (*packages.Package, map[string]*packages.Package,
 		}
 	}
 	if len(errs) > 0 {
-		return nil, nil, fmt.Errorf("syntax errors found in packages:\n%s", strings.Join(errs, "\n"))
+		return nil, nil, fmt.Errorf("package loading failed with errors:\n%s", strings.Join(errs, "\n"))
 	}
 
 	// 主包（第一个）
