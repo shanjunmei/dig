@@ -129,11 +129,7 @@ func findDigCallInBlock(block *ast.BlockStmt, info *types.Info, methodName strin
 func findModuleCallInBlock(block *ast.BlockStmt, info *types.Info) *ast.CallExpr {
 	var result *ast.CallExpr
 	ast.Inspect(block, func(n ast.Node) bool {
-		ret, ok := n.(*ast.ReturnStmt)
-		if !ok || len(ret.Results) != 1 {
-			return true
-		}
-		call, ok := ret.Results[0].(*ast.CallExpr)
+		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
 		}
@@ -144,7 +140,7 @@ func findModuleCallInBlock(block *ast.BlockStmt, info *types.Info) *ast.CallExpr
 		obj := info.ObjectOf(sel.Sel)
 		if obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == diPkgPath && obj.Name() == "Module" {
 			result = call
-			return false
+			return false // 找到即停止遍历
 		}
 		return true
 	})
