@@ -523,7 +523,6 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	e.globalProviderMap[retType] = idx
 	return nil
 }
-
 func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package, isInvoke bool) error {
 	typ := curPkg.TypesInfo.TypeOf(funcLit)
 	sig, ok := typ.(*types.Signature)
@@ -531,34 +530,66 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 		return fmt.Errorf("func literal is not a function type")
 	}
 
-	// 提取闭包参数
-	var paramNames []string
-	var paramTypes []types.Type
-	if funcLit.Type.Params != nil {
-		for _, field := range funcLit.Type.Params.List {
-			for _, name := range field.Names {
-				paramNames = append(paramNames, name.Name)
-				paramTypes = append(paramTypes, curPkg.TypesInfo.TypeOf(field.Type))
-			}
-		}
-	}
+	paramNames, paramTypes, paramTypeStrs := e.extractClosureParams(funcLit, curPkg)
 
-	// 收集自由变量（包含常量信息）
 	freeVars, freeTypes, freeTypeStrs, freeIsConst, freeLitValues, err := e.collectFreeVarsWithConst(funcLit, curPkg)
 	if err != nil {
 		return err
 	}
 
-	// 构建 ArgTypes = paramTypes + freeTypes
+	argTypes, isClosureParam, isConstArg, litValues := e.buildArgTypesAndFlags(paramTypes, paramTypeStrs, freeTypes, freeIsConst, freeLitValues)
+
+	hasErr := sigHasError(sig)
+	retType, err := e.determineReturnType(funcLit, sig, isInvoke, curPkg)
+	if err != nil {
+		return err
+	}
+	if retType != "" {
+		if _, dup := e.globalProviderMap[retType]; dup {
+			return fmt.Errorf("duplicate provide for type %q", retType)
+		}
+	}
+
+	funcName := e.generateFuncName(isInvoke)
+	idx := len(e.items)
+	item := e.buildExtractedItem(funcName, argTypes, isInvoke, hasErr, curPkg, funcLit,
+		freeVars, freeTypes, freeTypeStrs, paramNames, paramTypes,
+		isClosureParam, isConstArg, litValues, retType)
+
+	e.items = append(e.items, item)
+	if !isInvoke && retType != "" {
+		e.globalProviderMap[retType] = idx
+	}
+	return nil
+}
+
+// ---------- 辅助方法 for handleFuncLit ----------
+func (e *Extractor) extractClosureParams(funcLit *ast.FuncLit, curPkg *packages.Package) ([]string, []types.Type, []string) {
+	var names []string
+	var typesList []types.Type
+	var typeStrs []string
+	if funcLit.Type.Params != nil {
+		for _, field := range funcLit.Type.Params.List {
+			for _, name := range field.Names {
+				names = append(names, name.Name)
+				t := curPkg.TypesInfo.TypeOf(field.Type)
+				typesList = append(typesList, t)
+				typeStrs = append(typeStrs, e.getTypeFullName(t))
+			}
+		}
+	}
+	return names, typesList, typeStrs
+}
+
+func (e *Extractor) buildArgTypesAndFlags(paramTypes []types.Type, paramTypeStrs []string, freeTypes []types.Type, freeIsConst []bool, freeLitValues []string) ([]string, []bool, []bool, []string) {
 	argTypes := make([]string, 0, len(paramTypes)+len(freeTypes))
-	for _, t := range paramTypes {
-		argTypes = append(argTypes, e.getTypeFullName(t))
+	for _, s := range paramTypeStrs {
+		argTypes = append(argTypes, s)
 	}
 	for _, t := range freeTypes {
 		argTypes = append(argTypes, e.getTypeFullName(t))
 	}
 
-	// 构建 IsClosureParam
 	isClosureParam := make([]bool, 0, len(paramTypes)+len(freeTypes))
 	for i := 0; i < len(paramTypes); i++ {
 		isClosureParam = append(isClosureParam, true)
@@ -567,7 +598,6 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 		isClosureParam = append(isClosureParam, false)
 	}
 
-	// 构建常量信息（闭包参数不是常量）
 	isConstArg := make([]bool, 0, len(paramTypes)+len(freeTypes))
 	litValues := make([]string, 0, len(paramTypes)+len(freeTypes))
 	for i := 0; i < len(paramTypes); i++ {
@@ -575,30 +605,45 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 		litValues = append(litValues, "")
 	}
 	for i := 0; i < len(freeTypes); i++ {
-		isConstArg = append(isConstArg, freeIsConst[i])
-		litValues = append(litValues, freeLitValues[i])
-	}
-
-	hasErr := sigHasError(sig)
-	var retType string
-	if !isInvoke {
-		res := sig.Results()
-		if res.Len() == 0 {
-			return fmt.Errorf("anonymous provide function has no return")
-		}
-		retType = e.getTypeFullName(res.At(0).Type())
-		if _, dup := e.globalProviderMap[retType]; dup {
-			return fmt.Errorf("duplicate provide for type %q", retType)
+		if i < len(freeIsConst) {
+			isConstArg = append(isConstArg, freeIsConst[i])
+			litValues = append(litValues, freeLitValues[i])
+		} else {
+			isConstArg = append(isConstArg, false)
+			litValues = append(litValues, "")
 		}
 	}
+	return argTypes, isClosureParam, isConstArg, litValues
+}
 
+func (e *Extractor) determineReturnType(funcLit *ast.FuncLit, sig *types.Signature, isInvoke bool, curPkg *packages.Package) (string, error) {
+	if isInvoke {
+		return "", nil
+	}
+	res := sig.Results()
+	if res.Len() == 0 {
+		return "", fmt.Errorf("anonymous provide function has no return")
+	}
+	if funcLit.Type.Results != nil && len(funcLit.Type.Results.List) > 0 {
+		retExpr := funcLit.Type.Results.List[0].Type
+		return e.getTypeFullName(curPkg.TypesInfo.TypeOf(retExpr)), nil
+	}
+	return e.getTypeFullName(res.At(0).Type()), nil
+}
+
+func (e *Extractor) generateFuncName(isInvoke bool) string {
 	prefix := "__p_"
 	if isInvoke {
 		prefix = "__i_"
 	}
-	funcName := fmt.Sprintf("%s%d", prefix, len(e.items))
+	return fmt.Sprintf("%s%d", prefix, len(e.items))
+}
 
-	idx := len(e.items)
+func (e *Extractor) buildExtractedItem(funcName string, argTypes []string, isInvoke, hasErr bool, curPkg *packages.Package, funcLit *ast.FuncLit,
+	freeVars []*ast.Ident, freeTypes []types.Type, freeTypeStrs []string,
+	paramNames []string, paramTypes []types.Type,
+	isClosureParam, isConstArg []bool, litValues []string, retType string) extractedItem {
+
 	item := extractedItem{
 		FuncName:          funcName,
 		ArgTypes:          argTypes,
@@ -617,17 +662,10 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 		IsConstArg:        isConstArg,
 		ConstLitValues:    litValues,
 	}
-	if !isInvoke {
+	if retType != "" {
 		item.RetType = retType
 	}
-
-	e.items = append(e.items, item)
-
-	if !isInvoke {
-		e.globalProviderMap[retType] = idx
-	}
-
-	return nil
+	return item
 }
 
 func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error {
@@ -1255,13 +1293,49 @@ func (e *Extractor) typePkg(typ types.Type) *types.Package {
 		return nil
 	}
 }
+
 func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, error) {
 	usedPkgs := make(map[string]bool)
-	paramList := make([]string, 0)
+
+	paramList, freeVarMap, err := e.buildParamListAndFreeVarMap(it, usedPkgs)
+	if err != nil {
+		return "", nil, err
+	}
+	paramStr := strings.Join(paramList, ", ")
+
+	rewrittenBody := e.replaceFreeVarsInBody(it.ClosureLit.Body, freeVarMap)
+
+	typeNameMap := e.collectTypeNameMap(rewrittenBody, it.Pkg)
+	e.collectUsedPkgsFromBody(rewrittenBody, it.Pkg, usedPkgs)
+
+	var bodyBuf bytes.Buffer
+	if err := printer.Fprint(&bodyBuf, it.Pkg.Fset, rewrittenBody); err != nil {
+		return "", nil, fmt.Errorf("printer print closure body failed: %w", err)
+	}
+	bodyStr := bodyBuf.String()
+
+	bodyStr = e.applyTypeAliasReplacements(bodyStr, typeNameMap)
+
+	retType := ""
+	if it.RetType != "" {
+		retType = e.replacePkgPathWithAlias(it.RetType)
+	}
+	def := e.buildClosureDefString(it.FuncName, paramStr, bodyStr, retType)
+
+	var usedList []string
+	for pkgPath := range usedPkgs {
+		usedList = append(usedList, pkgPath)
+	}
+	return def, usedList, nil
+}
+
+// ---------- 辅助方法 for generateClosureDef ----------
+func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[string]bool) ([]string, map[string]string, error) {
+	var paramList []string
 	freeVarMap := make(map[string]string)
 	paramIdx := 0
 
-	// 1. 先追加原生闭包参数（安全无越界）
+	// 闭包原始参数
 	for i := 0; i < len(it.ClosureParamNames); i++ {
 		name := it.ClosureParamNames[i]
 		typStr := e.replacePkgPathWithAlias(it.ArgTypes[paramIdx])
@@ -1272,9 +1346,8 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 		paramIdx++
 	}
 
-	// 2. 仅非常量自由变量才生成参数，跳过常量
+	// 自由变量（只处理非常量）
 	for i := 0; i < len(it.FreeVars); i++ {
-		// 边界防护：防止数组下标越界
 		if i >= len(it.IsConstArg) || it.IsConstArg[i] {
 			continue
 		}
@@ -1285,13 +1358,11 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 		if pkg := e.typePkg(it.FreeTypes[i]); pkg != nil && pkg.Path() != e.mainPkgPath {
 			usedPkgs[pkg.Path()] = true
 		}
-		paramIdx++
 	}
+	return paramList, freeVarMap, nil
+}
 
-	paramStr := strings.Join(paramList, ", ")
-
-	// 变量名替换（自由变量 -> 参数名）
-	body := it.ClosureLit.Body
+func (e *Extractor) replaceFreeVarsInBody(body *ast.BlockStmt, freeVarMap map[string]string) *ast.BlockStmt {
 	newNode := astutil.Apply(body,
 		func(c *astutil.Cursor) bool {
 			if ident, ok := c.Node().(*ast.Ident); ok {
@@ -1304,30 +1375,30 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 		},
 		nil,
 	)
-
-	rewrittenBody, ok := newNode.(*ast.BlockStmt)
-	if !ok {
-		rewrittenBody = body
+	if blk, ok := newNode.(*ast.BlockStmt); ok {
+		return blk
 	}
+	return body
+}
 
-	// 收集包依赖
+func (e *Extractor) collectTypeNameMap(body *ast.BlockStmt, pkg *packages.Package) map[string]string {
 	typeNameMap := make(map[string]string)
-	astutil.Apply(rewrittenBody,
+	astutil.Apply(body,
 		func(c *astutil.Cursor) bool {
 			ident, ok := c.Node().(*ast.Ident)
 			if !ok {
 				return true
 			}
 			if sel, ok := c.Parent().(*ast.SelectorExpr); ok && sel.Sel == ident {
-				return true
+				return true // 已限定的类型名跳过
 			}
-			obj := it.Pkg.TypesInfo.ObjectOf(ident)
+			obj := pkg.TypesInfo.ObjectOf(ident)
 			if typeName, ok := obj.(*types.TypeName); ok {
-				pkg := typeName.Pkg()
-				if pkg != nil && pkg.Path() != e.mainPkgPath {
-					alias, found := e.pkgAliasMap[pkg.Path()]
+				pkgObj := typeName.Pkg()
+				if pkgObj != nil && pkgObj.Path() != e.mainPkgPath {
+					alias, found := e.pkgAliasMap[pkgObj.Path()]
 					if !found {
-						parts := strings.Split(pkg.Path(), "/")
+						parts := strings.Split(pkgObj.Path(), "/")
 						alias = parts[len(parts)-1]
 					}
 					typeNameMap[ident.Name] = alias + "." + ident.Name
@@ -1337,36 +1408,24 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 		},
 		nil,
 	)
+	return typeNameMap
+}
 
-	e.collectUsedPkgsFromBody(rewrittenBody, it.Pkg, usedPkgs)
-
-	var bodyBuf strings.Builder
-	// 捕获打印AST错误，转为返回error，不直接panic
-	if err := printer.Fprint(&bodyBuf, it.Pkg.Fset, rewrittenBody); err != nil {
-		return "", nil, fmt.Errorf("printer print closure body failed: %w", err)
-	}
-	bodyStr := bodyBuf.String()
-
-	// 类型别名替换
+func (e *Extractor) applyTypeAliasReplacements(bodyStr string, typeNameMap map[string]string) string {
+	// 先替换独立的类型名
 	for name, replacement := range typeNameMap {
 		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
 		bodyStr = re.ReplaceAllString(bodyStr, replacement)
 	}
-	bodyStr = e.replacePkgPathWithAlias(bodyStr)
+	// 再替换完整的包路径
+	return e.replacePkgPathWithAlias(bodyStr)
+}
 
-	var def string
-	if it.RetType != "" {
-		retType := e.replacePkgPathWithAlias(it.RetType)
-		def = fmt.Sprintf("func %s(%s) %s %s", it.FuncName, paramStr, retType, bodyStr)
-	} else {
-		def = fmt.Sprintf("func %s(%s) %s", it.FuncName, paramStr, bodyStr)
+func (e *Extractor) buildClosureDefString(funcName, paramStr, bodyStr, retType string) string {
+	if retType != "" {
+		return fmt.Sprintf("func %s(%s) %s %s", funcName, paramStr, retType, bodyStr)
 	}
-
-	var usedList []string
-	for pkgPath := range usedPkgs {
-		usedList = append(usedList, pkgPath)
-	}
-	return def, usedList, nil
+	return fmt.Sprintf("func %s(%s) %s", funcName, paramStr, bodyStr)
 }
 
 // importInfo 用于收集导入信息
