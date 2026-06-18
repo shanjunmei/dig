@@ -11,6 +11,7 @@ import (
 	"go/types"
 	"log"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -852,12 +853,12 @@ func (e *Extractor) collectPkgAlias(pkg *packages.Package) string {
 	}
 	// 首先检查用户自定义别名
 	if alias, ok := e.importAliasMap[pp]; ok {
-		// 存入 pkgAliasMap 以便后续反向查找
-		e.pkgAliasMap[pp] = alias
-		if pp == e.mainPkgPath {
-			return ""
+		// 只有非主包才存储别名
+		if pp != e.mainPkgPath {
+			e.pkgAliasMap[pp] = alias
+			return alias
 		}
-		return alias
+		return ""
 	}
 	if alias, ok := e.pkgAliasMap[pp]; ok {
 		if pp == e.mainPkgPath {
@@ -873,10 +874,11 @@ func (e *Extractor) collectPkgAlias(pkg *packages.Package) string {
 	for _, a := range e.importAliasMap {
 		existing[a] = true
 	}
-	//	existing["context"] = true
-	//	existing["dig"] = true
 	alias := uniqueAlias(pp, existing)
-	e.pkgAliasMap[pp] = alias
+	// 只有非主包才存入 map
+	if pp != e.mainPkgPath {
+		e.pkgAliasMap[pp] = alias
+	}
 	if pp == e.mainPkgPath {
 		return ""
 	}
@@ -1072,7 +1074,7 @@ func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) []strin
 }
 
 func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) Node {
-	return Node{
+	node := Node{
 		Func:      it.FuncName,
 		FuncPkg:   it.PkgAlias,
 		Args:      argNames,
@@ -1082,6 +1084,19 @@ func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) Node {
 		FreeVars:  it.FreeVars,
 		PkgPath:   it.Pkg.PkgPath,
 	}
+	if it.IsClosure {
+		closureDef, usedPkgs, err := e.generateClosureDef(&it)
+		if err != nil {
+			panic(err)
+		}
+		node.ClosureDef = closureDef
+		node.UsedPkgs = usedPkgs
+		// 也要传递 IsClosureParam, IsConstArg, ConstLitValues
+		node.IsClosureParam = it.IsClosureParam
+		node.IsConstArg = it.IsConstArg
+		node.ConstLitValues = it.ConstLitValues
+	}
+	return node
 }
 
 func (e *Extractor) buildSupplyNode(it extractedItem, name string) Node {
@@ -1135,7 +1150,12 @@ func (e *Extractor) rewriteTypeNames(block *ast.BlockStmt, pkg *packages.Package
 			if ident, ok := n.(*ast.Ident); ok {
 				obj := pkg.TypesInfo.ObjectOf(ident)
 				if typeName, ok := obj.(*types.TypeName); ok {
-					pkgPath := typeName.Pkg().Path()
+					pkg := typeName.Pkg()
+					if pkg == nil {
+						// 内置类型（如 error, bool），不处理
+						return true
+					}
+					pkgPath := pkg.Path()
 					if pkgPath == e.mainPkgPath {
 						return true
 					}
@@ -1166,6 +1186,26 @@ func (e *Extractor) rewriteTypeNames(block *ast.BlockStmt, pkg *packages.Package
 }
 
 func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
+	// 处理指针和切片等前缀
+	prefix := ""
+	for {
+		if strings.HasPrefix(typeStr, "*") {
+			prefix += "*"
+			typeStr = typeStr[1:]
+		} else if strings.HasPrefix(typeStr, "[]") {
+			prefix += "[]"
+			typeStr = typeStr[2:]
+		} else {
+			break
+		}
+	}
+
+	// 去掉主包前缀
+	if strings.HasPrefix(typeStr, e.mainPkgPath+".") {
+		typeStr = typeStr[len(e.mainPkgPath)+1:]
+	}
+
+	// 其他包别名替换
 	type pair struct {
 		path  string
 		alias string
@@ -1181,7 +1221,28 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 	for _, p := range pairs {
 		result = strings.ReplaceAll(result, p.path+".", p.alias+".")
 	}
-	return result
+	return prefix + result
+}
+func (e *Extractor) collectUsedPkgsFromBody(body *ast.BlockStmt, pkg *packages.Package, usedPkgs map[string]bool) {
+	ast.Inspect(body, func(n ast.Node) bool {
+		if ident, ok := n.(*ast.Ident); ok {
+			obj := pkg.TypesInfo.ObjectOf(ident)
+			if obj == nil {
+				return true
+			}
+			if typeName, ok := obj.(*types.TypeName); ok {
+				pkgPathObj := typeName.Pkg()
+				if pkgPathObj == nil {
+					return true // 内置类型，如 bool, error
+				}
+				pkgPath := pkgPathObj.Path()
+				if pkgPath != "" && pkgPath != e.mainPkgPath {
+					usedPkgs[pkgPath] = true
+				}
+			}
+		}
+		return true
+	})
 }
 
 // typePkg 辅助方法（添加到 Extractor）
@@ -1235,36 +1296,14 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 
 	paramStr := strings.Join(paramList, ", ")
 
-	// 直接使用原始 Body，用 astutil.Apply 修改变量名和类型名
+	// 变量名替换（自由变量 -> 参数名）
 	body := it.ClosureLit.Body
 	newNode := astutil.Apply(body,
 		func(c *astutil.Cursor) bool {
-			n := c.Node()
-			// 变量替换：自由变量 -> 参数名
-			if ident, ok := n.(*ast.Ident); ok {
+			if ident, ok := c.Node().(*ast.Ident); ok {
 				if newName, ok := freeVarMap[ident.Name]; ok {
-					// 替换为参数名
 					c.Replace(ast.NewIdent(newName))
 					return false
-				}
-				// 类型重写：类型名替换为别名
-				obj := it.Pkg.TypesInfo.ObjectOf(ident)
-				if typeName, ok := obj.(*types.TypeName); ok {
-					pkgPath := typeName.Pkg().Path()
-					if pkgPath != e.mainPkgPath {
-						alias, found := e.pkgAliasMap[pkgPath]
-						if !found {
-							parts := strings.Split(pkgPath, "/")
-							alias = parts[len(parts)-1]
-						}
-						usedPkgs[pkgPath] = true
-						sel := &ast.SelectorExpr{
-							X:   ast.NewIdent(alias),
-							Sel: ast.NewIdent(ident.Name),
-						}
-						c.Replace(sel)
-						return false
-					}
 				}
 			}
 			return true
@@ -1277,14 +1316,63 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 		rewrittenBody = body
 	}
 
+	// 收集需要加包前缀的类型名（仅针对未限定的标识符）
+	typeNameMap := make(map[string]string) // 原始类型名 -> 别名.类型名
+	astutil.Apply(rewrittenBody,
+		func(c *astutil.Cursor) bool {
+			ident, ok := c.Node().(*ast.Ident)
+			if !ok {
+				return true
+			}
+			// 如果是 SelectorExpr 的 Sel，则已限定，跳过
+			if sel, ok := c.Parent().(*ast.SelectorExpr); ok && sel.Sel == ident {
+				return true
+			}
+			obj := it.Pkg.TypesInfo.ObjectOf(ident)
+			if typeName, ok := obj.(*types.TypeName); ok {
+				pkg := typeName.Pkg()
+				if pkg != nil && pkg.Path() != e.mainPkgPath {
+					alias, found := e.pkgAliasMap[pkg.Path()]
+					if !found {
+						parts := strings.Split(pkg.Path(), "/")
+						alias = parts[len(parts)-1]
+					}
+					// 记录映射，用于字符串替换
+					typeNameMap[ident.Name] = alias + "." + ident.Name
+				}
+			}
+			return true
+		},
+		nil,
+	)
+
+	// 收集闭包体中使用的类型包（用于导入）
+	e.collectUsedPkgsFromBody(rewrittenBody, it.Pkg, usedPkgs)
+
+	// 打印闭包体
 	var bodyBuf strings.Builder
 	if err := printer.Fprint(&bodyBuf, it.Pkg.Fset, rewrittenBody); err != nil {
 		return "", nil, fmt.Errorf("failed to print closure body: %v", err)
 	}
 	bodyStr := bodyBuf.String()
 
-	retType := e.replacePkgPathWithAlias(it.RetType)
-	def := fmt.Sprintf("func %s(%s) %s %s", it.FuncName, paramStr, retType, bodyStr)
+	// 使用正则替换独立的类型名标识符（添加包前缀）
+	for name, replacement := range typeNameMap {
+		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
+		bodyStr = re.ReplaceAllString(bodyStr, replacement)
+	}
+
+	// 最后替换包路径（将完整包路径替换为别名）
+	bodyStr = e.replacePkgPathWithAlias(bodyStr)
+
+	// 构建最终函数定义
+	var def string
+	if it.RetType != "" {
+		retType := e.replacePkgPathWithAlias(it.RetType)
+		def = fmt.Sprintf("func %s(%s) %s %s", it.FuncName, paramStr, retType, bodyStr)
+	} else {
+		def = fmt.Sprintf("func %s(%s) %s", it.FuncName, paramStr, bodyStr)
+	}
 
 	var usedList []string
 	for pkgPath := range usedPkgs {
