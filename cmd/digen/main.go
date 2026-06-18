@@ -64,6 +64,7 @@ type Node struct {
 	IsClosureParam []bool
 	IsConstArg     []bool
 	ConstLitValues []string
+	IsContextArg   []bool
 }
 
 type extractedItem struct {
@@ -92,6 +93,7 @@ type extractedItem struct {
 	// 新增：常量信息（仅对自由变量有效）
 	IsConstArg     []bool
 	ConstLitValues []string
+	IsContextArg   []bool
 }
 
 type Extractor struct {
@@ -507,18 +509,23 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 		return fmt.Errorf("duplicate provide for type %q", retType)
 	}
 	argTypes := make([]string, sig.Params().Len())
+	isContextArg := make([]bool, sig.Params().Len())
 	for i := 0; i < sig.Params().Len(); i++ {
-		argTypes[i] = e.getTypeFullName(sig.Params().At(i).Type())
+		param := sig.Params().At(i)
+		typ := param.Type()
+		argTypes[i] = e.getTypeFullName(typ)
+		isContextArg[i] = isContextType(typ)
 	}
 	hasErr := sigHasError(sig)
 	idx := len(e.items)
 	e.items = append(e.items, extractedItem{
-		FuncName: name,
-		RetType:  retType,
-		ArgTypes: argTypes,
-		Pkg:      realPkg,
-		PkgAlias: alias,
-		HasError: hasErr,
+		FuncName:     name,
+		RetType:      retType,
+		ArgTypes:     argTypes,
+		Pkg:          realPkg,
+		PkgAlias:     alias,
+		HasError:     hasErr,
+		IsContextArg: isContextArg,
 	})
 	e.globalProviderMap[retType] = idx
 	return nil
@@ -551,16 +558,29 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	}
 
 	funcName := e.generateFuncName(isInvoke)
+	isContextArg := make([]bool, len(argTypes))
+	// 先处理闭包参数
+	for i, t := range paramTypes {
+		if isContextType(t) {
+			isContextArg[i] = true
+		}
+	}
 	idx := len(e.items)
 	item := e.buildExtractedItem(funcName, argTypes, isInvoke, hasErr, curPkg, funcLit,
 		freeVars, freeTypes, freeTypeStrs, paramNames, paramTypes,
-		isClosureParam, isConstArg, litValues, retType)
+		isClosureParam, isConstArg, litValues, retType, isContextArg)
 
 	e.items = append(e.items, item)
 	if !isInvoke && retType != "" {
 		e.globalProviderMap[retType] = idx
 	}
 	return nil
+}
+
+// isContextType 判断类型是否为 context.Context
+func isContextType(typ types.Type) bool {
+	// 简单方式：比较类型字符串（全限定名）
+	return typ.String() == "context.Context"
 }
 
 // ---------- 辅助方法 for handleFuncLit ----------
@@ -642,7 +662,7 @@ func (e *Extractor) generateFuncName(isInvoke bool) string {
 func (e *Extractor) buildExtractedItem(funcName string, argTypes []string, isInvoke, hasErr bool, curPkg *packages.Package, funcLit *ast.FuncLit,
 	freeVars []*ast.Ident, freeTypes []types.Type, freeTypeStrs []string,
 	paramNames []string, paramTypes []types.Type,
-	isClosureParam, isConstArg []bool, litValues []string, retType string) extractedItem {
+	isClosureParam, isConstArg []bool, litValues []string, retType string, isContextArg []bool) extractedItem {
 
 	item := extractedItem{
 		FuncName:          funcName,
@@ -661,6 +681,7 @@ func (e *Extractor) buildExtractedItem(funcName string, argTypes []string, isInv
 		IsClosureParam:    isClosureParam,
 		IsConstArg:        isConstArg,
 		ConstLitValues:    litValues,
+		IsContextArg:      isContextArg,
 	}
 	if retType != "" {
 		item.RetType = retType
@@ -678,17 +699,22 @@ func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error 
 	}
 	alias := e.collectPkgAlias(realPkg)
 	argTypes := make([]string, sig.Params().Len())
+	isContextArg := make([]bool, sig.Params().Len())
 	for i := 0; i < sig.Params().Len(); i++ {
-		argTypes[i] = e.getTypeFullName(sig.Params().At(i).Type())
+		param := sig.Params().At(i)
+		typ := param.Type()
+		argTypes[i] = e.getTypeFullName(typ)
+		isContextArg[i] = isContextType(typ)
 	}
 	hasErr := sigHasError(sig)
 	e.items = append(e.items, extractedItem{
-		FuncName: name,
-		ArgTypes: argTypes,
-		IsInvoke: true,
-		Pkg:      realPkg,
-		PkgAlias: alias,
-		HasError: hasErr,
+		FuncName:     name,
+		ArgTypes:     argTypes,
+		IsInvoke:     true,
+		Pkg:          realPkg,
+		PkgAlias:     alias,
+		HasError:     hasErr,
+		IsContextArg: isContextArg,
 	})
 	return nil
 }
@@ -699,6 +725,12 @@ func (e *Extractor) collectFreeVarsWithConst(funcLit *ast.FuncLit, curPkg *packa
 	freeVars, freeTypes, freeTypeStrs, isConst, litValues := e.collectFreeVarsFromBody(funcLit.Body, curPkg, declSet)
 	if err := e.checkFreeVarVisibility(freeVars, curPkg); err != nil {
 		return nil, nil, nil, nil, nil, err
+	}
+	for _, ident := range freeVars {
+		obj := curPkg.TypesInfo.ObjectOf(ident)
+		if obj != nil && isContextType(obj.Type()) {
+			return nil, nil, nil, nil, nil, fmt.Errorf("cannot capture context variable %q as free variable; please pass context as a function parameter", ident.Name)
+		}
 	}
 	return freeVars, freeTypes, freeTypeStrs, isConst, litValues, nil
 }
@@ -799,6 +831,7 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 
 		// 仅变量类型才作为自由变量
 		if _, ok := obj.(*types.Var); !ok {
+
 			return true
 		}
 
@@ -1017,6 +1050,9 @@ func (e *Extractor) buildDependencyGraph(items []extractedItem) ([][]int, []int,
 			continue
 		}
 		for j, argType := range it.ArgTypes {
+			if len(it.IsContextArg) > j && it.IsContextArg[j] {
+				continue
+			}
 			if it.IsClosure && len(it.IsConstArg) > j && it.IsConstArg[j] {
 				continue
 			}
@@ -1097,6 +1133,10 @@ func (e *Extractor) buildNodes(order []int, items []extractedItem, varNames []st
 func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) []string {
 	argNames := make([]string, len(it.ArgTypes))
 	for j, argType := range it.ArgTypes {
+		if it.IsContextArg != nil && j < len(it.IsContextArg) && it.IsContextArg[j] {
+			argNames[j] = "" // 占位，生成时替换为 "ctx"
+			continue
+		}
 		provIdx := e.globalProviderMap[argType]
 		argNames[j] = varNames[provIdx]
 	}
@@ -1105,14 +1145,15 @@ func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) []strin
 
 func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) Node {
 	node := Node{
-		Func:      it.FuncName,
-		FuncPkg:   it.PkgAlias,
-		Args:      argNames,
-		IsInvoke:  true,
-		HasError:  it.HasError,
-		IsClosure: it.IsClosure,
-		FreeVars:  it.FreeVars,
-		PkgPath:   it.Pkg.PkgPath,
+		Func:         it.FuncName,
+		FuncPkg:      it.PkgAlias,
+		Args:         argNames,
+		IsInvoke:     true,
+		HasError:     it.HasError,
+		IsClosure:    it.IsClosure,
+		FreeVars:     it.FreeVars,
+		PkgPath:      it.Pkg.PkgPath,
+		IsContextArg: it.IsContextArg,
 	}
 	if it.IsClosure {
 		closureDef, usedPkgs, err := e.generateClosureDef(&it)
@@ -1166,7 +1207,19 @@ func (e *Extractor) buildProviderNode(it extractedItem, argNames []string, name 
 		IsClosureParam: it.IsClosureParam,
 		IsConstArg:     it.IsConstArg,
 		ConstLitValues: it.ConstLitValues,
+		IsContextArg:   it.IsContextArg,
 	}
+}
+func buildCallArgs(node Node) []string {
+	args := make([]string, len(node.Args))
+	for i, arg := range node.Args {
+		if len(node.IsContextArg) > i && node.IsContextArg[i] {
+			args[i] = "ctx"
+		} else {
+			args[i] = arg
+		}
+	}
+	return args
 }
 
 // ----------------------------------------------------------------------------
@@ -1665,14 +1718,7 @@ func writeInvokes(buf *bytes.Buffer, nodes []Node) {
 			continue
 		}
 		if node.IsClosure {
-			args := make([]string, len(node.Args))
-			for i, arg := range node.Args {
-				if i < len(node.IsConstArg) && node.IsConstArg[i] {
-					args[i] = node.ConstLitValues[i]
-				} else {
-					args[i] = arg
-				}
-			}
+			args := buildCallArgs(node)
 			argsStr := strings.Join(args, ", ")
 			if node.HasError {
 				fmt.Fprintf(buf, "\t\tif err := %s(%s); err != nil { return err }\n", node.Func, argsStr)
@@ -1683,18 +1729,19 @@ func writeInvokes(buf *bytes.Buffer, nodes []Node) {
 		}
 		full := fullFuncName(node.FuncPkg, node.Func)
 		debugf("[DEBUG generateCode invoke] full=%q, FuncPkg=%q, Func=%q, args=%v", full, node.FuncPkg, node.Func, node.Args)
-		args := strings.Join(node.Args, ", ")
+		args := buildCallArgs(node) // 替换原有 args
+		argsStr := strings.Join(args, ", ")
 		if node.HasError {
-			if args == "" {
+			if argsStr == "" {
 				fmt.Fprintf(buf, "\t\tif err := %s(); err != nil { return err }\n", full)
 			} else {
-				fmt.Fprintf(buf, "\t\tif err := %s(%s); err != nil { return err }\n", full, args)
+				fmt.Fprintf(buf, "\t\tif err := %s(%s); err != nil { return err }\n", full, argsStr)
 			}
 		} else {
-			if args == "" {
+			if argsStr == "" {
 				fmt.Fprintf(buf, "\t\t%s()\n", full)
 			} else {
-				fmt.Fprintf(buf, "\t\t%s(%s)\n", full, args)
+				fmt.Fprintf(buf, "\t\t%s(%s)\n", full, argsStr)
 			}
 		}
 	}
@@ -1739,15 +1786,7 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 		return
 	}
 	if node.IsClosure {
-		args := make([]string, len(node.Args))
-		for i, arg := range node.Args {
-			// 边界判断，防止数组越界
-			if i < len(node.IsConstArg) && node.IsConstArg[i] {
-				args[i] = node.ConstLitValues[i]
-			} else {
-				args[i] = arg
-			}
-		}
+		args := buildCallArgs(node) // 替换原有 args 构造
 		argsStr := strings.Join(args, ", ")
 		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, node.Func, argsStr)
 		return
