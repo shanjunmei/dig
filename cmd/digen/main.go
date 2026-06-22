@@ -32,6 +32,9 @@ const (
 	UnusedModeDrop
 )
 
+// 仅保留 debugEnabled 作为包级变量（未导出），其他配置移至 main 内
+var debugEnabled bool
+
 type GenTarget struct {
 	FuncName string
 	Node     *ast.FuncDecl
@@ -1643,18 +1646,13 @@ func debugf(format string, args ...any) {
 }
 
 // ----------------------------------------------------------------------------
-// 重构后的 run 函数及辅助
+// 主流程
 // ----------------------------------------------------------------------------
 
-var (
-	debugEnabled bool
-)
-
 func main() {
-	var (
-		outputFile    = flag.String("out", "dig_gen.go", "output file name")
-		unusedModeStr = flag.String("unused", "error", "behavior for unused providers: error, ignore, drop")
-	)
+	// 定义局部变量（原包级变量已移除）
+	outputFile := flag.String("out", "dig_gen.go", "output file name")
+	unusedModeStr := flag.String("unused", "error", "behavior for unused providers: error, ignore, drop")
 	flag.BoolVar(&debugEnabled, "debug", false, "enable debug logging")
 	flag.Parse()
 
@@ -1669,7 +1667,7 @@ func main() {
 	if err != nil {
 		log.Fatalln(fmt.Errorf("scan target failed: %v", err))
 	}
-	target.File = *outputFile
+	target.File = *outputFile // 使用局部变量
 
 	nodes, pkgAliasMap, err := extractAndBuildNodes(pkg, target, pkgMap, unusedMode)
 	if err != nil {
