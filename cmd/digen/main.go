@@ -126,27 +126,6 @@ func findDigCallInBlock(block *ast.BlockStmt, info *types.Info, methodName strin
 	return result
 }
 
-func findModuleCallInBlock(block *ast.BlockStmt, info *types.Info) *ast.CallExpr {
-	var result *ast.CallExpr
-	ast.Inspect(block, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		obj := info.ObjectOf(sel.Sel)
-		if obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == diPkgPath && obj.Name() == "Module" {
-			result = call
-			return false // 找到即停止遍历
-		}
-		return true
-	})
-	return result
-}
-
 func findInjectorFunctions(pkg *packages.Package) (*GenTarget, error) {
 	var targets []GenTarget
 	for idx, f := range pkg.Syntax {
