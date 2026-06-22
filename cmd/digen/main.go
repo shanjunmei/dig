@@ -32,12 +32,6 @@ const (
 	UnusedModeDrop
 )
 
-var (
-	outputFile    = flag.String("out", "dig_gen.go", "output file name")
-	unusedModeStr = flag.String("unused", "error", "behavior for unused providers: error, ignore, drop")
-	debugEnabled  bool
-)
-
 type GenTarget struct {
 	FuncName string
 	Node     *ast.FuncDecl
@@ -85,7 +79,6 @@ type extractedItem struct {
 	ClosureParamNames []string
 	ClosureParamTypes []types.Type
 
-	// 新增：常量信息（仅对自由变量有效）
 	IsConstArg     []bool
 	ConstLitValues []string
 	IsContextArg   []bool
@@ -157,7 +150,6 @@ func findInjectorFunctions(pkg *packages.Package) (*GenTarget, error) {
 	return &targets[0], nil
 }
 
-// isDigAppPointer 判断类型是否为 *dig.App
 func isDigAppPointer(typ types.Type) bool {
 	ptr, ok := typ.(*types.Pointer)
 	if !ok {
@@ -173,16 +165,13 @@ func isDigAppPointer(typ types.Type) bool {
 }
 
 func validateReturnType(fnDecl *ast.FuncDecl, info *types.Info) error {
-	// 检查返回值是否存在
 	if fnDecl.Type.Results == nil || len(fnDecl.Type.Results.List) == 0 {
 		return fmt.Errorf("function %q: must have return value, required: *dig.App", fnDecl.Name.Name)
 	}
-	// 只允许一个返回值
 	if len(fnDecl.Type.Results.List) > 1 {
 		return fmt.Errorf("function %q: only allow single return value, required: *dig.App", fnDecl.Name.Name)
 	}
 	resField := fnDecl.Type.Results.List[0]
-	// 禁止命名返回值
 	if len(resField.Names) > 0 {
 		return fmt.Errorf("function %q: named return value is not allowed, required: *dig.App", fnDecl.Name.Name)
 	}
@@ -214,6 +203,7 @@ func checkExportedVisibility(obj types.Object, curPkg *types.Package) error {
 	}
 	return nil
 }
+
 func uniqueAlias(pkgPath string, existing map[string]bool) string {
 	parts := strings.Split(pkgPath, "/")
 	if len(parts) == 0 {
@@ -285,17 +275,9 @@ func sigHasError(sig *types.Signature) bool {
 func resolveFunctionObject(call *ast.CallExpr, curPkg *packages.Package) types.Object {
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
-		obj := curPkg.TypesInfo.ObjectOf(fun)
-		if obj != nil {
-			debugf("[DEBUG resolve] ident %q -> %v (pkg=%v)", fun.Name, obj, obj.Pkg())
-		}
-		return obj
+		return curPkg.TypesInfo.ObjectOf(fun)
 	case *ast.SelectorExpr:
-		obj := curPkg.TypesInfo.ObjectOf(fun.Sel)
-		if obj != nil {
-			debugf("[DEBUG resolve] selector %s.%s -> %v (pkg=%v)", fun.X, fun.Sel.Name, obj, obj.Pkg())
-		}
-		return obj
+		return curPkg.TypesInfo.ObjectOf(fun.Sel)
 	default:
 		return nil
 	}
@@ -341,9 +323,30 @@ func findBuildCall(fn *ast.FuncDecl, info *types.Info) *ast.CallExpr {
 	return findDigCallInBlock(fn.Body, info, "Build")
 }
 
+// isContextType 判断类型是否为 context.Context
+func isContextType(typ types.Type) bool {
+	return typ.String() == "context.Context"
+}
+
 // ----------------------------------------------------------------------------
 // Extractor 方法
 // ----------------------------------------------------------------------------
+
+// NewExtractor 构造并初始化提取器
+func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, unusedMode UnusedMode) *Extractor {
+	e := &Extractor{
+		pkgMap:            pkgMap,
+		mainPkgPath:       mainPkgPath,
+		items:             []extractedItem{},
+		globalProviderMap: make(map[string]int),
+		pkgAliasMap:       make(map[string]string),
+		UnusedMode:        unusedMode,
+		importAliasMap:    make(map[string]string),
+	}
+	e.loadImportAliases()
+	return e
+}
+
 func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packages.Package) error {
 	obj := resolveFunctionObject(call, curPkg)
 	if obj == nil {
@@ -379,9 +382,6 @@ func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packa
 	return nil
 }
 
-// findSingleModuleCall 在函数体中查找唯一的 dig.Module 调用，
-// 要求必须恰好有一个，且位于顶层（不在 if/switch/for/select 内）。
-// 返回该调用，若不符合则返回错误。
 func (e *Extractor) findSingleModuleCall(body *ast.BlockStmt, info *types.Info, funcName string) (*ast.CallExpr, error) {
 	var moduleCalls []*ast.CallExpr
 	var moduleInControl []bool
@@ -425,6 +425,17 @@ func (e *Extractor) findSingleModuleCall(body *ast.BlockStmt, info *types.Info, 
 		return nil, fmt.Errorf("function %s contains multiple dig.Module calls; only one is allowed", funcName)
 	}
 }
+
+// 通用参数处理函数
+func (e *Extractor) processArgs(args []ast.Expr, pkg *packages.Package, handler func(ast.Expr, *packages.Package) error) error {
+	for _, arg := range args {
+		if err := handler(arg, pkg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (e *Extractor) extractOptions(expr ast.Expr, curPkg, realPkg *packages.Package) error {
 	expr = ast.Unparen(expr)
 	call, ok := expr.(*ast.CallExpr)
@@ -436,53 +447,19 @@ func (e *Extractor) extractOptions(expr ast.Expr, curPkg, realPkg *packages.Pack
 		if obj := curPkg.TypesInfo.ObjectOf(sel.Sel); obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == diPkgPath {
 			switch obj.Name() {
 			case "Provide":
-				return e.processProvideArgs(call.Args, realPkg)
+				return e.processArgs(call.Args, realPkg, e.handleProvide)
 			case "Invoke":
-				return e.processInvokeArgs(call.Args, realPkg)
+				return e.processArgs(call.Args, realPkg, e.handleInvoke)
 			case "Supply":
-				return e.processSupplyArgs(call.Args, realPkg)
+				return e.processArgs(call.Args, realPkg, e.handleSupply)
 			case "Module":
-				return e.processModuleArgs(call.Args, curPkg, realPkg)
+				return e.processArgs(call.Args, curPkg, func(arg ast.Expr, pkg *packages.Package) error {
+					return e.extractOptions(arg, curPkg, realPkg)
+				})
 			}
 		}
 	}
 	return e.extractOptionsFromFuncCall(call, curPkg)
-}
-
-func (e *Extractor) processProvideArgs(args []ast.Expr, pkg *packages.Package) error {
-	for _, arg := range args {
-		if err := e.handleProvide(arg, pkg); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (e *Extractor) processInvokeArgs(args []ast.Expr, pkg *packages.Package) error {
-	for _, arg := range args {
-		if err := e.handleInvoke(arg, pkg); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (e *Extractor) processSupplyArgs(args []ast.Expr, pkg *packages.Package) error {
-	for _, arg := range args {
-		if err := e.handleSupply(arg, pkg); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (e *Extractor) processModuleArgs(args []ast.Expr, curPkg, realPkg *packages.Package) error {
-	for _, arg := range args {
-		if err := e.extractOptions(arg, curPkg, realPkg); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (e *Extractor) typeQualifier(p *types.Package) string {
@@ -491,6 +468,29 @@ func (e *Extractor) typeQualifier(p *types.Package) string {
 
 func (e *Extractor) getTypeFullName(typ types.Type) string {
 	return types.TypeString(typ, e.typeQualifier)
+}
+
+// buildArgInfo 构建参数类型和上下文标记（用于普通函数）
+func (e *Extractor) buildArgInfo(sig *types.Signature) (argTypes []string, isContext []bool) {
+	n := sig.Params().Len()
+	argTypes = make([]string, n)
+	isContext = make([]bool, n)
+	for i := range n {
+		typ := sig.Params().At(i).Type()
+		argTypes[i] = e.getTypeFullName(typ)
+		isContext[i] = isContextType(typ)
+	}
+	return
+}
+
+// 新建 extractedItem 基础字段
+func (e *Extractor) newExtractedItem(funcName string, pkg *packages.Package, alias string, hasErr bool) extractedItem {
+	return extractedItem{
+		FuncName: funcName,
+		Pkg:      pkg,
+		PkgAlias: alias,
+		HasError: hasErr,
+	}
 }
 
 func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error {
@@ -508,7 +508,7 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	case 0:
 		return fmt.Errorf("func %s has no return", name)
 	case 1:
-		//允许 T
+		// ok
 	case 2:
 		if !types.Identical(res.At(1).Type(), types.Universe.Lookup("error").Type()) {
 			return fmt.Errorf("func %s: second return value must be error, got %s", name, res.At(1).Type().String())
@@ -522,28 +522,19 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	if _, dup := e.globalProviderMap[retType]; dup {
 		return fmt.Errorf("duplicate provide for type %q", retType)
 	}
-	argTypes := make([]string, sig.Params().Len())
-	isContextArg := make([]bool, sig.Params().Len())
-	for i := 0; i < sig.Params().Len(); i++ {
-		param := sig.Params().At(i)
-		typ := param.Type()
-		argTypes[i] = e.getTypeFullName(typ)
-		isContextArg[i] = isContextType(typ)
-	}
+	argTypes, isContext := e.buildArgInfo(sig)
 	hasErr := sigHasError(sig)
+	item := e.newExtractedItem(name, realPkg, alias, hasErr)
+	item.RetType = retType
+	item.ArgTypes = argTypes
+	item.IsContextArg = isContext
+
 	idx := len(e.items)
-	e.items = append(e.items, extractedItem{
-		FuncName:     name,
-		RetType:      retType,
-		ArgTypes:     argTypes,
-		Pkg:          realPkg,
-		PkgAlias:     alias,
-		HasError:     hasErr,
-		IsContextArg: isContextArg,
-	})
+	e.items = append(e.items, item)
 	e.globalProviderMap[retType] = idx
 	return nil
 }
+
 func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package, isInvoke bool) error {
 	typ := curPkg.TypesInfo.TypeOf(funcLit)
 	sig, ok := typ.(*types.Signature)
@@ -573,17 +564,30 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 
 	funcName := e.generateFuncName(isInvoke)
 	isContextArg := make([]bool, len(argTypes))
-	// 先处理闭包参数
 	for i, t := range paramTypes {
 		if isContextType(t) {
 			isContextArg[i] = true
 		}
 	}
-	idx := len(e.items)
-	item := e.buildExtractedItem(funcName, argTypes, isInvoke, hasErr, curPkg, funcLit,
-		freeVars, freeTypes, freeTypeStrs, paramNames, paramTypes,
-		isConstArg, litValues, retType, isContextArg)
+	// 自由变量中可能包含 context，但已在前置检查中禁止，此处无需处理
+	item := e.newExtractedItem(funcName, curPkg, e.collectPkgAlias(curPkg), hasErr)
+	item.ArgTypes = argTypes
+	item.IsInvoke = isInvoke
+	item.IsClosure = true
+	item.ClosureLit = funcLit
+	item.FreeVars = freeVars
+	item.FreeTypes = freeTypes
+	item.FreeTypeStrings = freeTypeStrs
+	item.ClosureParamNames = paramNames
+	item.ClosureParamTypes = paramTypes
+	item.IsConstArg = isConstArg
+	item.ConstLitValues = litValues
+	item.IsContextArg = isContextArg
+	if retType != "" {
+		item.RetType = retType
+	}
 
+	idx := len(e.items)
 	e.items = append(e.items, item)
 	if !isInvoke && retType != "" {
 		e.globalProviderMap[retType] = idx
@@ -591,13 +595,6 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	return nil
 }
 
-// isContextType 判断类型是否为 context.Context
-func isContextType(typ types.Type) bool {
-	// 简单方式：比较类型字符串（全限定名）
-	return typ.String() == "context.Context"
-}
-
-// ---------- 辅助方法 for handleFuncLit ----------
 func (e *Extractor) extractClosureParams(funcLit *ast.FuncLit, curPkg *packages.Package) ([]string, []types.Type, []string) {
 	var names []string
 	var typesList []types.Type
@@ -663,35 +660,6 @@ func (e *Extractor) generateFuncName(isInvoke bool) string {
 	return fmt.Sprintf("%s%d", prefix, len(e.items))
 }
 
-func (e *Extractor) buildExtractedItem(funcName string, argTypes []string, isInvoke, hasErr bool, curPkg *packages.Package, funcLit *ast.FuncLit,
-	freeVars []*ast.Ident, freeTypes []types.Type, freeTypeStrs []string,
-	paramNames []string, paramTypes []types.Type,
-	isConstArg []bool, litValues []string, retType string, isContextArg []bool) extractedItem {
-
-	item := extractedItem{
-		FuncName:          funcName,
-		ArgTypes:          argTypes,
-		IsInvoke:          isInvoke,
-		HasError:          hasErr,
-		Pkg:               curPkg,
-		PkgAlias:          e.collectPkgAlias(curPkg),
-		IsClosure:         true,
-		ClosureLit:        funcLit,
-		FreeVars:          freeVars,
-		FreeTypes:         freeTypes,
-		FreeTypeStrings:   freeTypeStrs,
-		ClosureParamNames: paramNames,
-		ClosureParamTypes: paramTypes,
-		IsConstArg:        isConstArg,
-		ConstLitValues:    litValues,
-		IsContextArg:      isContextArg,
-	}
-	if retType != "" {
-		item.RetType = retType
-	}
-	return item
-}
-
 func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error {
 	if funcLit, ok := expr.(*ast.FuncLit); ok {
 		return e.handleFuncLit(funcLit, curPkg, true)
@@ -701,31 +669,17 @@ func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error 
 		return err
 	}
 	alias := e.collectPkgAlias(realPkg)
-	params := sig.Params()
-	n := params.Len()
-	argTypes := make([]string, n)
-	isContextArg := make([]bool, n)
-
-	for i := range n {
-		param := params.At(i)
-		typ := param.Type()
-		argTypes[i] = e.getTypeFullName(typ)
-		isContextArg[i] = isContextType(typ)
-	}
+	argTypes, isContext := e.buildArgInfo(sig)
 	hasErr := sigHasError(sig)
-	e.items = append(e.items, extractedItem{
-		FuncName:     name,
-		ArgTypes:     argTypes,
-		IsInvoke:     true,
-		Pkg:          realPkg,
-		PkgAlias:     alias,
-		HasError:     hasErr,
-		IsContextArg: isContextArg,
-	})
+	item := e.newExtractedItem(name, realPkg, alias, hasErr)
+	item.ArgTypes = argTypes
+	item.IsInvoke = true
+	item.IsContextArg = isContext
+
+	e.items = append(e.items, item)
 	return nil
 }
 
-// collectFreeVarsWithConst 收集闭包中的自由变量（变量和常量）
 func (e *Extractor) collectFreeVarsWithConst(funcLit *ast.FuncLit, curPkg *packages.Package) ([]*ast.Ident, []types.Type, []string, []bool, []string, error) {
 	declSet := e.collectDeclarations(funcLit)
 	freeVars, freeTypes, freeTypeStrs, isConst, litValues := e.collectFreeVarsFromBody(funcLit.Body, curPkg, declSet)
@@ -741,13 +695,9 @@ func (e *Extractor) collectFreeVarsWithConst(funcLit *ast.FuncLit, curPkg *packa
 	return freeVars, freeTypes, freeTypeStrs, isConst, litValues, nil
 }
 
-// ========== 重构后的 collectDeclarations 及辅助 ==========
-
 func (e *Extractor) collectDeclarations(funcLit *ast.FuncLit) map[string]bool {
 	declSet := make(map[string]bool)
-	// 收集参数声明
 	e.collectParamDecls(funcLit, declSet)
-	// 遍历函数体，收集赋值和声明语句中的定义
 	ast.Inspect(funcLit.Body, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.AssignStmt:
@@ -760,7 +710,6 @@ func (e *Extractor) collectDeclarations(funcLit *ast.FuncLit) map[string]bool {
 	return declSet
 }
 
-// collectParamDecls 收集函数字面量的参数名
 func (e *Extractor) collectParamDecls(funcLit *ast.FuncLit, declSet map[string]bool) {
 	if funcLit.Type.Params != nil {
 		for _, field := range funcLit.Type.Params.List {
@@ -771,7 +720,6 @@ func (e *Extractor) collectParamDecls(funcLit *ast.FuncLit, declSet map[string]b
 	}
 }
 
-// collectAssignDecls 从赋值语句中收集左侧标识符（变量声明）
 func (e *Extractor) collectAssignDecls(assign *ast.AssignStmt, declSet map[string]bool) {
 	for _, lhs := range assign.Lhs {
 		if ident, ok := lhs.(*ast.Ident); ok && ident.Obj != nil && ident.Obj.Kind == ast.Var {
@@ -780,7 +728,6 @@ func (e *Extractor) collectAssignDecls(assign *ast.AssignStmt, declSet map[strin
 	}
 }
 
-// collectGenDecls 从声明语句中收集值规格说明中的名称
 func (e *Extractor) collectGenDecls(decl *ast.DeclStmt, declSet map[string]bool) {
 	genDecl, ok := decl.Decl.(*ast.GenDecl)
 	if !ok {
@@ -796,8 +743,6 @@ func (e *Extractor) collectGenDecls(decl *ast.DeclStmt, declSet map[string]bool)
 		}
 	}
 }
-
-// ========== 其他 Extractor 方法 ==========
 
 func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *packages.Package, declSet map[string]bool) ([]*ast.Ident, []types.Type, []string, []bool, []string) {
 	var freeVars []*ast.Ident
@@ -820,24 +765,20 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 			return true
 		}
 
-		// 预声明常量直接跳过
 		if cObj, ok := obj.(*types.Const); ok && cObj.Pkg() == nil {
 			return true
 		}
 
-		// 用户自定义常量：只记录字面量，不加入freeVars
 		if _, ok := obj.(*types.Const); ok {
 			if seen[ident.Name] {
 				return true
 			}
 			seen[ident.Name] = true
-			// 常量不存入freeVars，跳过参数生成
+			// 常量不加入自由变量
 			return true
 		}
 
-		// 仅变量类型才作为自由变量
 		if _, ok := obj.(*types.Var); !ok {
-
 			return true
 		}
 
@@ -884,14 +825,13 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 	if _, dup := e.globalProviderMap[retType]; dup {
 		return fmt.Errorf("duplicate supply for type %q", retType)
 	}
+	item := e.newExtractedItem("", curPkg, alias, false)
+	item.IsSupply = true
+	item.RetType = retType
+	item.Expr = expr
+
 	idx := len(e.items)
-	e.items = append(e.items, extractedItem{
-		IsSupply: true,
-		RetType:  retType,
-		Expr:     expr,
-		Pkg:      curPkg,
-		PkgAlias: alias,
-	})
+	e.items = append(e.items, item)
 	e.globalProviderMap[retType] = idx
 	return nil
 }
@@ -901,9 +841,7 @@ func (e *Extractor) collectPkgAlias(pkg *packages.Package) string {
 	if pp == "" || pkg.Module == nil {
 		return ""
 	}
-	// 首先检查用户自定义别名
 	if alias, ok := e.importAliasMap[pp]; ok {
-		// 只有非主包才存储别名
 		if pp != e.mainPkgPath {
 			e.pkgAliasMap[pp] = alias
 			return alias
@@ -916,7 +854,6 @@ func (e *Extractor) collectPkgAlias(pkg *packages.Package) string {
 		}
 		return alias
 	}
-	// 自动生成别名（原有逻辑）
 	existing := make(map[string]bool)
 	for _, a := range e.pkgAliasMap {
 		existing[a] = true
@@ -925,7 +862,6 @@ func (e *Extractor) collectPkgAlias(pkg *packages.Package) string {
 		existing[a] = true
 	}
 	alias := uniqueAlias(pp, existing)
-	// 只有非主包才存入 map
 	if pp != e.mainPkgPath {
 		e.pkgAliasMap[pp] = alias
 	}
@@ -1128,25 +1064,19 @@ func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) []strin
 }
 
 func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) Node {
-	node := Node{
-		Func:      it.FuncName,
-		FuncPkg:   it.PkgAlias,
-		Args:      argNames,
-		IsInvoke:  true,
-		HasError:  it.HasError,
-		IsClosure: it.IsClosure,
-
-		PkgPath:      it.Pkg.PkgPath,
-		IsContextArg: it.IsContextArg,
-	}
+	node := e.baseNode(it, "", argNames)
+	node.IsInvoke = true
+	node.HasError = it.HasError
+	node.IsClosure = it.IsClosure
+	node.Func = it.FuncName
+	node.FuncPkg = it.PkgAlias
 	if it.IsClosure {
 		closureDef, usedPkgs, err := e.generateClosureDef(&it)
 		if err != nil {
-			panic(err)
+			panic(err) // 保留原行为，可考虑返回错误
 		}
 		node.ClosureDef = closureDef
 		node.UsedPkgs = usedPkgs
-		// 也要传递 IsClosureParam, IsConstArg, ConstLitValues
 		node.IsConstArg = it.IsConstArg
 		node.ConstLitValues = it.ConstLitValues
 	}
@@ -1166,33 +1096,35 @@ func (e *Extractor) buildSupplyNode(it extractedItem, name string) Node {
 }
 
 func (e *Extractor) buildProviderNode(it extractedItem, argNames []string, name string) Node {
-	var closureDef string
-	var usedPkgs []string
+	node := e.baseNode(it, name, argNames)
+	node.RetType = it.RetType
+	node.HasError = it.HasError
+	node.IsClosure = it.IsClosure
+	node.Func = it.FuncName
+	node.FuncPkg = it.PkgAlias
 	if it.IsClosure {
-		var err error
-		closureDef, usedPkgs, err = e.generateClosureDef(&it)
+		closureDef, usedPkgs, err := e.generateClosureDef(&it)
 		if err != nil {
 			panic(err)
 		}
+		node.ClosureDef = closureDef
+		node.UsedPkgs = usedPkgs
+		node.IsConstArg = it.IsConstArg
+		node.ConstLitValues = it.ConstLitValues
 	}
+	return node
+}
+
+func (e *Extractor) baseNode(it extractedItem, name string, args []string) Node {
 	return Node{
-		Name:      name,
-		Func:      it.FuncName,
-		FuncPkg:   it.PkgAlias,
-		RetType:   it.RetType,
-		Args:      argNames,
-		HasError:  it.HasError,
-		IsClosure: it.IsClosure,
-
-		ClosureDef: closureDef,
-		UsedPkgs:   usedPkgs,
-		PkgPath:    it.Pkg.PkgPath,
-
-		IsConstArg:     it.IsConstArg,
-		ConstLitValues: it.ConstLitValues,
-		IsContextArg:   it.IsContextArg,
+		Name:         name,
+		Args:         args,
+		PkgPath:      it.Pkg.PkgPath,
+		FuncPkg:      it.PkgAlias,
+		IsContextArg: it.IsContextArg,
 	}
 }
+
 func buildCallArgs(node Node) []string {
 	args := make([]string, len(node.Args))
 	for i, arg := range node.Args {
@@ -1206,7 +1138,6 @@ func buildCallArgs(node Node) []string {
 }
 
 func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
-	// 处理指针和切片等前缀
 	var prefix strings.Builder
 	for {
 		if strings.HasPrefix(typeStr, "*") {
@@ -1220,12 +1151,10 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 		}
 	}
 
-	// 去掉主包前缀
 	if strings.HasPrefix(typeStr, e.mainPkgPath+".") {
 		typeStr = typeStr[len(e.mainPkgPath)+1:]
 	}
 
-	// 其他包别名替换
 	type pair struct {
 		path  string
 		alias string
@@ -1241,6 +1170,7 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 	})
 	return prefix.String() + result
 }
+
 func (e *Extractor) collectUsedPkgsFromBody(body *ast.BlockStmt, pkg *packages.Package, usedPkgs map[string]bool) {
 	ast.Inspect(body, func(n ast.Node) bool {
 		if ident, ok := n.(*ast.Ident); ok {
@@ -1251,7 +1181,7 @@ func (e *Extractor) collectUsedPkgsFromBody(body *ast.BlockStmt, pkg *packages.P
 			if typeName, ok := obj.(*types.TypeName); ok {
 				pkgPathObj := typeName.Pkg()
 				if pkgPathObj == nil {
-					return true // 内置类型，如 bool, error
+					return true
 				}
 				pkgPath := pkgPathObj.Path()
 				if pkgPath != "" && pkgPath != e.mainPkgPath {
@@ -1263,7 +1193,6 @@ func (e *Extractor) collectUsedPkgsFromBody(body *ast.BlockStmt, pkg *packages.P
 	})
 }
 
-// typePkg 辅助方法（添加到 Extractor）
 func (e *Extractor) typePkg(typ types.Type) *types.Package {
 	switch t := typ.(type) {
 	case *types.Named:
@@ -1275,7 +1204,6 @@ func (e *Extractor) typePkg(typ types.Type) *types.Package {
 	case *types.Array:
 		return e.typePkg(t.Elem())
 	case *types.Map:
-		// 简单处理：忽略 key 和 elem 的包（可根据需要完善）
 		return nil
 	default:
 		return nil
@@ -1314,12 +1242,10 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 	return def, usedList, nil
 }
 
-// ---------- 辅助方法 for generateClosureDef ----------
 func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[string]bool) ([]string, map[string]string, error) {
 	var paramList []string
 	freeVarMap := make(map[string]string)
 
-	// 缓存结构体切片，减少重复寻址
 	closureParamNames := it.ClosureParamNames
 	closureParamTypes := it.ClosureParamTypes
 	argTypes := it.ArgTypes
@@ -1328,7 +1254,6 @@ func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[
 	freeTypeStrings := it.FreeTypeStrings
 	freeTypes := it.FreeTypes
 
-	// 闭包原始参数
 	nClosure := len(closureParamNames)
 	for i := range nClosure {
 		name := closureParamNames[i]
@@ -1340,7 +1265,6 @@ func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[
 		}
 	}
 
-	// 自由变量（只处理非常量）
 	nFree := len(freeVars)
 	for i := range nFree {
 		if i < len(isConstArg) && isConstArg[i] {
@@ -1387,7 +1311,7 @@ func (e *Extractor) collectTypeNameMap(body *ast.BlockStmt, pkg *packages.Packag
 				return true
 			}
 			if sel, ok := c.Parent().(*ast.SelectorExpr); ok && sel.Sel == ident {
-				return true // 已限定的类型名跳过
+				return true
 			}
 			obj := pkg.TypesInfo.ObjectOf(ident)
 			if typeName, ok := obj.(*types.TypeName); ok {
@@ -1409,12 +1333,10 @@ func (e *Extractor) collectTypeNameMap(body *ast.BlockStmt, pkg *packages.Packag
 }
 
 func (e *Extractor) applyTypeAliasReplacements(bodyStr string, typeNameMap map[string]string) string {
-	// 先替换独立的类型名
 	for name, replacement := range typeNameMap {
 		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
 		bodyStr = re.ReplaceAllString(bodyStr, replacement)
 	}
-	// 再替换完整的包路径
 	return e.replacePkgPathWithAlias(bodyStr)
 }
 
@@ -1425,7 +1347,6 @@ func (e *Extractor) buildClosureDefString(funcName, paramStr, bodyStr, retType s
 	return fmt.Sprintf("func %s(%s) %s", funcName, paramStr, bodyStr)
 }
 
-// importInfo 用于收集导入信息
 type importInfo struct {
 	filePath string
 	pkgPath  string
@@ -1433,7 +1354,6 @@ type importInfo struct {
 	isMain   bool
 }
 
-// collectAllImportInfos 遍历所有包，收集所有有效的导入别名信息，并按主包优先、文件路径排序
 func (e *Extractor) collectAllImportInfos() []importInfo {
 	var infos []importInfo
 	for _, p := range e.pkgMap {
@@ -1457,17 +1377,15 @@ func (e *Extractor) collectAllImportInfos() []importInfo {
 			}
 		}
 	}
-	// 排序：主包优先，同主包按文件路径排序（保持确定性）
 	sort.Slice(infos, func(i, j int) bool {
 		if infos[i].isMain != infos[j].isMain {
-			return infos[i].isMain // true（主包）排在前面
+			return infos[i].isMain
 		}
 		return infos[i].filePath < infos[j].filePath
 	})
 	return infos
 }
 
-// loadImportAliases 加载用户自定义的导入别名，主包别名优先
 func (e *Extractor) loadImportAliases() {
 	infos := e.collectAllImportInfos()
 	for _, info := range infos {
@@ -1541,7 +1459,6 @@ func generateCode(nodes []Node, pkgName, originFuncName, diPath, diAlias, mainPk
 
 	writeHeader(buf, mainPkg)
 
-	// 构建 usedPkgSet
 	usedPkgSet := make(map[string]bool)
 	usedPkgSet["context"] = true
 	usedPkgSet[diPath] = true
@@ -1596,11 +1513,9 @@ func writeImports(buf *bytes.Buffer, mainPkgPath string, pkgAliasMap map[string]
 	buf.WriteString("import (\n")
 	for _, path := range paths {
 		alias := importMap[path]
-		// 获取默认包名（路径最后一段）
 		parts := strings.Split(path, "/")
 		defaultName := parts[len(parts)-1]
 		if alias == defaultName {
-			// 省略别名，只写路径
 			fmt.Fprintf(buf, "\t%q\n", path)
 		} else {
 			fmt.Fprintf(buf, "\t%s %q\n", alias, path)
@@ -1633,7 +1548,6 @@ func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName, diAlias stri
 	fmt.Fprintf(buf, "\treturn %s.New(func(ctx context.Context) error {\n", diAlias)
 	writeInvokes(buf, nodes)
 	buf.WriteString("\t\treturn nil\n\t})\n}\n\n")
-	// fmt.Fprintf(buf, "func %s() *%s.App {\n\treturn __%s()\n}\n", originFuncName, diAlias, originFuncName)
 }
 
 func writeProviders(buf *bytes.Buffer, nodes []Node, refCount map[string]int, unusedMode UnusedMode) {
@@ -1655,39 +1569,20 @@ func writeInvokes(buf *bytes.Buffer, nodes []Node) {
 		if !node.IsInvoke {
 			continue
 		}
-		if node.IsClosure {
-			args := buildCallArgs(node)
-			argsStr := strings.Join(args, ", ")
-			if node.HasError {
-				fmt.Fprintf(buf, "\t\tif err := %s(%s); err != nil { return err }\n", node.Func, argsStr)
-			} else {
-				fmt.Fprintf(buf, "\t\t%s(%s)\n", node.Func, argsStr)
-			}
-			continue
-		}
 		full := fullFuncName(node.FuncPkg, node.Func)
-		debugf("[DEBUG generateCode invoke] full=%q, FuncPkg=%q, Func=%q, args=%v", full, node.FuncPkg, node.Func, node.Args)
-		args := buildCallArgs(node) // 替换原有 args
+		args := buildCallArgs(node)
 		argsStr := strings.Join(args, ", ")
-		if node.HasError {
-			if argsStr == "" {
-				fmt.Fprintf(buf, "\t\tif err := %s(); err != nil { return err }\n", full)
-			} else {
-				fmt.Fprintf(buf, "\t\tif err := %s(%s); err != nil { return err }\n", full, argsStr)
-			}
-		} else {
-			if argsStr == "" {
-				fmt.Fprintf(buf, "\t\t%s()\n", full)
-			} else {
-				fmt.Fprintf(buf, "\t\t%s(%s)\n", full, argsStr)
-			}
-		}
+		stmt := formatCallStmt(full, argsStr, node.HasError)
+		buf.WriteString("\t\t" + stmt + "\n")
 	}
 }
 
-// ----------------------------------------------------------------------------
-// 生成辅助语句
-// ----------------------------------------------------------------------------
+func formatCallStmt(full, argsStr string, hasError bool) string {
+	if hasError {
+		return fmt.Sprintf("if err := %s(%s); err != nil { return err }", full, argsStr)
+	}
+	return fmt.Sprintf("%s(%s)", full, argsStr)
+}
 
 func handleUnusedProvider(buf *bytes.Buffer, node Node, unusedMode UnusedMode) bool {
 	switch unusedMode {
@@ -1723,15 +1618,13 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 		fmt.Fprintf(buf, "\t%s := %s\n", node.Name, expr)
 		return
 	}
-	if node.IsClosure {
-		args := buildCallArgs(node) // 替换原有 args 构造
-		argsStr := strings.Join(args, ", ")
-		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, node.Func, argsStr)
-		return
-	}
 	full := fullFuncName(node.FuncPkg, node.Func)
 	args := buildCallArgs(node)
 	argsStr := strings.Join(args, ", ")
+	if node.IsClosure {
+		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, node.Func, argsStr)
+		return
+	}
 	if node.HasError {
 		fmt.Fprintf(buf, "\t%s, err := %s(%s)\n\tif err != nil { panic(err) }\n", node.Name, full, argsStr)
 	} else {
@@ -1753,49 +1646,44 @@ func debugf(format string, args ...any) {
 // 重构后的 run 函数及辅助
 // ----------------------------------------------------------------------------
 
+var (
+	debugEnabled bool
+)
+
 func main() {
+	var (
+		outputFile    = flag.String("out", "dig_gen.go", "output file name")
+		unusedModeStr = flag.String("unused", "error", "behavior for unused providers: error, ignore, drop")
+	)
 	flag.BoolVar(&debugEnabled, "debug", false, "enable debug logging")
 	flag.Parse()
 
-	if err := run(); err != nil {
-		log.Fatal(err)
-	}
-}
+	unusedMode := parseUnusedMode(unusedModeStr)
 
-// run 作为主控流程，调用各个子步骤
-func run() error {
-	// 1. 解析模式
-	unusedMode := parseUnusedMode()
-
-	// 2. 加载并校验包
 	pkg, pkgMap, err := loadAndValidatePackages()
 	if err != nil {
-		return err
+		log.Fatalln(err)
 	}
 
-	// 4. 查找目标注入函数
 	target, err := findInjectorFunctions(pkg)
+	target.File = *outputFile
 	if err != nil {
-		return fmt.Errorf("scan target failed: %v", err)
+		log.Fatalln(fmt.Errorf("scan target failed: %v", err))
 	}
 
-	// 5. 提取 DI 配置并构建节点
 	nodes, pkgAliasMap, err := extractAndBuildNodes(pkg, target, pkgMap, unusedMode)
 	if err != nil {
-		return fmt.Errorf("extract and build nodes failed: %v", err)
+		log.Fatalln(fmt.Errorf("extract and build nodes failed: %v", err))
 	}
 
-	// 6. 生成代码并写入文件
 	if err := writeGeneratedCode(pkg, target, nodes, pkgAliasMap, unusedMode); err != nil {
-		return err
+		log.Fatalln(err)
 	}
 
 	debugf("generate success: %s", *outputFile)
-	return nil
 }
 
-// parseUnusedMode 解析命令行参数中的 unused 模式
-func parseUnusedMode() UnusedMode {
+func parseUnusedMode(unusedModeStr *string) UnusedMode {
 	switch *unusedModeStr {
 	case "ignore":
 		return UnusedModeIgnore
@@ -1806,7 +1694,6 @@ func parseUnusedMode() UnusedMode {
 	}
 }
 
-// loadAndValidatePackages 加载当前目录下的包并检查错误
 func loadAndValidatePackages() (*packages.Package, map[string]*packages.Package, error) {
 	cfg := &packages.Config{
 		Mode:       packages.NeedSyntax | packages.NeedTypes | packages.NeedName | packages.NeedModule | packages.NeedFiles | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps,
@@ -1821,10 +1708,8 @@ func loadAndValidatePackages() (*packages.Package, map[string]*packages.Package,
 		return nil, nil, fmt.Errorf("no packages loaded")
 	}
 
-	// 构建包映射
 	pkgMap := collectAllPackages(pkgs)
 
-	// 收集所有包的错误信息
 	var errs []string
 	for _, p := range pkgMap {
 		if len(p.Errors) > 0 {
@@ -1838,7 +1723,6 @@ func loadAndValidatePackages() (*packages.Package, map[string]*packages.Package,
 		return nil, nil, fmt.Errorf("compilation errors found in packages:\n%s", strings.Join(errs, "\n"))
 	}
 
-	// 主包（第一个）
 	mainPkg := pkgs[0]
 	if len(mainPkg.Errors) > 0 {
 		var mainErrs []string
@@ -1851,7 +1735,6 @@ func loadAndValidatePackages() (*packages.Package, map[string]*packages.Package,
 	return mainPkg, pkgMap, nil
 }
 
-// extractAndBuildNodes 创建 Extractor，提取选项，构建最终节点
 func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[string]*packages.Package, unusedMode UnusedMode) ([]Node, map[string]string, error) {
 	entryFunc := target.Node
 	buildCall := findBuildCall(entryFunc, pkg.TypesInfo)
@@ -1859,24 +1742,14 @@ func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[s
 		return nil, nil, fmt.Errorf("no dig.Build call found")
 	}
 
-	extractor := &Extractor{
-		pkgMap:            pkgMap,
-		mainPkgPath:       pkg.PkgPath,
-		items:             []extractedItem{},
-		globalProviderMap: make(map[string]int),
-		pkgAliasMap:       make(map[string]string),
-		UnusedMode:        unusedMode,
-		importAliasMap:    make(map[string]string),
-	}
-	extractor.loadImportAliases()
-	// 提取所有选项
+	extractor := NewExtractor(pkgMap, pkg.PkgPath, unusedMode)
+
 	for _, arg := range buildCall.Args {
 		if err := extractor.extractOptions(arg, pkg, pkg); err != nil {
 			return nil, nil, err
 		}
 	}
 
-	// 构建最终节点
 	nodes, err := extractor.buildFinalNodes()
 	if err != nil {
 		return nil, nil, err
@@ -1884,9 +1757,7 @@ func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[s
 	return nodes, extractor.pkgAliasMap, nil
 }
 
-// writeGeneratedCode 生成代码并写入文件
 func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, pkgAliasMap map[string]string, unusedMode UnusedMode) error {
-	// 从主包的导入声明中查找 dig 包的别名
 	diAlias := ""
 	for _, f := range pkg.Syntax {
 		for _, imp := range f.Imports {
@@ -1896,7 +1767,7 @@ func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, 
 					diAlias = imp.Name.Name
 				} else {
 					parts := strings.Split(path, "/")
-					diAlias = parts[len(parts)-1] // 默认包名
+					diAlias = parts[len(parts)-1]
 				}
 				break
 			}
@@ -1906,9 +1777,8 @@ func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, 
 		}
 	}
 	if diAlias == "" {
-		diAlias = "dig" // fallback
+		diAlias = "dig"
 	}
-	// 确保 pkgAliasMap 中包含该映射，供 generateCode 内部使用
 	if _, ok := pkgAliasMap[diPkgPath]; !ok {
 		pkgAliasMap[diPkgPath] = diAlias
 	}
@@ -1923,7 +1793,7 @@ func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, 
 		pkgAliasMap,
 		unusedMode,
 	)
-	if err := os.WriteFile(*outputFile, []byte(code), 0644); err != nil {
+	if err := os.WriteFile(target.File, []byte(code), 0644); err != nil {
 		return err
 	}
 	return nil
