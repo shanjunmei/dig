@@ -701,10 +701,13 @@ func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error 
 		return err
 	}
 	alias := e.collectPkgAlias(realPkg)
-	argTypes := make([]string, sig.Params().Len())
-	isContextArg := make([]bool, sig.Params().Len())
-	for i := 0; i < sig.Params().Len(); i++ {
-		param := sig.Params().At(i)
+	params := sig.Params()
+	n := params.Len()
+	argTypes := make([]string, n)
+	isContextArg := make([]bool, n)
+
+	for i := range n {
+		param := params.At(i)
 		typ := param.Type()
 		argTypes[i] = e.getTypeFullName(typ)
 		isContextArg[i] = isContextType(typ)
@@ -974,10 +977,7 @@ func (e *Extractor) findCycle(adj [][]int) ([]int, error) {
 }
 
 func (e *Extractor) formatCycleError(cycle []int) error {
-	var cycleDesc []string
-	for _, idx := range cycle {
-		cycleDesc = append(cycleDesc, e.describeItem(idx))
-	}
+	cycleDesc := Map(cycle, e.describeItem)
 	cycleInfo := strings.Join(cycleDesc, " -> ")
 	return fmt.Errorf("circular dependency detected: %s", cycleInfo)
 }
@@ -1230,17 +1230,15 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 		path  string
 		alias string
 	}
-	var pairs []pair
-	for path, alias := range e.pkgAliasMap {
-		pairs = append(pairs, pair{path, alias})
-	}
+	pairs := MapEntries(e.pkgAliasMap, func(path, alias string) pair {
+		return pair{path, alias}
+	})
 	sort.Slice(pairs, func(i, j int) bool {
 		return len(pairs[i].path) > len(pairs[j].path)
 	})
-	result := typeStr
-	for _, p := range pairs {
-		result = strings.ReplaceAll(result, p.path+".", p.alias+".")
-	}
+	result := Reduce(pairs, typeStr, func(res string, p pair) string {
+		return strings.ReplaceAll(res, p.path+".", p.alias+".")
+	})
 	return prefix.String() + result
 }
 func (e *Extractor) collectUsedPkgsFromBody(body *ast.BlockStmt, pkg *packages.Package, usedPkgs map[string]bool) {
@@ -1312,10 +1310,7 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 	}
 	def := e.buildClosureDefString(it.FuncName, paramStr, bodyStr, retType)
 
-	var usedList []string
-	for pkgPath := range usedPkgs {
-		usedList = append(usedList, pkgPath)
-	}
+	usedList := Keys(usedPkgs)
 	return def, usedList, nil
 }
 
@@ -1323,32 +1318,44 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[string]bool) ([]string, map[string]string, error) {
 	var paramList []string
 	freeVarMap := make(map[string]string)
-	paramIdx := 0
+
+	// 缓存结构体切片，减少重复寻址
+	closureParamNames := it.ClosureParamNames
+	closureParamTypes := it.ClosureParamTypes
+	argTypes := it.ArgTypes
+	freeVars := it.FreeVars
+	isConstArg := it.IsConstArg
+	freeTypeStrings := it.FreeTypeStrings
+	freeTypes := it.FreeTypes
 
 	// 闭包原始参数
-	for i := 0; i < len(it.ClosureParamNames); i++ {
-		name := it.ClosureParamNames[i]
-		typStr := e.replacePkgPathWithAlias(it.ArgTypes[paramIdx])
-		paramList = append(paramList, fmt.Sprintf("%s %s", name, typStr))
-		if pkg := e.typePkg(it.ClosureParamTypes[i]); pkg != nil && pkg.Path() != e.mainPkgPath {
+	nClosure := len(closureParamNames)
+	for i := range nClosure {
+		name := closureParamNames[i]
+		typStr := e.replacePkgPathWithAlias(argTypes[i])
+		paramList = append(paramList, name+" "+typStr)
+
+		if pkg := e.typePkg(closureParamTypes[i]); pkg != nil && pkg.Path() != e.mainPkgPath {
 			usedPkgs[pkg.Path()] = true
 		}
-		paramIdx++
 	}
 
 	// 自由变量（只处理非常量）
-	for i := 0; i < len(it.FreeVars); i++ {
-		if i >= len(it.IsConstArg) || it.IsConstArg[i] {
+	nFree := len(freeVars)
+	for i := range nFree {
+		if i < len(isConstArg) && isConstArg[i] {
 			continue
 		}
-		paramName := fmt.Sprintf("p%d", i)
-		typStr := e.replacePkgPathWithAlias(it.FreeTypeStrings[i])
-		paramList = append(paramList, fmt.Sprintf("%s %s", paramName, typStr))
-		freeVarMap[it.FreeVars[i].Name] = paramName
-		if pkg := e.typePkg(it.FreeTypes[i]); pkg != nil && pkg.Path() != e.mainPkgPath {
+		paramName := "p" + string(rune(i+'0'))
+		typStr := e.replacePkgPathWithAlias(freeTypeStrings[i])
+		paramList = append(paramList, paramName+" "+typStr)
+		freeVarMap[freeVars[i].Name] = paramName
+
+		if pkg := e.typePkg(freeTypes[i]); pkg != nil && pkg.Path() != e.mainPkgPath {
 			usedPkgs[pkg.Path()] = true
 		}
 	}
+
 	return paramList, freeVarMap, nil
 }
 
@@ -1548,10 +1555,7 @@ func generateCode(nodes []Node, pkgName, originFuncName, diPath, diAlias, mainPk
 		}
 	}
 
-	var usedPkgs []string
-	for pkgPath := range usedPkgSet {
-		usedPkgs = append(usedPkgs, pkgPath)
-	}
+	usedPkgs := Keys(usedPkgSet)
 
 	writeImports(buf, mainPkgPath, pkgAliasMap, usedPkgs, diPath, diAlias)
 	writeClosureDefs(buf, nodes)
@@ -1586,10 +1590,7 @@ func writeImports(buf *bytes.Buffer, mainPkgPath string, pkgAliasMap map[string]
 		}
 		importMap[pkgPath] = alias
 	}
-	var paths []string
-	for path := range importMap {
-		paths = append(paths, path)
-	}
+	paths := Keys(importMap)
 	sort.Strings(paths)
 
 	buf.WriteString("import (\n")
@@ -1764,10 +1765,7 @@ func main() {
 // run 作为主控流程，调用各个子步骤
 func run() error {
 	// 1. 解析模式
-	unusedMode, err := parseUnusedMode()
-	if err != nil {
-		return err
-	}
+	unusedMode := parseUnusedMode()
 
 	// 2. 加载并校验包
 	pkg, pkgMap, err := loadAndValidatePackages()
@@ -1797,14 +1795,14 @@ func run() error {
 }
 
 // parseUnusedMode 解析命令行参数中的 unused 模式
-func parseUnusedMode() (UnusedMode, error) {
+func parseUnusedMode() UnusedMode {
 	switch *unusedModeStr {
 	case "ignore":
-		return UnusedModeIgnore, nil
+		return UnusedModeIgnore
 	case "drop":
-		return UnusedModeDrop, nil
+		return UnusedModeDrop
 	default:
-		return UnusedModeError, nil
+		return UnusedModeError
 	}
 }
 
@@ -1813,7 +1811,7 @@ func loadAndValidatePackages() (*packages.Package, map[string]*packages.Package,
 	cfg := &packages.Config{
 		Mode:       packages.NeedSyntax | packages.NeedTypes | packages.NeedName | packages.NeedModule | packages.NeedFiles | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps,
 		Tests:      false,
-		BuildFlags: []string{fmt.Sprintf("-tags=%s", tagBuild)},
+		BuildFlags: []string{"-tags=" + tagBuild},
 	}
 	pkgs, err := packages.Load(cfg, ".")
 	if err != nil {
