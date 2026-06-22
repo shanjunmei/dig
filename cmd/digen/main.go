@@ -1666,10 +1666,10 @@ func main() {
 	}
 
 	target, err := findInjectorFunctions(pkg)
-	target.File = *outputFile
 	if err != nil {
 		log.Fatalln(fmt.Errorf("scan target failed: %v", err))
 	}
+	target.File = *outputFile
 
 	nodes, pkgAliasMap, err := extractAndBuildNodes(pkg, target, pkgMap, unusedMode)
 	if err != nil {
