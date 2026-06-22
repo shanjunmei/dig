@@ -1474,12 +1474,19 @@ func generateCode(nodes []Node, pkgName, originFuncName, diPath, diAlias, mainPk
 			usedPkgSet[pkgPath] = true
 		}
 	}
-
 	usedPkgs := Keys(usedPkgSet)
 
+	// 计算 refCount（所有 provider 被引用的次数）
+	refCount := make(map[string]int)
+	for _, node := range nodes {
+		for _, arg := range node.Args {
+			refCount[arg]++
+		}
+	}
+
 	writeImports(buf, mainPkgPath, pkgAliasMap, usedPkgs, diPath, diAlias)
-	writeClosureDefs(buf, nodes)
-	writeMainFunc(buf, nodes, originFuncName, diAlias, unusedMode)
+	writeClosureDefs(buf, nodes, refCount, unusedMode)                       // 传入 refCount 和 unusedMode
+	writeMainFunc(buf, nodes, originFuncName, diAlias, unusedMode, refCount) // 可复用 refCount，避免重复计算
 
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
@@ -1526,10 +1533,21 @@ func writeImports(buf *bytes.Buffer, mainPkgPath string, pkgAliasMap map[string]
 	}
 	buf.WriteString(")\n\n")
 }
-
-func writeClosureDefs(buf *bytes.Buffer, nodes []Node) {
+func writeClosureDefs(buf *bytes.Buffer, nodes []Node, refCount map[string]int, unusedMode UnusedMode) {
 	for _, node := range nodes {
-		if node.IsClosure && node.ClosureDef != "" {
+		if !node.IsClosure || node.ClosureDef == "" {
+			continue
+		}
+		// 判断是否应该输出
+		shouldOutput := true
+		if unusedMode == UnusedModeDrop {
+			// drop 模式：只输出被使用的闭包（有引用或返回 error）
+			if refCount[node.Name] == 0 && !node.HasError {
+				shouldOutput = false
+			}
+		}
+		// 其他模式（ignore, error）均输出（error 模式在检查阶段已阻止生成，此处无影响）
+		if shouldOutput {
 			fmt.Fprintf(buf, "%s\n", node.ClosureDef)
 		}
 	}
@@ -1537,15 +1555,7 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []Node) {
 		buf.WriteString("\n")
 	}
 }
-
-func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName, diAlias string, unusedMode UnusedMode) {
-	refCount := make(map[string]int)
-	for _, node := range nodes {
-		for _, arg := range node.Args {
-			refCount[arg]++
-		}
-	}
-
+func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName, diAlias string, unusedMode UnusedMode, refCount map[string]int) {
 	fmt.Fprintf(buf, "func %s() *%s.App {\n", originFuncName, diAlias)
 	writeProviders(buf, nodes, refCount, unusedMode)
 	fmt.Fprintf(buf, "\treturn %s.New(func(ctx context.Context) error {\n", diAlias)
