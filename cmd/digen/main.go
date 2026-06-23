@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
@@ -1631,6 +1632,7 @@ func debugf(format string, args ...any) {
 // ----------------------------------------------------------------------------
 
 func main() {
+	start := time.Now()
 	outputFile := flag.String("out", "dig_gen.go", "output file name")
 	unusedModeStr := flag.String("unused", "error", "behavior for unused providers: error, ignore, drop")
 	flag.BoolVar(&debugEnabled, "debug", false, "enable debug logging")
@@ -1673,7 +1675,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	debugf("generate success: %s", *outputFile)
+	fmt.Printf("[digen] generate success | output: %s | cost: %s\n", *outputFile, time.Since(start))
 }
 
 func parseUnusedMode(unusedModeStr *string) UnusedMode {
