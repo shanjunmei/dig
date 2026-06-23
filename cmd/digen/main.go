@@ -1539,13 +1539,7 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []Node, refCount map[string]int, 
 			continue
 		}
 		// 判断是否应该输出
-		shouldOutput := true
-		if unusedMode == UnusedModeDrop {
-			// drop 模式：只输出被使用的闭包（有引用或返回 error）
-			if refCount[node.Name] == 0 && !node.HasError {
-				shouldOutput = false
-			}
-		}
+		shouldOutput := shouldKeepProvider(node, refCount, unusedMode)
 		// 其他模式（ignore, error）均输出（error 模式在检查阶段已阻止生成，此处无影响）
 		if shouldOutput {
 			fmt.Fprintf(buf, "%s\n", node.ClosureDef)
@@ -1562,12 +1556,16 @@ func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName, diAlias stri
 	writeInvokes(buf, nodes)
 	buf.WriteString("\t\treturn nil\n\t})\n}\n\n")
 }
-
 func writeProviders(buf *bytes.Buffer, nodes []Node, refCount map[string]int, unusedMode UnusedMode) {
 	for _, node := range nodes {
 		if node.IsInvoke {
 			continue
 		}
+		// 对于 drop 模式，未使用且无 error 的直接跳过
+		if unusedMode == UnusedModeDrop && !shouldKeepProvider(node, refCount, unusedMode) {
+			continue
+		}
+		// 其他情况：如果是未使用且无 error，处理 ignore 或 error
 		if !node.HasError && refCount[node.Name] == 0 {
 			if handleUnusedProvider(buf, node, unusedMode) {
 				continue
@@ -1643,6 +1641,13 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 	} else {
 		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, full, argsStr)
 	}
+}
+func shouldKeepProvider(node Node, refCount map[string]int, unusedMode UnusedMode) bool {
+	if unusedMode != UnusedModeDrop {
+		return true
+	}
+	// drop 模式：只有被使用或返回 error 的才保留
+	return refCount[node.Name] > 0 || node.HasError
 }
 
 // ----------------------------------------------------------------------------
