@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1445,7 +1446,9 @@ func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName
 	usedPkgSet := make(map[string]bool, len(nodes)+2) // +2 for context and dig
 	usedPkgSet["context"] = true
 	usedPkgSet[diPath] = true
-
+	if debugEnabled {
+		usedPkgSet["log"] = true
+	}
 	// 合并循环：同时收集 usedPkgSet 和 refCount（refCount 已由外部传入，此处不重新计算）
 	// 但 usedPkgSet 仍需遍历 nodes
 	for _, node := range nodes {
@@ -1459,6 +1462,9 @@ func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName
 	usedPkgs := Keys(usedPkgSet)
 
 	writeImports(buf, mainPkgPath, pkgAliasMap, usedPkgs)
+	if debugEnabled {
+		buf.WriteString("var Logf = log.Printf\n\n")
+	}
 	writeClosureDefs(buf, nodes, refCount, unusedMode)
 	writeMainFunc(buf, nodes, originFuncName, diAlias, unusedMode, refCount)
 
@@ -1571,8 +1577,25 @@ func writeInvokes(buf *bytes.Buffer, nodes []Node) {
 		}
 		args := buildCallArgs(node)
 		argsStr := strings.Join(args, ", ")
-		stmt := formatCallStmt(funcName, argsStr, node.HasError)
-		buf.WriteString("\t\t" + stmt + "\n")
+
+		// 开始日志（缩进两层，因为位于 dig.New 的闭包内）
+		//Debugf(buf, "\t\tlog.Println(\"[INVOKE] starting: %s\")", funcName)
+		emitLog(buf, "[INVOKE] starting: %s", strconv.Quote(funcName))
+		if node.HasError {
+			// 调用并处理错误：错误分支总是生成 if 块，内部日志由 Debugf 控制
+			fmt.Fprintf(buf, "\t\tif err := %s(%s); err != nil {\n", funcName, argsStr)
+			// 错误日志（仅调试模式）
+			//Debugf(buf, "\t\t\tlog.Printf(\"[INVOKE] failed: %s: %%v\", err)", funcName)
+			emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(funcName), "err")
+			fmt.Fprintf(buf, "\t\t\treturn err\n\t\t}\n")
+		} else {
+			// 无错误，直接调用
+			fmt.Fprintf(buf, "\t\t%s(%s)\n", funcName, argsStr)
+		}
+
+		// 完成日志
+		//	Debugf(buf, "\t\tlog.Println(\"[INVOKE] completed: %s\")", funcName)
+		emitLog(buf, "[INVOKE] completed: %s", strconv.Quote(funcName))
 	}
 }
 
@@ -1606,21 +1629,37 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 		if node.FuncPkg != "" && !strings.HasPrefix(expr, node.FuncPkg+".") {
 			expr = node.FuncPkg + "." + expr
 		}
+		//	Debugf(buf, "\tlog.Println(\"[PROVIDE] starting: supply %s\")", node.RetType)
+		emitLog(buf, "[PROVIDE] starting: supply %s", strconv.Quote(node.RetType))
 		fmt.Fprintf(buf, "\t%s := %s\n", node.Name, expr)
+		//	Debugf(buf, "\tlog.Println(\"[PROVIDE] completed: supply %s\")", node.RetType)
+		emitLog(buf, "[PROVIDE] completed: supply %s", strconv.Quote(node.RetType))
 		return
 	}
 	full := fullFuncName(node.FuncPkg, node.Func)
 	args := buildCallArgs(node)
 	argsStr := strings.Join(args, ", ")
+	//Debugf(buf, "\tlog.Println(\"[PROVIDE] starting: %s\")", full)
+	emitLog(buf, "[PROVIDE] starting: %s", strconv.Quote(full))
+
 	if node.IsClosure {
 		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, node.Func, argsStr)
+		//Debugf(buf, "\tlog.Println(\"[PROVIDE] completed: %s\")", full)
+		emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(full))
 		return
 	}
 	if node.HasError {
-		fmt.Fprintf(buf, "\t%s, err := %s(%s)\n\tif err != nil { panic(err) }\n", node.Name, full, argsStr)
+		fmt.Fprintf(buf, "\t%s, err := %s(%s)\n", node.Name, full, argsStr)
+		// 错误处理块
+		fmt.Fprintf(buf, "\tif err != nil {\n")
+		//	Debugf(buf, "\t\tlog.Printf(\"[PROVIDE] failed: %s: %%v\", err)", full)
+		emitLog(buf, "[PROVIDE] failed: %s: %v", strconv.Quote(full), "err")
+		fmt.Fprintf(buf, "\t\tpanic(err)\n\t}\n")
 	} else {
 		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, full, argsStr)
 	}
+	//	Debugf(buf, "\tlog.Println(\"[PROVIDE] completed: %s\")", full)
+	emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(full))
 }
 
 // ----------------------------------------------------------------------------
@@ -1631,6 +1670,35 @@ func debugf(format string, args ...any) {
 	if debugEnabled {
 		fmt.Printf("[digen]"+format+"\n", args...)
 	}
+}
+
+// Debugf 将格式化的日志语句写入 buf，仅在 debugEnabled 为 true 时生效。
+// 用于生成带有调试日志的应用代码。
+func Debugf(buf *bytes.Buffer, format string, args ...any) {
+	if debugEnabled {
+		fmt.Fprintf(buf, format+"\n", args...)
+	}
+}
+
+// format 中可以包含 %%v 来转义为 %v。
+// emitLog 向 buf 写入一条 Logf 调用，仅在 debugEnabled 时生效。
+// format 是格式字符串，args 是要插入的代码片段（直接原样写入）。
+// 自动在格式串末尾添加 \n 以保证换行。
+func emitLog(buf *bytes.Buffer, format string, args ...string) {
+	if !debugEnabled {
+		return
+	}
+	// 确保格式串以 \n 结尾
+	if !strings.HasSuffix(format, "\n") {
+		format += "\n"
+	}
+	buf.WriteString("Logf(")
+	buf.WriteString(strconv.Quote(format)) // 转义 format 为字符串字面量
+	for _, arg := range args {
+		buf.WriteString(", ")
+		buf.WriteString(arg) // 直接写入代码片段，不转义
+	}
+	buf.WriteString(")\n")
 }
 
 // ----------------------------------------------------------------------------
