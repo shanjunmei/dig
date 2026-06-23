@@ -1169,12 +1169,8 @@ func (e *Extractor) collectUsedPkgsFromBody(body *ast.BlockStmt, pkg *packages.P
 			if obj == nil {
 				return true
 			}
-			if typeName, ok := obj.(*types.TypeName); ok {
-				pkgPathObj := typeName.Pkg()
-				if pkgPathObj == nil {
-					return true
-				}
-				pkgPath := pkgPathObj.Path()
+			if objPkg := obj.Pkg(); objPkg != nil {
+				pkgPath := objPkg.Path()
 				if pkgPath != "" && pkgPath != e.mainPkgPath {
 					usedPkgs[pkgPath] = true
 				}
@@ -1517,6 +1513,11 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []Node, refCount map[string]int, 
 		if !node.IsClosure || node.ClosureDef == "" {
 			continue
 		}
+		// Invoke 闭包始终需要定义
+		if node.IsInvoke {
+			fmt.Fprintf(buf, "%s\n", node.ClosureDef)
+			continue
+		}
 		if shouldGenerateProvider(node, refCount, unusedMode) {
 			fmt.Fprintf(buf, "%s\n", node.ClosureDef)
 		}
@@ -1562,10 +1563,15 @@ func writeInvokes(buf *bytes.Buffer, nodes []Node) {
 		if !node.IsInvoke {
 			continue
 		}
-		full := fullFuncName(node.FuncPkg, node.Func)
+		var funcName string
+		if node.IsClosure {
+			funcName = node.Func // 闭包是生成的全局函数，无包前缀
+		} else {
+			funcName = fullFuncName(node.FuncPkg, node.Func)
+		}
 		args := buildCallArgs(node)
 		argsStr := strings.Join(args, ", ")
-		stmt := formatCallStmt(full, argsStr, node.HasError)
+		stmt := formatCallStmt(funcName, argsStr, node.HasError)
 		buf.WriteString("\t\t" + stmt + "\n")
 	}
 }
