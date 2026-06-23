@@ -452,7 +452,7 @@ func (e *Extractor) extractOptions(expr ast.Expr, curPkg, realPkg *packages.Pack
 			case "Supply":
 				return e.processArgs(call.Args, realPkg, e.handleSupply)
 			case "Module":
-				return e.processArgs(call.Args, curPkg, func(arg ast.Expr, pkg *packages.Package) error {
+				return e.processArgs(call.Args, curPkg, func(arg ast.Expr, _ *packages.Package) error {
 					return e.extractOptions(arg, curPkg, realPkg)
 				})
 			}
@@ -1461,7 +1461,7 @@ func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName
 	}
 	usedPkgs := Keys(usedPkgSet)
 
-	writeImports(buf, mainPkgPath, pkgAliasMap, usedPkgs, diPath, diAlias)
+	writeImports(buf, mainPkgPath, pkgAliasMap, usedPkgs)
 	writeClosureDefs(buf, nodes, refCount, unusedMode)
 	writeMainFunc(buf, nodes, originFuncName, diAlias, unusedMode, refCount)
 
@@ -1481,7 +1481,7 @@ func writeHeader(buf *bytes.Buffer, pkgName string) {
 	fmt.Fprintf(buf, "package %s\n\n", pkgName)
 }
 
-func writeImports(buf *bytes.Buffer, mainPkgPath string, pkgAliasMap map[string]string, usedPkgs []string, diPath, diAlias string) {
+func writeImports(buf *bytes.Buffer, mainPkgPath string, pkgAliasMap map[string]string, usedPkgs []string) {
 	importMap := make(map[string]string)
 	for _, pkgPath := range usedPkgs {
 		if pkgPath == mainPkgPath || pkgPath == "" {
@@ -1614,13 +1614,6 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 	} else {
 		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, full, argsStr)
 	}
-}
-
-func shouldKeepProvider(node Node, refCount map[string]int, unusedMode UnusedMode) bool {
-	if unusedMode != UnusedModeDrop {
-		return true
-	}
-	return refCount[node.Name] > 0 || node.HasError
 }
 
 // ----------------------------------------------------------------------------
