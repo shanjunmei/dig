@@ -32,7 +32,6 @@ const (
 	UnusedModeDrop
 )
 
-// 仅保留 debugEnabled 作为包级变量（未导出），其他配置移至 main 内
 var debugEnabled bool
 
 type GenTarget struct {
@@ -326,7 +325,6 @@ func findBuildCall(fn *ast.FuncDecl, info *types.Info) *ast.CallExpr {
 	return findDigCallInBlock(fn.Body, info, "Build")
 }
 
-// isContextType 判断类型是否为 context.Context
 func isContextType(typ types.Type) bool {
 	return typ.String() == "context.Context"
 }
@@ -335,7 +333,6 @@ func isContextType(typ types.Type) bool {
 // Extractor 方法
 // ----------------------------------------------------------------------------
 
-// NewExtractor 构造并初始化提取器
 func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, unusedMode UnusedMode) *Extractor {
 	e := &Extractor{
 		pkgMap:            pkgMap,
@@ -429,7 +426,6 @@ func (e *Extractor) findSingleModuleCall(body *ast.BlockStmt, info *types.Info, 
 	}
 }
 
-// 通用参数处理函数
 func (e *Extractor) processArgs(args []ast.Expr, pkg *packages.Package, handler func(ast.Expr, *packages.Package) error) error {
 	for _, arg := range args {
 		if err := handler(arg, pkg); err != nil {
@@ -473,7 +469,6 @@ func (e *Extractor) getTypeFullName(typ types.Type) string {
 	return types.TypeString(typ, e.typeQualifier)
 }
 
-// buildArgInfo 构建参数类型和上下文标记（用于普通函数）
 func (e *Extractor) buildArgInfo(sig *types.Signature) (argTypes []string, isContext []bool) {
 	n := sig.Params().Len()
 	argTypes = make([]string, n)
@@ -486,7 +481,6 @@ func (e *Extractor) buildArgInfo(sig *types.Signature) (argTypes []string, isCon
 	return
 }
 
-// 新建 extractedItem 基础字段
 func (e *Extractor) newExtractedItem(funcName string, pkg *packages.Package, alias string, hasErr bool) extractedItem {
 	return extractedItem{
 		FuncName: funcName,
@@ -572,7 +566,6 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 			isContextArg[i] = true
 		}
 	}
-	// 自由变量中可能包含 context，但已在前置检查中禁止，此处无需处理
 	item := e.newExtractedItem(funcName, curPkg, e.collectPkgAlias(curPkg), hasErr)
 	item.ArgTypes = argTypes
 	item.IsInvoke = isInvoke
@@ -777,7 +770,6 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 				return true
 			}
 			seen[ident.Name] = true
-			// 常量不加入自由变量
 			return true
 		}
 
@@ -956,11 +948,6 @@ func (e *Extractor) buildFinalNodes() ([]Node, error) {
 	order = e.reorderInvokes(order, items)
 	varNames := e.assignVarNames(order, items)
 	nodes := e.buildNodes(order, items, varNames)
-	if e.UnusedMode == UnusedModeError {
-		if err := checkUnusedProviders(nodes); err != nil {
-			return nil, err
-		}
-	}
 	return nodes, nil
 }
 
@@ -1057,7 +1044,7 @@ func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) []strin
 	argNames := make([]string, len(it.ArgTypes))
 	for j, argType := range it.ArgTypes {
 		if it.IsContextArg != nil && j < len(it.IsContextArg) && it.IsContextArg[j] {
-			argNames[j] = "" // 占位，生成时替换为 "ctx"
+			argNames[j] = ""
 			continue
 		}
 		provIdx := e.globalProviderMap[argType]
@@ -1076,7 +1063,7 @@ func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) Node {
 	if it.IsClosure {
 		closureDef, usedPkgs, err := e.generateClosureDef(&it)
 		if err != nil {
-			panic(err) // 保留原行为，可考虑返回错误
+			panic(err)
 		}
 		node.ClosureDef = closureDef
 		node.UsedPkgs = usedPkgs
@@ -1427,13 +1414,7 @@ func topologicalSort(n int, adj [][]int, indeg []int) ([]int, error) {
 	return order, nil
 }
 
-func checkUnusedProviders(nodes []Node) error {
-	refCount := make(map[string]int)
-	for _, node := range nodes {
-		for _, arg := range node.Args {
-			refCount[arg]++
-		}
-	}
+func checkUnusedProviders(nodes []Node, refCount map[string]int) error {
 	for _, node := range nodes {
 		if node.IsInvoke {
 			continue
@@ -1453,7 +1434,7 @@ func checkUnusedProviders(nodes []Node) error {
 // 代码生成（拆分）
 // ----------------------------------------------------------------------------
 
-func generateCode(nodes []Node, pkgName, originFuncName, diPath, diAlias, mainPkgPath string, pkgAliasMap map[string]string, unusedMode UnusedMode) string {
+func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName, diPath, diAlias, mainPkgPath string, pkgAliasMap map[string]string, unusedMode UnusedMode) string {
 	mainPkg := pkgName
 	if mainPkg == "" {
 		mainPkg = "main"
@@ -1476,17 +1457,9 @@ func generateCode(nodes []Node, pkgName, originFuncName, diPath, diAlias, mainPk
 	}
 	usedPkgs := Keys(usedPkgSet)
 
-	// 计算 refCount（所有 provider 被引用的次数）
-	refCount := make(map[string]int)
-	for _, node := range nodes {
-		for _, arg := range node.Args {
-			refCount[arg]++
-		}
-	}
-
 	writeImports(buf, mainPkgPath, pkgAliasMap, usedPkgs, diPath, diAlias)
-	writeClosureDefs(buf, nodes, refCount, unusedMode)                       // 传入 refCount 和 unusedMode
-	writeMainFunc(buf, nodes, originFuncName, diAlias, unusedMode, refCount) // 可复用 refCount，避免重复计算
+	writeClosureDefs(buf, nodes, refCount, unusedMode)
+	writeMainFunc(buf, nodes, originFuncName, diAlias, unusedMode, refCount)
 
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
@@ -1533,15 +1506,13 @@ func writeImports(buf *bytes.Buffer, mainPkgPath string, pkgAliasMap map[string]
 	}
 	buf.WriteString(")\n\n")
 }
+
 func writeClosureDefs(buf *bytes.Buffer, nodes []Node, refCount map[string]int, unusedMode UnusedMode) {
 	for _, node := range nodes {
 		if !node.IsClosure || node.ClosureDef == "" {
 			continue
 		}
-		// 判断是否应该输出
-		shouldOutput := shouldKeepProvider(node, refCount, unusedMode)
-		// 其他模式（ignore, error）均输出（error 模式在检查阶段已阻止生成，此处无影响）
-		if shouldOutput {
+		if shouldKeepProvider(node, refCount, unusedMode) {
 			fmt.Fprintf(buf, "%s\n", node.ClosureDef)
 		}
 	}
@@ -1549,6 +1520,7 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []Node, refCount map[string]int, 
 		buf.WriteString("\n")
 	}
 }
+
 func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName, diAlias string, unusedMode UnusedMode, refCount map[string]int) {
 	fmt.Fprintf(buf, "func %s() *%s.App {\n", originFuncName, diAlias)
 	writeProviders(buf, nodes, refCount, unusedMode)
@@ -1556,16 +1528,15 @@ func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName, diAlias stri
 	writeInvokes(buf, nodes)
 	buf.WriteString("\t\treturn nil\n\t})\n}\n\n")
 }
+
 func writeProviders(buf *bytes.Buffer, nodes []Node, refCount map[string]int, unusedMode UnusedMode) {
 	for _, node := range nodes {
 		if node.IsInvoke {
 			continue
 		}
-		// 对于 drop 模式，未使用且无 error 的直接跳过
 		if unusedMode == UnusedModeDrop && !shouldKeepProvider(node, refCount, unusedMode) {
 			continue
 		}
-		// 其他情况：如果是未使用且无 error，处理 ignore 或 error
 		if !node.HasError && refCount[node.Name] == 0 {
 			if handleUnusedProvider(buf, node, unusedMode) {
 				continue
@@ -1642,11 +1613,11 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, full, argsStr)
 	}
 }
+
 func shouldKeepProvider(node Node, refCount map[string]int, unusedMode UnusedMode) bool {
 	if unusedMode != UnusedModeDrop {
 		return true
 	}
-	// drop 模式：只有被使用或返回 error 的才保留
 	return refCount[node.Name] > 0 || node.HasError
 }
 
@@ -1665,7 +1636,6 @@ func debugf(format string, args ...any) {
 // ----------------------------------------------------------------------------
 
 func main() {
-	// 定义局部变量（原包级变量已移除）
 	outputFile := flag.String("out", "dig_gen.go", "output file name")
 	unusedModeStr := flag.String("unused", "error", "behavior for unused providers: error, ignore, drop")
 	flag.BoolVar(&debugEnabled, "debug", false, "enable debug logging")
@@ -1682,14 +1652,29 @@ func main() {
 	if err != nil {
 		log.Fatalln(fmt.Errorf("scan target failed: %v", err))
 	}
-	target.File = *outputFile // 使用局部变量
+	target.File = *outputFile
 
-	nodes, pkgAliasMap, err := extractAndBuildNodes(pkg, target, pkgMap, unusedMode)
+	nodes, pkgAliasMap, err := extractAndBuildNodes(pkg, target, pkgMap)
 	if err != nil {
 		log.Fatalln(fmt.Errorf("extract and build nodes failed: %v", err))
 	}
 
-	if err := writeGeneratedCode(pkg, target, nodes, pkgAliasMap, unusedMode); err != nil {
+	// 计算 refCount（仅一次）
+	refCount := make(map[string]int)
+	for _, node := range nodes {
+		for _, arg := range node.Args {
+			refCount[arg]++
+		}
+	}
+
+	// 错误模式执行未使用检查
+	if unusedMode == UnusedModeError {
+		if err := checkUnusedProviders(nodes, refCount); err != nil {
+			log.Fatalln(err)
+		}
+	}
+
+	if err := writeGeneratedCode(pkg, target, nodes, refCount, pkgAliasMap, unusedMode); err != nil {
 		log.Fatalln(err)
 	}
 
@@ -1748,14 +1733,14 @@ func loadAndValidatePackages() (*packages.Package, map[string]*packages.Package,
 	return mainPkg, pkgMap, nil
 }
 
-func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[string]*packages.Package, unusedMode UnusedMode) ([]Node, map[string]string, error) {
+func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[string]*packages.Package) ([]Node, map[string]string, error) {
 	entryFunc := target.Node
 	buildCall := findBuildCall(entryFunc, pkg.TypesInfo)
 	if buildCall == nil {
 		return nil, nil, fmt.Errorf("no dig.Build call found")
 	}
 
-	extractor := NewExtractor(pkgMap, pkg.PkgPath, unusedMode)
+	extractor := NewExtractor(pkgMap, pkg.PkgPath, UnusedModeIgnore) // UnusedMode 不再用于构建，传默认值
 
 	for _, arg := range buildCall.Args {
 		if err := extractor.extractOptions(arg, pkg, pkg); err != nil {
@@ -1770,7 +1755,7 @@ func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[s
 	return nodes, extractor.pkgAliasMap, nil
 }
 
-func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, pkgAliasMap map[string]string, unusedMode UnusedMode) error {
+func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, refCount map[string]int, pkgAliasMap map[string]string, unusedMode UnusedMode) error {
 	diAlias := ""
 	for _, f := range pkg.Syntax {
 		for _, imp := range f.Imports {
@@ -1798,6 +1783,7 @@ func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, 
 
 	code := generateCode(
 		nodes,
+		refCount,
 		pkg.Name,
 		target.FuncName,
 		diPkgPath,
