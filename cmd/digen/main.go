@@ -1434,6 +1434,7 @@ func checkUnusedProviders(nodes []Node, refCount map[string]int) error {
 // 代码生成（拆分）
 // ----------------------------------------------------------------------------
 
+// generateCode 内部合并循环，预分配 map 容量
 func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName, diPath, diAlias, mainPkgPath string, pkgAliasMap map[string]string, unusedMode UnusedMode) string {
 	mainPkg := pkgName
 	if mainPkg == "" {
@@ -1443,10 +1444,13 @@ func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName
 
 	writeHeader(buf, mainPkg)
 
-	usedPkgSet := make(map[string]bool)
+	// 预分配 map 容量
+	usedPkgSet := make(map[string]bool, len(nodes)+2) // +2 for context and dig
 	usedPkgSet["context"] = true
 	usedPkgSet[diPath] = true
 
+	// 合并循环：同时收集 usedPkgSet 和 refCount（refCount 已由外部传入，此处不重新计算）
+	// 但 usedPkgSet 仍需遍历 nodes
 	for _, node := range nodes {
 		if node.PkgPath != "" && node.PkgPath != mainPkgPath {
 			usedPkgSet[node.PkgPath] = true
@@ -1512,7 +1516,7 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []Node, refCount map[string]int, 
 		if !node.IsClosure || node.ClosureDef == "" {
 			continue
 		}
-		if shouldKeepProvider(node, refCount, unusedMode) {
+		if shouldGenerateProvider(node, refCount, unusedMode) {
 			fmt.Fprintf(buf, "%s\n", node.ClosureDef)
 		}
 	}
@@ -1534,13 +1538,19 @@ func writeProviders(buf *bytes.Buffer, nodes []Node, refCount map[string]int, un
 		if node.IsInvoke {
 			continue
 		}
-		if unusedMode == UnusedModeDrop && !shouldKeepProvider(node, refCount, unusedMode) {
+		if !shouldGenerateProvider(node, refCount, unusedMode) {
 			continue
 		}
+		// 未使用且无 error 的情况，根据 unusedMode 决定是否生成 _ = 语句
 		if !node.HasError && refCount[node.Name] == 0 {
-			if handleUnusedProvider(buf, node, unusedMode) {
+			// 在 error 模式下，不应该走到这里，因为已在检查阶段报错
+			if unusedMode == UnusedModeIgnore {
+				// 生成 _ = 语句，然后继续
+				handleUnusedProvider(buf, node)
 				continue
 			}
+			// drop 模式已被 shouldGenerateProvider 过滤，不会进入此分支
+			// error 模式已在 main 中检查，不会进入生成
 		}
 		writeProviderStatement(buf, node)
 	}
@@ -1566,28 +1576,20 @@ func formatCallStmt(full, argsStr string, hasError bool) string {
 	return fmt.Sprintf("%s(%s)", full, argsStr)
 }
 
-func handleUnusedProvider(buf *bytes.Buffer, node Node, unusedMode UnusedMode) bool {
-	switch unusedMode {
-	case UnusedModeDrop:
-		return true
-	case UnusedModeIgnore:
-		if node.IsSupply {
-			expr := node.Value
-			if node.FuncPkg != "" && !strings.HasPrefix(expr, node.FuncPkg+".") {
-				expr = node.FuncPkg + "." + expr
-			}
-			fmt.Fprintf(buf, "\t_ = %s\n", expr)
-		} else if node.IsClosure {
-			argsStr := strings.Join(node.Args, ", ")
-			fmt.Fprintf(buf, "\t_ = %s(%s)\n", node.Func, argsStr)
-		} else {
-			full := fullFuncName(node.FuncPkg, node.Func)
-			args := strings.Join(node.Args, ", ")
-			fmt.Fprintf(buf, "\t_ = %s(%s)\n", full, args)
+func handleUnusedProvider(buf *bytes.Buffer, node Node) {
+	if node.IsSupply {
+		expr := node.Value
+		if node.FuncPkg != "" && !strings.HasPrefix(expr, node.FuncPkg+".") {
+			expr = node.FuncPkg + "." + expr
 		}
-		return true
-	default:
-		return false
+		fmt.Fprintf(buf, "\t_ = %s\n", expr)
+	} else if node.IsClosure {
+		argsStr := strings.Join(node.Args, ", ")
+		fmt.Fprintf(buf, "\t_ = %s(%s)\n", node.Func, argsStr)
+	} else {
+		full := fullFuncName(node.FuncPkg, node.Func)
+		args := strings.Join(node.Args, ", ")
+		fmt.Fprintf(buf, "\t_ = %s(%s)\n", full, args)
 	}
 }
 
@@ -1754,7 +1756,13 @@ func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[s
 	}
 	return nodes, extractor.pkgAliasMap, nil
 }
-
+func shouldGenerateProvider(node Node, refCount map[string]int, unusedMode UnusedMode) bool {
+	if unusedMode != UnusedModeDrop {
+		return true
+	}
+	// drop 模式：只有被使用或返回 error 的才保留
+	return refCount[node.Name] > 0 || node.HasError
+}
 func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, refCount map[string]int, pkgAliasMap map[string]string, unusedMode UnusedMode) error {
 	diAlias := ""
 	for _, f := range pkg.Syntax {
