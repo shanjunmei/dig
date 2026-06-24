@@ -1641,9 +1641,9 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 		if node.FuncPkg != "" && !strings.HasPrefix(expr, node.FuncPkg+".") {
 			expr = node.FuncPkg + "." + expr
 		}
-		emitLog(buf, "[PROVIDE] starting: supply %s", strconv.Quote(node.RetType))
+		emitLog(buf, "[SUPPLY] starting:  %s", strconv.Quote(node.RetType))
 		fmt.Fprintf(buf, "\t%s := %s\n", node.Name, expr)
-		emitLog(buf, "[PROVIDE] completed: supply %s", strconv.Quote(node.RetType))
+		emitLog(buf, "[SUPPLY] completed:  %s", strconv.Quote(node.RetType))
 		return
 	}
 
