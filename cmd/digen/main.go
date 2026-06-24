@@ -245,6 +245,15 @@ func fullFuncName(pkgAlias, funcName string) string {
 	return pkgAlias + "." + funcName
 }
 
+// shortName 返回用于调用的简短名称（包别名.函数名）
+func shortName(node Node) string {
+	return fullFuncName(node.FuncPkg, node.Func)
+}
+
+// longName 返回用于日志的完整路径（包路径.函数名）
+func longName(node Node) string {
+	return node.PkgPath + "." + node.Func
+}
 func getFuncMeta(expr ast.Expr, curPkg *packages.Package, pkgMap map[string]*packages.Package) (name string, sig *types.Signature, realPkg *packages.Package, err error) {
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
 	if obj == nil {
@@ -1571,9 +1580,9 @@ func writeInvokes(buf *bytes.Buffer, nodes []Node) {
 			continue
 		}
 		// 用于调用的别名形式
-		callName := fullFuncName(node.FuncPkg, node.Func)
+		callName := shortName(node)
 		// 用于日志的完整路径
-		logName := node.PkgPath + "." + node.Func
+		logName := longName(node)
 
 		args := buildCallArgs(node)
 		argsStr := strings.Join(args, ", ")
@@ -1639,9 +1648,9 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 	}
 
 	// 用于调用的别名形式
-	callName := fullFuncName(node.FuncPkg, node.Func)
+	callName := shortName(node)
 	// 用于日志的完整路径
-	logName := node.PkgPath + "." + node.Func
+	logName := longName(node)
 
 	args := buildCallArgs(node)
 	argsStr := strings.Join(args, ", ")
