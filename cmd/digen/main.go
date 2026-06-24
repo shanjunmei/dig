@@ -31,7 +31,6 @@ const (
 	closurePrefixInvoke  = "__i_"
 	closurePrefixProvide = "__p_"
 	defaultDigAlias      = "dig"
-	contextPkgPath       = "context"
 )
 
 type UnusedMode int
@@ -387,13 +386,7 @@ func (e *Extractor) collectAllImportInfos() []importInfo {
 			}
 		}
 	}
-	// 按文件路径排序保证稳定
-	sort.Slice(infos, func(i, j int) bool {
-		if infos[i].filePath != infos[j].filePath {
-			return infos[i].filePath < infos[j].filePath
-		}
-		return infos[i].pkgPath < infos[j].pkgPath
-	})
+
 	return infos
 }
 
@@ -1393,36 +1386,36 @@ func (e *Extractor) replaceFreeVarsInBody(body *ast.BlockStmt, freeVarMap map[st
 func (e *Extractor) collectTypeNameAndUsedPkgs(body *ast.BlockStmt, pkg *packages.Package, usedPkgs map[string]bool) map[string]string {
 	typeNameMap := make(map[string]string)
 	ast.Inspect(body, func(n ast.Node) bool {
-		// 收集类型名（原 collectTypeNameMap 逻辑）
-		if ident, ok := n.(*ast.Ident); ok {
-			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel == ident {
-				return true
-			}
-			obj := pkg.TypesInfo.ObjectOf(ident)
-			if typeName, ok := obj.(*types.TypeName); ok {
-				pkgObj := typeName.Pkg()
-				if pkgObj != nil && pkgObj.Path() != e.mainPkgPath {
-					alias, found := e.pkgAliasMap[pkgObj.Path()]
-					if !found {
-						parts := strings.Split(pkgObj.Path(), "/")
-						alias = parts[len(parts)-1]
-					}
-					typeNameMap[ident.Name] = alias + "." + ident.Name
+		ident, ok := n.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		obj := pkg.TypesInfo.ObjectOf(ident)
+		if obj == nil {
+			return true
+		}
+
+		// 1) 如果是类型名，记录类型别名映射
+		if typeName, ok := obj.(*types.TypeName); ok {
+			pkgObj := typeName.Pkg()
+			if pkgObj != nil && pkgObj.Path() != e.mainPkgPath {
+				alias, found := e.pkgAliasMap[pkgObj.Path()]
+				if !found {
+					parts := strings.Split(pkgObj.Path(), "/")
+					alias = parts[len(parts)-1]
 				}
+				typeNameMap[ident.Name] = alias + "." + ident.Name
 			}
 		}
-		if ident, ok := n.(*ast.Ident); ok {
-			obj := pkg.TypesInfo.ObjectOf(ident)
-			if obj == nil {
-				return true
-			}
-			if objPkg := obj.Pkg(); objPkg != nil {
-				pkgPath := objPkg.Path()
-				if pkgPath != "" && pkgPath != e.mainPkgPath {
-					usedPkgs[pkgPath] = true
-				}
+
+		// 2) 记录该标识符所属的包（用于依赖收集）
+		if objPkg := obj.Pkg(); objPkg != nil {
+			pkgPath := objPkg.Path()
+			if pkgPath != "" && pkgPath != e.mainPkgPath {
+				usedPkgs[pkgPath] = true
 			}
 		}
+
 		return true
 	})
 	return typeNameMap
@@ -1650,19 +1643,27 @@ func writeInvokes(buf *bytes.Buffer, nodes []Node) {
 }
 
 func handleUnusedProvider(buf *bytes.Buffer, node Node) {
+	logName := longName(node)
 	if node.IsSupply {
 		expr := node.Value
 		if node.FuncPkg != "" && !strings.HasPrefix(expr, node.FuncPkg+".") {
 			expr = node.FuncPkg + "." + expr
 		}
+		emitLog(buf, "[SUPPLY] starting: supply %s", strconv.Quote(logName))
 		fmt.Fprintf(buf, "\t_ = %s\n", expr)
+		emitLog(buf, "[SUPPLY] completed:  %s", strconv.Quote(logName))
 	} else if node.IsClosure {
 		argsStr := strings.Join(node.Args, ", ")
+		emitLog(buf, "[PROVIDE] starting: %s", strconv.Quote(logName))
 		fmt.Fprintf(buf, "\t_ = %s(%s)\n", node.Func, argsStr)
+		emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(logName))
 	} else {
 		full := fullFuncName(node.FuncPkg, node.Func)
 		args := strings.Join(node.Args, ", ")
+		emitLog(buf, "[PROVIDE] starting: %s", strconv.Quote(logName))
 		fmt.Fprintf(buf, "\t_ = %s(%s)\n", full, args)
+		emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(logName))
+
 	}
 }
 
