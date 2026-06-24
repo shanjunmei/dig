@@ -1084,6 +1084,7 @@ func (e *Extractor) buildSupplyNode(it extractedItem, name string) Node {
 		Value:    buf.String(),
 		FuncPkg:  it.PkgAlias,
 		PkgPath:  it.Pkg.PkgPath,
+		RetType:  it.RetType,
 	}
 }
 
