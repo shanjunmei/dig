@@ -1570,33 +1570,35 @@ func writeInvokes(buf *bytes.Buffer, nodes []Node) {
 		if !node.IsInvoke {
 			continue
 		}
-		var funcName string
-		if node.IsClosure {
-			funcName = node.Func // 闭包是生成的全局函数，无包前缀
-		} else {
-			funcName = fullFuncName(node.FuncPkg, node.Func)
-		}
+		// 用于调用的别名形式
+		callName := fullFuncName(node.FuncPkg, node.Func)
+		// 用于日志的完整路径
+		logName := node.PkgPath + "." + node.Func
+
 		args := buildCallArgs(node)
 		argsStr := strings.Join(args, ", ")
 
-		// 开始日志（缩进两层，因为位于 dig.New 的闭包内）
-		//Debugf(buf, "\t\tlog.Println(\"[INVOKE] starting: %s\")", funcName)
-		emitLog(buf, "[INVOKE] starting: %s", strconv.Quote(funcName))
-		if node.HasError {
-			// 调用并处理错误：错误分支总是生成 if 块，内部日志由 Debugf 控制
-			fmt.Fprintf(buf, "\t\tif err := %s(%s); err != nil {\n", funcName, argsStr)
-			// 错误日志（仅调试模式）
-			//Debugf(buf, "\t\t\tlog.Printf(\"[INVOKE] failed: %s: %%v\", err)", funcName)
-			emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(funcName), "err")
-			fmt.Fprintf(buf, "\t\t\treturn err\n\t\t}\n")
+		emitLog(buf, "[INVOKE] starting: %s", strconv.Quote(logName))
+
+		if node.IsClosure {
+			if node.HasError {
+				fmt.Fprintf(buf, "\t\tif err := %s(%s); err != nil {\n", node.Func, argsStr)
+				emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), "err")
+				fmt.Fprintf(buf, "\t\t\treturn err\n\t\t}\n")
+			} else {
+				fmt.Fprintf(buf, "\t\t%s(%s)\n", node.Func, argsStr)
+			}
 		} else {
-			// 无错误，直接调用
-			fmt.Fprintf(buf, "\t\t%s(%s)\n", funcName, argsStr)
+			if node.HasError {
+				fmt.Fprintf(buf, "\t\tif err := %s(%s); err != nil {\n", callName, argsStr)
+				emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), "err")
+				fmt.Fprintf(buf, "\t\t\treturn err\n\t\t}\n")
+			} else {
+				fmt.Fprintf(buf, "\t\t%s(%s)\n", callName, argsStr)
+			}
 		}
 
-		// 完成日志
-		//	Debugf(buf, "\t\tlog.Println(\"[INVOKE] completed: %s\")", funcName)
-		emitLog(buf, "[INVOKE] completed: %s", strconv.Quote(funcName))
+		emitLog(buf, "[INVOKE] completed: %s", strconv.Quote(logName))
 	}
 }
 
@@ -1630,37 +1632,40 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 		if node.FuncPkg != "" && !strings.HasPrefix(expr, node.FuncPkg+".") {
 			expr = node.FuncPkg + "." + expr
 		}
-		//	Debugf(buf, "\tlog.Println(\"[PROVIDE] starting: supply %s\")", node.RetType)
 		emitLog(buf, "[PROVIDE] starting: supply %s", strconv.Quote(node.RetType))
 		fmt.Fprintf(buf, "\t%s := %s\n", node.Name, expr)
-		//	Debugf(buf, "\tlog.Println(\"[PROVIDE] completed: supply %s\")", node.RetType)
 		emitLog(buf, "[PROVIDE] completed: supply %s", strconv.Quote(node.RetType))
 		return
 	}
-	full := fullFuncName(node.FuncPkg, node.Func)
+
+	// 用于调用的别名形式
+	callName := fullFuncName(node.FuncPkg, node.Func)
+	// 用于日志的完整路径
+	logName := node.PkgPath + "." + node.Func
+
 	args := buildCallArgs(node)
 	argsStr := strings.Join(args, ", ")
-	//Debugf(buf, "\tlog.Println(\"[PROVIDE] starting: %s\")", full)
-	emitLog(buf, "[PROVIDE] starting: %s", strconv.Quote(full))
+
+	emitLog(buf, "[PROVIDE] starting: %s", strconv.Quote(logName))
 
 	if node.IsClosure {
+		// 闭包调用直接用函数名（无包前缀）
 		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, node.Func, argsStr)
-		//Debugf(buf, "\tlog.Println(\"[PROVIDE] completed: %s\")", full)
-		emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(full))
+		emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(logName))
 		return
 	}
+
+	// 非闭包，使用 callName（包别名 + 函数名）
 	if node.HasError {
-		fmt.Fprintf(buf, "\t%s, err := %s(%s)\n", node.Name, full, argsStr)
-		// 错误处理块
+		fmt.Fprintf(buf, "\t%s, err := %s(%s)\n", node.Name, callName, argsStr)
 		fmt.Fprintf(buf, "\tif err != nil {\n")
-		//	Debugf(buf, "\t\tlog.Printf(\"[PROVIDE] failed: %s: %%v\", err)", full)
-		emitLog(buf, "[PROVIDE] failed: %s: %v", strconv.Quote(full), "err")
+		emitLog(buf, "[PROVIDE] failed: %s: %v", strconv.Quote(logName), "err")
 		fmt.Fprintf(buf, "\t\tpanic(err)\n\t}\n")
 	} else {
-		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, full, argsStr)
+		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, callName, argsStr)
 	}
-	//	Debugf(buf, "\tlog.Println(\"[PROVIDE] completed: %s\")", full)
-	emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(full))
+
+	emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(logName))
 }
 
 // ----------------------------------------------------------------------------
