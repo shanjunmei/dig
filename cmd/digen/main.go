@@ -94,7 +94,6 @@ type Extractor struct {
 	items             []extractedItem
 	globalProviderMap map[string]int
 	pkgAliasMap       map[string]string
-	UnusedMode        UnusedMode
 	importAliasMap    map[string]string
 }
 
@@ -344,14 +343,13 @@ func isContextType(typ types.Type) bool {
 // Extractor 方法
 // ----------------------------------------------------------------------------
 
-func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, unusedMode UnusedMode) *Extractor {
+func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string) *Extractor {
 	e := &Extractor{
 		pkgMap:            pkgMap,
 		mainPkgPath:       mainPkgPath,
 		items:             []extractedItem{},
 		globalProviderMap: make(map[string]int),
 		pkgAliasMap:       make(map[string]string),
-		UnusedMode:        unusedMode,
 		importAliasMap:    make(map[string]string),
 	}
 	e.loadImportAliases()
@@ -1617,13 +1615,6 @@ func writeInvokes(buf *bytes.Buffer, nodes []Node) {
 	}
 }
 
-func formatCallStmt(full, argsStr string, hasError bool) string {
-	if hasError {
-		return fmt.Sprintf("if err := %s(%s); err != nil { return err }", full, argsStr)
-	}
-	return fmt.Sprintf("%s(%s)", full, argsStr)
-}
-
 func handleUnusedProvider(buf *bytes.Buffer, node Node) {
 	if node.IsSupply {
 		expr := node.Value
@@ -1832,7 +1823,7 @@ func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[s
 		return nil, nil, fmt.Errorf("no dig.Build call found")
 	}
 
-	extractor := NewExtractor(pkgMap, pkg.PkgPath, UnusedModeIgnore) // UnusedMode 不再用于构建，传默认值
+	extractor := NewExtractor(pkgMap, pkg.PkgPath) // UnusedMode 不再用于构建，传默认值
 
 	for _, arg := range buildCall.Args {
 		if err := extractor.extractOptions(arg, pkg, pkg); err != nil {
