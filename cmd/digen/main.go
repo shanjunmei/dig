@@ -251,6 +251,9 @@ func shortName(node Node) string {
 
 // longName 返回用于日志的完整路径（包路径.函数名）
 func longName(node Node) string {
+	if node.PkgPath == "" {
+		return node.Func
+	}
 	return node.PkgPath + "." + node.Func
 }
 func getFuncMeta(expr ast.Expr, curPkg *packages.Package, pkgMap map[string]*packages.Package) (name string, sig *types.Signature, realPkg *packages.Package, err error) {
@@ -1870,17 +1873,7 @@ func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, 
 		pkgAliasMap[diPkgPath] = diAlias
 	}
 
-	code := generateCode(
-		nodes,
-		refCount,
-		pkg.Name,
-		target.FuncName,
-		diPkgPath,
-		diAlias,
-		pkg.PkgPath,
-		pkgAliasMap,
-		unusedMode,
-	)
+	code := generateCode(nodes, refCount, pkg.Name, target.FuncName, diPkgPath, diAlias, pkg.PkgPath, pkgAliasMap, unusedMode)
 	if err := os.WriteFile(target.File, []byte(code), 0644); err != nil {
 		return err
 	}
