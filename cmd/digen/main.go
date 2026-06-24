@@ -1437,7 +1437,7 @@ func checkUnusedProviders(nodes []Node, refCount map[string]int) error {
 			continue
 		}
 		if refCount[node.Name] == 0 {
-			funcDesc := fullFuncName(node.FuncPkg, node.Func)
+			funcDesc := longName(node)
 			return fmt.Errorf("unused provider: %s (returns %s)", funcDesc, node.RetType)
 		}
 	}
