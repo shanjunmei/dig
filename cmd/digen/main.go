@@ -1072,6 +1072,7 @@ func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) Node {
 	node.Func = it.FuncName
 	node.FuncPkg = it.PkgAlias
 	if it.IsClosure {
+		node.PkgPath = e.mainPkgPath
 		closureDef, usedPkgs, err := e.generateClosureDef(&it)
 		if err != nil {
 			panic(err)
@@ -1105,6 +1106,7 @@ func (e *Extractor) buildProviderNode(it extractedItem, argNames []string, name 
 	node.Func = it.FuncName
 	node.FuncPkg = it.PkgAlias
 	if it.IsClosure {
+		node.PkgPath = e.mainPkgPath
 		closureDef, usedPkgs, err := e.generateClosureDef(&it)
 		if err != nil {
 			panic(err)
