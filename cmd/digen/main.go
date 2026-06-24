@@ -1239,6 +1239,10 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 	def := e.buildClosureDefString(it.FuncName, paramStr, bodyStr, retType)
 
 	usedList := Keys(usedPkgs)
+	if it.Pkg.PkgPath != e.mainPkgPath {
+		comment := fmt.Sprintf("// original package: %s\n", it.Pkg.PkgPath)
+		def = comment + def
+	}
 	return def, usedList, nil
 }
 
