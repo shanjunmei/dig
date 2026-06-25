@@ -749,7 +749,10 @@ func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error 
 
 func (e *Extractor) collectFreeVarsWithConst(funcLit *ast.FuncLit, curPkg *packages.Package) ([]*ast.Ident, []types.Type, []string, []bool, []string, error) {
 	declSet := e.collectDeclarations(funcLit)
-	freeVars, freeTypes, freeTypeStrs, isConst, litValues := e.collectFreeVarsFromBody(funcLit.Body, curPkg, declSet)
+	freeVars, freeTypes, freeTypeStrs, isConst, litValues, err := e.collectFreeVarsFromBody(funcLit.Body, curPkg, declSet)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
 	if err := e.checkFreeVarVisibility(freeVars, curPkg); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
@@ -811,17 +814,19 @@ func (e *Extractor) collectGenDecls(decl *ast.DeclStmt, declSet map[string]bool)
 	}
 }
 
-func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *packages.Package, declSet map[string]bool) ([]*ast.Ident, []types.Type, []string, []bool, []string) {
+func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *packages.Package, declSet map[string]bool) ([]*ast.Ident, []types.Type, []string, []bool, []string, error) {
 	var freeVars []*ast.Ident
 	var freeTypes []types.Type
 	var freeTypeStrs []string
 	var isConst []bool
 	var litValues []string
 	seen := make(map[string]bool)
+	pkgScope := curPkg.Types.Scope()
 
+	var err error
 	ast.Inspect(body, func(n ast.Node) bool {
 		ident, ok := n.(*ast.Ident)
-		if !ok || ident.Obj != nil {
+		if !ok {
 			return true
 		}
 		obj := curPkg.TypesInfo.ObjectOf(ident)
@@ -832,37 +837,50 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 			return true
 		}
 
-		if cObj, ok := obj.(*types.Const); ok && cObj.Pkg() == nil {
-			return true
-		}
-
-		if _, ok := obj.(*types.Const); ok {
+		// 只对变量和常量进行作用域检查
+		switch o := obj.(type) {
+		case *types.Var:
+			if o.Parent() != pkgScope {
+				if o.Pkg() == nil || o.Parent() == nil {
+					return true
+				}
+				err = fmt.Errorf("cannot capture local variable %q defined in InitApp scope; move it to package level", ident.Name)
+				return false
+			}
+			// 如果是包级变量，加入 freeVars（后续会找 provider）
 			if seen[ident.Name] {
 				return true
 			}
 			seen[ident.Name] = true
+			freeVars = append(freeVars, ident)
+			freeTypes = append(freeTypes, obj.Type())
+			freeTypeStrs = append(freeTypeStrs, e.getTypeFullName(obj.Type()))
+			isConst = append(isConst, false)
+			litValues = append(litValues, "")
 			return true
-		}
 
-		if _, ok := obj.(*types.Var); !ok {
+		case *types.Const:
+			if o.Parent() != pkgScope {
+				if o.Pkg() == nil || o.Parent() == nil {
+					return true
+				}
+				err = fmt.Errorf("cannot capture local constant %q defined in InitApp scope; move it to package level", ident.Name)
+				return false
+			}
+			// 包级常量忽略
 			return true
-		}
 
-		if seen[ident.Name] {
+		default:
+			// 其他对象（函数、类型名等）直接放行
 			return true
 		}
-		seen[ident.Name] = true
-		freeVars = append(freeVars, ident)
-		freeTypes = append(freeTypes, obj.Type())
-		freeTypeStrs = append(freeTypeStrs, e.getTypeFullName(obj.Type()))
-		isConst = append(isConst, false)
-		litValues = append(litValues, "")
-		return true
 	})
 
-	return freeVars, freeTypes, freeTypeStrs, isConst, litValues
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	return freeVars, freeTypes, freeTypeStrs, isConst, litValues, nil
 }
-
 func (e *Extractor) checkFreeVarVisibility(vars []*ast.Ident, curPkg *packages.Package) error {
 	for _, ident := range vars {
 		obj := curPkg.TypesInfo.ObjectOf(ident)
