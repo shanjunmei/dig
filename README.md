@@ -1,265 +1,486 @@
-# dig — Compile-time Code Generation Zero-Reflection DI Container for Go
-[&#20013;&#25991;&#25991;&#26723;](./README_zh.md) | English Docs
+# dig — Compile&#8209;time Dependency Injection for Go
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shanjunmei/dig)](https://goreportcard.com/report/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Core Philosophy
-Compile-time static safety, zero runtime reflection overhead, no runtime magic, fully native Go style.
-All dependency resolution logic is generated into static Go code at build time, runtime only executes plain function calls.
+**dig** is a code&#8209;generation based dependency injection container for Go.  
+It resolves all dependencies at **compile time** and generates plain Go source code – **no reflection**, no runtime magic, just static, native Go.
 
-## Core Advantages
-1. **Zero runtime reflection**
-All dependency assembly logic is generated as static Go source code via `digen` CLI. No runtime type parsing, no reflection performance loss, startup performance equals handwritten initialization code.
+---
 
-2. **Mutually exclusive build tag 3-file isolation (official standard spec)**
-Split project code into 3 independent files with exclusive build tags to eliminate duplicate definition / undefined symbol compile errors:
-- `di.go` Tag `digen`: Only parsed by digen generator, excluded from normal build & run
-- `main.go` No build tag: Shared base types, global variables, business models, entry `main()`, compiled in all scenarios
-- `di_gen.go` Tag `!digen`: Auto-generated runtime entry file, skipped during code generation
+## Why dig?
 
-3. **Strict separation rules for Supply & Provide closures (core constraint)**
-- `dig.Supply`: Natively accepts package-level global runtime variables as type providers
-- Inline `dig.Provide(func() T)` anonymous closure: Only constant literals are allowed as free variables; capturing local variables inside `InitApp()` will trigger generator error, avoid undefined symbol after code split
+- **Zero reflection** – startup performance equals hand&#8209;written initialization code.
+- **Static safety** – missing or circular dependencies are caught during `go generate`, not at runtime.
+- **Minimal API** – only 4 core functions: `Build`, `Provide`, `Supply`, `Invoke`.
+- **Safe closures** – inline `Provide` functions are restricted to constant literals only; capturing outer local variables is forbidden to avoid undefined symbols in generated code.
+- **Built&#8209;in `Supply`** – inject package&#8209;level global variables directly, no verbose wrappers.
+- **Wrapper types** – define lightweight aliases to resolve primitive type injection conflicts.
+- **Built&#8209;in `Invoke`** – all startup/registration logic runs after all providers are ready.
+- **Observability** – optional debug logging with `before/after` markers; `Logf` can be overridden at runtime.
+- **Unused&#8209;provider policies** – choose `error` (default), `ignore`, or `drop`.
+- **No external dependencies** – core library uses only the Go standard library.
+- **Small binary size** – no embedded reflection or framework runtime.
+- **Low learning curve** – just 4 APIs and a few clear constraints.
 
-4. **Wrapper type solves primitive type injection conflict**
-Direct injection of raw `bool`/`string`/`time.Duration` will cause duplicate provider conflicts. Define lightweight alias wrapper types for each business scenario, fully recognized and parsed by digen.
+---
 
-5. **Native Invoke post-start callback**
-Dedicated `dig.Invoke()` API, all callback logic will be scheduled after all Supply & Provider instances are created. Designed for route registration, database initialization, service startup and other boot logic.
+## Installation
 
-6. **Earlier dependency error detection**
-Missing dependencies, circular dependencies, duplicate providers are fully validated during `go generate`; errors are exposed at development time instead of panicking online.
-
-7. **3 configurable unused provider policies**
-Support 3 modes to handle unused constructors via command flag `--unused`:
-- `error`: Generation fails and throws error if unused provider exists (default)
-- `ignore`: Keep unused provider with blank assignment `_ = fn()`
-- `drop`: Remove unused provider code directly from generated file
-
-8. **Minimal external dependencies**
-Core library only relies on Go standard library; digen generator only depends on official `golang.org/x/tools` AST toolkit, no heavy third-party dependencies.
-
-9. **Low learning cost**
-Only 4 core APIs: `dig.Build`, `dig.Provide`, `dig.Supply`, `dig.Invoke`; clear build tag & closure constraints, low entry barrier.
-
-10. Tiny final binary size
-No embedded reflection runtime, no redundant framework logic, compiled binary size is close to handwritten initialization code.
-
-## Mandatory Build Tag Isolation Rules (Must Follow)
-### File Split & Tag Matching Rules
-1. `di.go` (Generator-only init logic, tag `digen`)
-```go
-//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go -unused=drop --tags=digen
-//go:build digen
-// +build digen
-package main
-
-import (
-	"time"
-	"github.com/shanjunmei/dig"
-)
-
-func InitApp() *dig.App {
-	return dig.Build(
-		// Supply accepts global variables defined in main.go
-		dig.Supply(s),
-
-		// Provide closure only uses constant literals, no outer local variable capture
-		dig.Provide(func() EnableCache { return EnableCache(true) }),
-		dig.Provide(func() QueryTimeout { return QueryTimeout(3 * time.Second) }),
-
-		dig.Provide(NewConfig),
-		dig.Provide(func(t QueryTimeout, um UseMySQL, rm EnableCache) any {
-			if um {
-				return NewMySQLStore(t)
-			}
-			return NewRedisStore(rm)
-		}),
-		dig.Provide(NewServer),
-
-		// All boot logic executes after all instances are ready
-		dig.Invoke(func(srv *Server, um UseMySQL, ec EnableCache, t QueryTimeout) {
-			println("service boot complete")
-			println("mysql switch:", bool(um))
-			println("cache enable:", bool(ec))
-			println("query timeout sec:", t.Seconds())
-			_ = srv.Run()
-		}),
-	)
-}
-```
-- Only contains `InitApp()` with full `dig.Build()` chain
-- Only parsed by digen during `go generate`
-- Skipped during normal `go run` / `go build` due to tag mismatch
-
-2. `main.go` (Shared base code, no build tag)
-```go
-package main
-
-import (
-	"context"
-	"time"
-)
-
-// Global runtime variable consumed by dig.Supply
-var s = UseMySQL(true)
-
-// Unique wrapper types to resolve primitive type injection collision
-type UseMySQL bool
-type EnableCache bool
-type QueryTimeout time.Duration
-
-// Business model & constructors
-type Config struct {
-	Addr string
-}
-func NewConfig() *Config {
-	return &Config{Addr: "0.0.0.0:8080"}
-}
-
-type MySQLStore struct{}
-func NewMySQLStore(t QueryTimeout) *MySQLStore {
-	return &MySQLStore{}
-}
-
-type RedisStore struct{}
-func NewRedisStore(c EnableCache) *RedisStore {
-	return &RedisStore{}
-}
-
-type Server struct {
-	store any
-}
-func NewServer(store any) *Server {
-	return &Server{store: store}
-}
-func (s *Server) Run() error { return nil }
-
-func main() {
-	app := InitApp()
-	_ = app.Run(context.Background())
-}
-```
-- All custom wrapper types, business structs, global variables, program entry `main()`
-- Compiled under all build modes, visible to both generator and runtime
-
-3. `di_gen.go` (Auto-generated runtime entry, tag `!digen`)
-```go
-// Code generated by digen; DO NOT EDIT.
-//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go -unused=drop --tags=digen
-//go:build !digen
-// +build !digen
-
-package main
-
-import (
-	"context"
-	"github.com/shanjunmei/dig"
-	"time"
-)
-
-// Auto-split top-level functions generated by digen for closures
-func __p_1() EnableCache {
-	return EnableCache(true)
-}
-func __p_2() QueryTimeout {
-	return QueryTimeout(3 * time.Second)
-}
-func __p_4(t QueryTimeout, um UseMySQL, rm EnableCache) any {
-	if um {
-		return NewMySQLStore(t)
-	}
-	return NewRedisStore(rm)
-}
-func __i_6(srv *Server, um UseMySQL, ec EnableCache, t QueryTimeout) {
-	println("service boot complete")
-	println("mysql switch:", bool(um))
-	println("cache enable:", bool(ec))
-	println("query timeout sec:", t.Seconds())
-	_ = srv.Run()
-}
-
-// Runtime fallback InitApp, only compiled under !digen tag
-func InitApp() *dig.App {
-	v0 := s
-	v1 := __p_1()
-	v2 := __p_2()
-	v4 := __p_4(v2, v0, v1)
-	v5 := NewServer(v4)
-	return dig.New(func(ctx context.Context) error {
-		__i_6(v5, v0, v1, v2)
-		return nil
-	})
-}
-```
-- Automatically overwritten after every `go generate`
-- Provides runtime `InitApp()` implementation for online execution
-- Excluded during code generation due to conflicting `!digen` tag with generator `--tags=digen`
-
-### Consequence of Incorrect Tag Configuration
-Mismatched tags or mixed file logic will trigger fatal compile errors:
-1. Duplicate definition: Two `InitApp()` functions exist in one package
-2. Undefined symbol: Generator cannot resolve base types / global variables
-3. Broken dependency topology parsing inside digen
-
-## Installation Guide
-### 1. Install core library to project
 ```bash
 go get github.com/shanjunmei/dig
-```
-
-### 2. Install digen code generation CLI tool
-```bash
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
-Minimum Go version requirement: Go 1.21+
 
-## Generation & Runtime Commands
+Requires Go 1.21+.
+
+---
+
+## 1. Basic Usage
+
+The simplest way to use **dig** involves two files.
+
+### 1.1 Container Definition (`di.go`)
+
+This file is the **only** file you need to write for the DI wiring. It uses the `//go:build digen` build tag so it is only parsed during code generation.
+
+```go
+//go:build digen
+package main
+
+import (
+    "context"
+    "fmt"
+    "github.com/shanjunmei/dig"
+)
+
+//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go
+
+func InitApp() *dig.App {
+    return dig.Build(
+        // 1) Ordinary function constructors
+        dig.Provide(NewConfig),
+        dig.Provide(NewDB),
+
+        // 2) Provide a value directly (useful for constants or globals)
+        dig.Supply(DefaultTimeout),
+
+        // 3) Provide using an inline closure – acceptable as long as
+        //    it only uses constant literals or supplied globals.
+        dig.Provide(func(timeout Timeout) *Server {
+            // The closure body can be more complex, but must not capture
+            // any local variable from InitApp().
+            return NewServer(timeout)
+        }),
+
+        // 4) Invoke runs after all providers are ready.
+        //    It can return an error which will be propagated to the caller.
+        dig.Invoke(func(srv *Server) error {
+            return srv.Run()
+        }),
+    )
+}
+```
+
+### 1.2 Business Logic (`main.go`)
+
+This file contains all your types, constructors, and the `main()` function. It has **no build tag**.
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+)
+
+// ---------- Config ----------
+type Config struct {
+    Addr string
+}
+
+func NewConfig() (*Config, error) {
+    // In real code, you might read from env/file.
+    return &Config{Addr: ":8080"}, nil
+}
+
+// ---------- DB ----------
+type DB struct {
+    cfg *Config
+}
+
+func NewDB(cfg *Config) (*DB, error) {
+    if cfg == nil {
+        return nil, fmt.Errorf("config cannot be nil")
+    }
+    return &DB{cfg: cfg}, nil
+}
+
+func (db *DB) Ping() error {
+    fmt.Println("DB ping OK")
+    return nil
+}
+
+// ---------- Timeout (wrapper type) ----------
+type Timeout time.Duration
+
+var DefaultTimeout = Timeout(5 * time.Second) // used by dig.Supply
+
+// ---------- Server ----------
+type Server struct {
+    db      *DB
+    timeout Timeout
+}
+
+// NewServer is called by the closure above
+func NewServer(timeout Timeout) *Server {
+    // in reality we'd use timeout to set timeouts
+    return &Server{timeout: timeout}
+}
+
+func (s *Server) Run() error {
+    fmt.Printf("Server running with timeout %v\n", s.timeout)
+    return nil
+}
+
+// ---------- Main ----------
+func main() {
+    app := InitApp() // generated in di_gen.go
+    if err := app.Run(context.Background()); err != nil {
+        fmt.Printf("app failed: %v\n", err)
+    }
+}
+```
+
+### 1.3 Generate and Run
+
 ```bash
-# Generate DI static code
 go generate ./...
-# Directly call digen tool
-digen -out di_gen.go -unused=drop --tags=digen
-
-# Normal compile & run program
 go run .
 ```
 
-## Horizontal Comparison With Mainstream Go DI Frameworks
-| Comparison Item | dig (This Project) | Google Wire | Uber dig (Reflection Runtime) | Uber FX (Reflection Runtime) |
-| ---- | ---- | ---- | ---- | ---- |
-| Require code generation | &#9989; digen CLI tool | &#9989; wire gen | &#10134; No code generation workflow | &#10134; No code generation workflow |
-| Runtime reflection exists | &#10060; Zero, pure static generated code | &#10060; Zero, pure static generated code | &#9989; Heavy runtime reflection | &#9989; Heavy runtime reflection |
-| Full dependency validation at generation time | &#9989; Full link check (missing/circular dependency error at dev stage) | &#9989; Full link check at generate time | &#10134; No generate step, only dynamic runtime check | &#10134; No generate step, only dynamic runtime check |
-| Mutually exclusive build tag 3-file isolation spec | &#9989; Official standard, native adapted by digen | &#9989; Natively support build tag, self-implementable 3-file isolation | &#10134; No code generation, no duplicate InitApp conflict, no need this spec | &#10134; No code generation, no duplicate InitApp conflict, no need this spec |
-| Supply native support for package global runtime variables | &#9989; Top-level `dig.Supply` built-in API, out-of-box | &#9888;&#65039; Global var injection supported, no dedicated Supply syntax, verbose writing | &#10060; No matching API, only constructor parameter injection | &#10060; No matching API, only constructor parameter injection |
-| Provide closure constraint: Only constant literals allowed, forbid capturing outer local variables | &#9989; Tool forced validation, error thrown if capture local variables | &#9888;&#65039; No forced validation, arbitrary free variable capture allowed; risk of undefined symbol after generation | &#10134; Anonymous closure Provide syntax unsupported | &#10134; Anonymous closure Provide syntax unsupported |
-| Wrapper type resolve primitive type injection collision | &#9989; Official recommended standard solution, fully parsed by generator | &#9888;&#65039; Syntactically supported, manual type wrapping required, no auxiliary generator check | &#10060; No built-in differentiation logic, identical primitive types cannot be distinguished | &#10060; No built-in differentiation logic, identical primitive types cannot be distinguished |
-| Native Invoke post-boot callback | &#9989; Built-in `dig.Invoke` API dedicated to route register / service startup | &#9888;&#65039; No native API, massive boilerplate code required for manual encapsulation | &#10060; Independent Invoke callback mechanism missing | &#9989; Full built-in lifecycle system (Start/Hook) |
-| Unused constructor control policy | 3 configurable modes: error / ignore / drop (controllable at generate time) | &#9888;&#65039; Silent drop only, no error alert mode | &#10134; Runtime framework, no generate-time control logic, silent ignore | &#10134; Runtime framework, no generate-time control logic, silent ignore |
-| External dependency count of business core library | Zero, only Go standard library | Zero, only Go standard library | Multiple third-party dependencies | Massive heavy dependencies (log, event bus, full lifecycle components) |
-| Learning curve | Extremely low: only 4 core APIs + clear tag / Supply constraints | Medium: simple base API, verbose closure & global var writing, many hidden pitfalls | Medium: need master type tag & scope rules | High: complex full lifecycle & module layered system |
-| Final compiled binary size | Tiny, no embedded reflection runtime logic | Tiny, no embedded reflection runtime logic | Medium, embedded reflection dispatch code | Largest, built-in log, event bus, full lifecycle components |
+The generator resolves dependencies and produces `di_gen.go`.
 
-### Symbol Annotation Explanation
-1. `&#9989;`: Framework natively provides official standard API/spec, out-of-box, no extra adaptation cost
-2. `&#9888;&#65039;`: Syntactically implementable, but tedious workflow with potential compile/runtime risks, no official simplified solution
-3. `&#10060;`: Framework underlying does not support this capability, no corresponding implementation logic
-4. `&#10134;`: Framework positioned as reflection-based runtime DI, no code generation workflow. This item is exclusive spec for code-generation tools; the framework naturally does not require this capability, not a functional defect.
+---
 
-### Key Correction Description For Comparison Table
-1. Build tag 3-file isolation
-This spec is exclusive engineering standard for code-generation DI tools, used to separate generator parsing source (`digen` tag) and online runtime source (`!digen` tag), avoid duplicate definition of `InitApp()`.
-Google Wire natively supports Go build tag, developers can implement identical 3-file isolation manually.
-Uber dig / FX have no code generation step, no two copies of `InitApp()` to conflict, so this isolation spec is unnecessary. The original table mark "not supported" is misleading and revised.
+## 2. Advanced Usage
 
-2. Runtime framework related items unified semantic adjustment
-All code-generation exclusive features (generate-time validation, 3-file isolation, unused constructor control) are marked `&#10134;` for Uber dig/FX, clarify it's positioning difference rather than function missing.
+### 2.1 Supply – Injecting Existing Values
 
-3. Objective description for Wire Supply & closure capture
-Wire can pass global variables as dependencies, but has no independent top-level Supply function, writing is verbose. Meanwhile Wire has no free variable capture validation; capturing local variables inside InitApp will lead to `undefined` compile error in generated file, the risk mark is retained objectively.
+You've already seen `Supply` in the basic example – it injects a package&#8209;level variable. You can use it for any global, constant, or runtime&#8209;computed value.
 
-4. Invoke capability boundary distinction
-dig's `Invoke` is lightweight post-creation callback without heavy lifecycle overhead; FX provides complete lifecycle hook system. The two design targets are different, only objective description of capability form, no subjective pros and cons judgment.
+```go
+dig.Supply(globalDBConn)
+dig.Supply(apiKey)
+```
+
+### 2.2 Wrapper Types to Resolve Primitive Conflicts
+
+If you need multiple `bool`, `string`, or `time.Duration` values, wrap them in distinct types to avoid duplicate provider errors.
+
+```go
+// main.go
+package main
+
+type UseMySQL bool
+type UseRedis bool
+type QueryTimeout time.Duration
+type DialTimeout time.Duration
+```
+
+In `di.go`:
+```go
+dig.Provide(func() UseMySQL { return UseMySQL(true) }),
+dig.Provide(func() UseRedis { return UseRedis(false) }),
+dig.Provide(func() QueryTimeout { return QueryTimeout(5 * time.Second) }),
+dig.Provide(func() DialTimeout { return DialTimeout(2 * time.Second) }),
+```
+
+The generator sees each wrapper type as unique, so there is no conflict.
+
+### 2.3 Closure Constraint (Critical)
+
+When you write an inline anonymous function inside `dig.Provide`, you **must not** capture variables from the outer scope of `InitApp()`.
+
+&#9989; **Correct** – uses only constant literals:
+```go
+dig.Provide(func() QueryTimeout { return QueryTimeout(5 * time.Second) })
+```
+
+&#10060; **Wrong** – captures a local variable `t`:
+```go
+t := 5 * time.Second
+dig.Provide(func() QueryTimeout { return QueryTimeout(t) })
+// generator error: can't capture local variable 't'
+```
+
+**Why?**  
+The generator extracts the closure body and lifts it into a top&#8209;level function in `di_gen.go`. Local variables from `InitApp()` do not exist in the top&#8209;level scope, causing an "undefined symbol" compile error. By restricting to constants and package&#8209;level globals (which you supply via `dig.Supply`), we guarantee the generated code compiles correctly.
+
+### 2.4 Observability (Debug Logging & Custom Logging)
+
+**Enable debug logging** with the `-debug` flag.
+
+Run the generator:
+```bash
+digen -debug -out di_gen.go
+```
+
+Or add `-debug` to the `//go:generate` directive:
+```go
+//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -debug -out di_gen.go
+```
+
+When enabled, the generated code will insert `Logf` calls like this:
+
+```go
+Logf("[PROVIDE] before: %s\n", "main.NewConfig")
+v0, err := NewConfig()
+if err != nil {
+    Logf("[PROVIDE] failed: %s: %v\n", "main.NewConfig", err)
+    panic(err)
+}
+Logf("[PROVIDE] after: %s\n", "main.NewConfig")
+```
+
+So you'll see runtime output such as:
+
+```
+[PROVIDE] before: main.NewConfig
+[PROVIDE] after:  main.NewConfig
+[PROVIDE] before: main.NewDB
+[PROVIDE] after:  main.NewDB
+[INVOKE]  before: main.(*Server).Run
+[INVOKE]  after:  main.(*Server).Run
+```
+
+**Override `Logf` at runtime** – The generated file declares:
+
+```go
+var Logf = log.Printf
+```
+
+You can override this in your `main.go` before calling `InitApp()`:
+
+```go
+package main
+
+import (
+    "log"
+    "os"
+)
+
+func main() {
+    customLogger := log.New(os.Stdout, "[MYAPP] ", log.LstdFlags|log.Lshortfile)
+    Logf = customLogger.Printf
+
+    app := InitApp()
+    if err := app.Run(context.Background()); err != nil {
+        customLogger.Fatalf("app failed: %v", err)
+    }
+}
+```
+
+**No external dependency** – `Logf` uses standard `log` by default.
+
+### 2.5 Unused Provider Policies
+
+- **`error`** (default) – generation fails if unused providers exist.
+- **`ignore`** – keep unused providers with `_ = fn()`.
+- **`drop`** – remove unused providers entirely.
+
+```bash
+digen -unused=drop -out di_gen.go
+```
+
+### 2.6 Package Alias Strategies
+
+- **`full`** (default) – `addr_handler`, `user_handler`
+- **`short`** – `handler`, `handler2`
+- **`obfuscated`** – `a`, `b`, `c1`
+
+### 2.7 Module&#8209;Style Code Organisation with `dig.Module`
+
+For larger projects, each module defines its own `Module()` function that returns a `dig.Option`. Modules can be **nested** – a module can include other modules, allowing hierarchical organisation.
+
+**Project structure**:
+```
+myapp/
+&#9500;&#9472;&#9472; di.go                         # top-level composition
+&#9500;&#9472;&#9472; main.go
+&#9500;&#9472;&#9472; internal/
+&#9474;   &#9500;&#9472;&#9472; db/
+&#9474;   &#9474;   &#9492;&#9472;&#9472; module.go             # db.Module()
+&#9474;   &#9500;&#9472;&#9472; server/
+&#9474;   &#9474;   &#9492;&#9472;&#9472; module.go             # server.Module() – may include db.Module()
+&#9474;   &#9500;&#9472;&#9472; logger/
+&#9474;   &#9474;   &#9492;&#9472;&#9472; module.go             # logger.Module()
+&#9474;   &#9492;&#9472;&#9472; monitoring/
+&#9474;       &#9492;&#9472;&#9472; module.go             # monitoring.Module() – may include logger.Module()
+&#9492;&#9472;&#9472; pkg/
+    &#9492;&#9472;&#9472; common/
+        &#9492;&#9472;&#9472; timeout.go
+```
+
+**Example: nested modules**
+
+**`internal/db/module.go`**:
+```go
+package db
+
+import "github.com/shanjunmei/dig"
+
+func Module() dig.Option {
+    return dig.Module(
+        dig.Provide(NewConfig),
+        dig.Provide(NewConnection),
+        dig.Invoke(func(db *DB) error { return db.Ping() }),
+    )
+}
+```
+
+**`internal/logger/module.go`**:
+```go
+package logger
+
+import "github.com/shanjunmei/dig"
+
+func Module() dig.Option {
+    return dig.Module(
+        dig.Provide(New),
+        dig.Invoke(Init),
+    )
+}
+```
+
+**`internal/monitoring/module.go`** (nested module):
+```go
+package monitoring
+
+import (
+    "myapp/internal/logger"
+    "github.com/shanjunmei/dig"
+)
+
+func Module() dig.Option {
+    return dig.Module(
+        // Include logger module as a dependency
+        logger.Module(),
+
+        // Monitoring's own providers
+        dig.Provide(NewMetricsCollector),
+        dig.Provide(NewHealthChecker),
+
+        // Monitoring's own invokes
+        dig.Invoke(StartMetricsServer),
+    )
+}
+```
+
+**`internal/server/module.go`** (nested module):
+```go
+package server
+
+import (
+    "myapp/internal/db"
+    "myapp/internal/monitoring"
+    "github.com/shanjunmei/dig"
+)
+
+func Module() dig.Option {
+    return dig.Module(
+        // Include db and monitoring modules
+        db.Module(),
+        monitoring.Module(),
+
+        // Server's own providers
+        dig.Provide(New),
+        dig.Provide(NewRouter),
+
+        // Server's invokes
+        dig.Invoke(RegisterRoutes),
+    )
+}
+```
+
+**`di.go`** – top&#8209;level composition (mixing modules with plain providers):
+```go
+//go:build digen
+package main
+
+import (
+    "myapp/internal/server"
+    "myapp/internal/logger"
+    "myapp/pkg/common"
+    "github.com/shanjunmei/dig"
+)
+
+func InitApp() *dig.App {
+    return dig.Build(
+        // Include the server module – it already includes db, monitoring, etc.
+        server.Module(),
+
+        // Top&#8209;level providers and supplies can be mixed freely
+        dig.Supply(common.DefaultTimeout),
+        dig.Provide(NewGlobalService),
+
+        // Another module can be included here, but be careful:
+        // if it's already included transitively, avoid duplicate inclusion.
+        // The generator will fail if the same provider is registered twice.
+        // In this example, logger.Module() is not included by server.Module(),
+        // so it's safe to add it here.
+        logger.Module(),
+
+        // Top&#8209;level invoke
+        dig.Invoke(StartGlobalWorker),
+    )
+}
+```
+
+**Nesting benefits**:
+- Encapsulates complex dependency hierarchies within modules.
+- Modules can be reused and composed independently.
+- The top&#8209;level `di.go` stays clean even as the project grows.
+
+**Important**: Do not include the same module twice (directly or transitively) – the generator will report a duplicate provider error. Design your module hierarchy so each module is included only once, or use a pattern where the top&#8209;level `di.go` is the single source of truth for module composition.
+
+---
+
+## CLI Flags (Full Reference)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-out` | `di_gen.go` | Output filename |
+| `-unused` | `error` | Behaviour for unused providers: `error`, `ignore`, `drop` |
+| `-debug` | `false` | Enable debug logs in generated code (uses `Logf`) |
+| `-alias` | `full` | Package alias strategy: `short`, `full`, or `obfuscated` |
+
+---
+
+## Comparison with Other DI Tools
+
+| Feature | dig | Google Wire | Uber dig / FX |
+|---------|-----|-------------|---------------|
+| **Approach** | Code generation (compile&#8209;time) | Code generation (compile&#8209;time) | Runtime reflection (no generation) |
+| **Code generation workflow** | &#9989; `digen` CLI | &#9989; `wire` CLI | &#10060; Not applicable |
+| **Zero runtime reflection** | &#9989; | &#9989; | &#10060; |
+| **Dependency validation** | At generation time | At generation time | At runtime |
+| **Dedicated `Supply` API** | &#9989; | &#10060; | &#10060; |
+| **Closure safety enforcement** | &#9989; (capture check) | &#9888;&#65039; (no check) | N/A |
+| **Wrapper type support** | &#9989; | &#9888;&#65039; (manual) | &#10060; |
+| **Built&#8209;in `Invoke`** | &#9989; | &#10060; | &#9989; (lifecycle hooks) |
+| **`dig.Module` composition** | &#9989; (with nesting) | &#10060; | &#9989; (fx.Module) |
+| **Unused provider policies** | 3 modes | only `drop` | N/A |
+| **Built&#8209;in debug logging** | &#9989; (with override) | &#9888;&#65039; (manual) | &#9989; (tracing) |
+| **External dependencies** | none (std only) | none | many |
+| **Generated code size** | Compact | Verbose | N/A |
+| **Generation performance** | Fast (AST rewrite) | Slower (type&#8209;checking) | N/A |
+| **Learning curve** | Low | Medium | High |
+
+---
+
+## License
+
+MIT – see [LICENSE](LICENSE) for details.
