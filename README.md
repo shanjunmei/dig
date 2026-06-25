@@ -1,5 +1,7 @@
 # dig — Compile&#8209;time Dependency Injection for Go
 
+[&#20013;&#25991;&#25991;&#26723;](./README_zh.md) | English
+
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shanjunmei/dig)](https://goreportcard.com/report/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -217,18 +219,22 @@ dig.Provide(func() QueryTimeout { return QueryTimeout(t) })
 ```
 
 **Why?**  
-The generator extracts the closure body and lifts it into a top&#8209;level function in `di_gen.go`. Local variables from `InitApp()` do not exist in the top&#8209;level scope, causing an "undefined symbol" compile error. By restricting to constants and package&#8209;level globals (which you supply via `dig.Supply`), we guarantee the generated code compiles correctly.
+The generator extracts the closure body and lifts it into a top&#8209;level function in `di_gen.go`. This new function is defined at **package level** – it does **not** have access to `InitApp()`'s stack frame. If the closure captures a local variable from `InitApp()`, that variable does not exist in the package scope, causing an "undefined symbol" compile error.
+
+Even if the captured value is a constant, it is still bound to `InitApp`'s scope. Only **constant literals** and **package&#8209;level variables** (which you can supply via `dig.Supply`) are allowed, because they are resolvable at package level.
+
+If you need a value that is computed at runtime, define it as a package&#8209;level variable and `dig.Supply` it.
 
 ### 2.4 Observability (Debug Logging & Custom Logging)
 
 **Enable debug logging** with the `-debug` flag.
 
-Run the generator:
+Run the generator directly:
 ```bash
 digen -debug -out di_gen.go
 ```
 
-Or add `-debug` to the `//go:generate` directive:
+Or add `-debug` to the `//go:generate` directive in `di.go`:
 ```go
 //go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -debug -out di_gen.go
 ```
@@ -245,7 +251,7 @@ if err != nil {
 Logf("[PROVIDE] after: %s\n", "main.NewConfig")
 ```
 
-So you'll see runtime output such as:
+You'll see runtime output such as:
 
 ```
 [PROVIDE] before: main.NewConfig
@@ -306,22 +312,23 @@ digen -unused=drop -out di_gen.go
 For larger projects, each module defines its own `Module()` function that returns a `dig.Option`. Modules can be **nested** – a module can include other modules, allowing hierarchical organisation.
 
 **Project structure**:
+
 ```
 myapp/
-&#9500;&#9472;&#9472; di.go                         # top-level composition
-&#9500;&#9472;&#9472; main.go
-&#9500;&#9472;&#9472; internal/
-&#9474;   &#9500;&#9472;&#9472; db/
-&#9474;   &#9474;   &#9492;&#9472;&#9472; module.go             # db.Module()
-&#9474;   &#9500;&#9472;&#9472; server/
-&#9474;   &#9474;   &#9492;&#9472;&#9472; module.go             # server.Module() – may include db.Module()
-&#9474;   &#9500;&#9472;&#9472; logger/
-&#9474;   &#9474;   &#9492;&#9472;&#9472; module.go             # logger.Module()
-&#9474;   &#9492;&#9472;&#9472; monitoring/
-&#9474;       &#9492;&#9472;&#9472; module.go             # monitoring.Module() – may include logger.Module()
-&#9492;&#9472;&#9472; pkg/
-    &#9492;&#9472;&#9472; common/
-        &#9492;&#9472;&#9472; timeout.go
+|-- di.go                         # top-level composition
+|-- main.go
+|-- internal/
+|   |-- db/
+|   |   `-- module.go             # db.Module()
+|   |-- server/
+|   |   `-- module.go             # server.Module() – may include db.Module()
+|   |-- logger/
+|   |   `-- module.go             # logger.Module()
+|   `-- monitoring/
+|       `-- module.go             # monitoring.Module() – may include logger.Module()
+`-- pkg/
+    `-- common/
+        `-- timeout.go
 ```
 
 **Example: nested modules**
@@ -464,7 +471,7 @@ func InitApp() *dig.App {
 | Feature | dig | Google Wire | Uber dig / FX |
 |---------|-----|-------------|---------------|
 | **Approach** | Code generation (compile&#8209;time) | Code generation (compile&#8209;time) | Runtime reflection (no generation) |
-| **Code generation workflow** | &#9989; `digen` CLI | &#9989; `wire` CLI | &#10060; Not applicable |
+| **Code generation workflow** | &#9989; `digen` CLI | &#9989; `wire` CLI | &#10060; Not applicable (reflection&#8209;based) |
 | **Zero runtime reflection** | &#9989; | &#9989; | &#10060; |
 | **Dependency validation** | At generation time | At generation time | At runtime |
 | **Dedicated `Supply` API** | &#9989; | &#10060; | &#10060; |
@@ -473,10 +480,10 @@ func InitApp() *dig.App {
 | **Built&#8209;in `Invoke`** | &#9989; | &#10060; | &#9989; (lifecycle hooks) |
 | **`dig.Module` composition** | &#9989; (with nesting) | &#10060; | &#9989; (fx.Module) |
 | **Unused provider policies** | 3 modes | only `drop` | N/A |
-| **Built&#8209;in debug logging** | &#9989; (with override) | &#9888;&#65039; (manual) | &#9989; (tracing) |
+| **Built&#8209;in debug logging** | &#9989; (with runtime override) | &#9888;&#65039; (manual) | &#9989; (tracing) |
 | **External dependencies** | none (std only) | none | many |
 | **Generated code size** | Compact | Verbose | N/A |
-| **Generation performance** | Fast (AST rewrite) | Slower (type&#8209;checking) | N/A |
+| **Generation performance** | Fast (AST rewrite) | Slower (full type&#8209;checking) | N/A |
 | **Learning curve** | Low | Medium | High |
 
 ---
