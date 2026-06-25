@@ -5,6 +5,26 @@ import (
 	"strings"
 )
 
+type AliasType string
+
+const (
+	AliasStrategyShort      AliasType = "short"
+	AliasStrategyFull       AliasType = "full"
+	AliasStrategyObfuscated AliasType = "obfuscated"
+)
+
+func (t AliasType) String() string {
+	return string(t)
+}
+
+func ParseAliasType(s string) (AliasType, error) {
+	switch AliasType(s) {
+	case AliasStrategyShort, AliasStrategyFull, AliasStrategyObfuscated:
+		return AliasType(s), nil
+	default:
+		return "", fmt.Errorf("invalid alias type %q, allowed: short, full, obfuscated", s)
+	}
+}
 func replacePkgChars(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r == '.' || r == '-' {
@@ -64,9 +84,13 @@ func (ContextualAliasStrategy) GenerateAlias(pkgPath string, existing map[string
 }
 
 // NewAliasStrategy 工厂函数，根据参数返回对应策略
-func NewAliasStrategy(useSimple bool) AliasStrategy {
-	if useSimple {
+func NewAliasStrategy(strategy AliasType) AliasStrategy {
+	switch strategy {
+	case AliasStrategyShort:
 		return SimpleAliasStrategy{}
+	case AliasStrategyObfuscated:
+		return ObfuscatedAliasStrategy{}
+	default: // full
+		return ContextualAliasStrategy{}
 	}
-	return ContextualAliasStrategy{}
 }

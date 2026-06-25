@@ -1555,9 +1555,9 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []Node, refCount map[string]int, 
 func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName, diAlias string, unusedMode UnusedMode, refCount map[string]int) {
 	fmt.Fprintf(buf, "func %s() *%s.App {\n", originFuncName, diAlias)
 	writeProviders(buf, nodes, refCount, unusedMode)
-	fmt.Fprintf(buf, "\treturn %s.New(func(ctx context.Context) error {\n", diAlias)
+	fmt.Fprintf(buf, "return %s.New(func(ctx context.Context) error {\n", diAlias)
 	writeInvokes(buf, nodes)
-	buf.WriteString("\treturn nil\n})\n}\n\n")
+	buf.WriteString("return nil\n})\n}\n\n")
 }
 
 func writeProviders(buf *bytes.Buffer, nodes []Node, refCount map[string]int, unusedMode UnusedMode) {
@@ -1589,27 +1589,27 @@ func writeInvokes(buf *bytes.Buffer, nodes []Node) {
 		args := buildCallArgs(node)
 		argsStr := strings.Join(args, ", ")
 
-		emitLog(buf, "[INVOKE] starting: %s", strconv.Quote(logName))
+		emitLog(buf, "[INVOKE] before: %s", strconv.Quote(logName))
 
 		if node.IsClosure {
 			if node.HasError {
-				fmt.Fprintf(buf, "\tif err := %s(%s); err != nil {\n", node.Func, argsStr)
+				fmt.Fprintf(buf, "if err := %s(%s); err != nil {\n", node.Func, argsStr)
 				emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), "err")
-				fmt.Fprintf(buf, "\treturn err\n}\n")
+				fmt.Fprintf(buf, "return err\n}\n")
 			} else {
 				fmt.Fprintf(buf, "%s(%s)\n", node.Func, argsStr)
 			}
 		} else {
 			if node.HasError {
-				fmt.Fprintf(buf, "\tif err := %s(%s); err != nil {\n", callName, argsStr)
+				fmt.Fprintf(buf, "if err := %s(%s); err != nil {\n", callName, argsStr)
 				emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), "err")
-				fmt.Fprintf(buf, "\treturn err\n}\n")
+				fmt.Fprintf(buf, "return err\n}\n")
 			} else {
 				fmt.Fprintf(buf, "%s(%s)\n", callName, argsStr)
 			}
 		}
 
-		emitLog(buf, "[INVOKE] completed: %s", strconv.Quote(logName))
+		emitLog(buf, "[INVOKE] after: %s", strconv.Quote(logName))
 	}
 }
 
@@ -1620,20 +1620,20 @@ func handleUnusedProvider(buf *bytes.Buffer, node Node) {
 		if node.FuncPkg != "" && !strings.HasPrefix(expr, node.FuncPkg+".") {
 			expr = node.FuncPkg + "." + expr
 		}
-		emitLog(buf, "[SUPPLY] starting: supply %s", strconv.Quote(logName))
-		fmt.Fprintf(buf, "\t_ = %s\n", expr)
-		emitLog(buf, "[SUPPLY] completed:  %s", strconv.Quote(logName))
+		emitLog(buf, "[SUPPLY] before: supply %s", strconv.Quote(logName))
+		fmt.Fprintf(buf, "_ = %s\n", expr)
+		emitLog(buf, "[SUPPLY] after:  %s", strconv.Quote(logName))
 	} else if node.IsClosure {
 		argsStr := strings.Join(node.Args, ", ")
-		emitLog(buf, "[PROVIDE] starting: %s", strconv.Quote(logName))
-		fmt.Fprintf(buf, "\t_ = %s(%s)\n", node.Func, argsStr)
-		emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(logName))
+		emitLog(buf, "[PROVIDE] before: %s", strconv.Quote(logName))
+		fmt.Fprintf(buf, "_ = %s(%s)\n", node.Func, argsStr)
+		emitLog(buf, "[PROVIDE] after: %s", strconv.Quote(logName))
 	} else {
 		full := fullFuncName(node.FuncPkg, node.Func)
 		args := strings.Join(node.Args, ", ")
-		emitLog(buf, "[PROVIDE] starting: %s", strconv.Quote(logName))
-		fmt.Fprintf(buf, "\t_ = %s(%s)\n", full, args)
-		emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(logName))
+		emitLog(buf, "[PROVIDE] before: %s", strconv.Quote(logName))
+		fmt.Fprintf(buf, "_ = %s(%s)\n", full, args)
+		emitLog(buf, "[PROVIDE] after: %s", strconv.Quote(logName))
 
 	}
 }
@@ -1644,9 +1644,9 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 		if node.FuncPkg != "" && !strings.HasPrefix(expr, node.FuncPkg+".") {
 			expr = node.FuncPkg + "." + expr
 		}
-		emitLog(buf, "[SUPPLY] starting:  %s", strconv.Quote(node.RetType))
+		emitLog(buf, "[SUPPLY] before:  %s", strconv.Quote(node.RetType))
 		fmt.Fprintf(buf, "%s := %s\n", node.Name, expr)
-		emitLog(buf, "[SUPPLY] completed:  %s", strconv.Quote(node.RetType))
+		emitLog(buf, "[SUPPLY] after:  %s", strconv.Quote(node.RetType))
 		return
 	}
 
@@ -1656,24 +1656,24 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 	args := buildCallArgs(node)
 	argsStr := strings.Join(args, ", ")
 
-	emitLog(buf, "[PROVIDE] starting: %s", strconv.Quote(logName))
+	emitLog(buf, "[PROVIDE] before: %s", strconv.Quote(logName))
 
 	if node.IsClosure {
 		fmt.Fprintf(buf, "%s := %s(%s)\n", node.Name, node.Func, argsStr)
-		emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(logName))
+		emitLog(buf, "[PROVIDE] after: %s", strconv.Quote(logName))
 		return
 	}
 
 	if node.HasError {
 		fmt.Fprintf(buf, "%s, err := %s(%s)\n", node.Name, callName, argsStr)
-		fmt.Fprintf(buf, "\tif err != nil {\n")
+		fmt.Fprintf(buf, "if err != nil {\n")
 		emitLog(buf, "[PROVIDE] failed: %s: %v", strconv.Quote(logName), "err")
-		fmt.Fprintf(buf, "\tpanic(err)\n}\n")
+		fmt.Fprintf(buf, "panic(err)\n}\n")
 	} else {
 		fmt.Fprintf(buf, "%s := %s(%s)\n", node.Name, callName, argsStr)
 	}
 
-	emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(logName))
+	emitLog(buf, "[PROVIDE] after: %s", strconv.Quote(logName))
 }
 
 // ----------------------------------------------------------------------------
@@ -1717,17 +1717,14 @@ func main() {
 	outputFile := flag.String("out", "dig_gen.go", "output file name")
 	unusedModeStr := flag.String("unused", "error", "behavior for unused providers: error, ignore, drop")
 	flag.BoolVar(&debugEnabled, "debug", false, "enable debug logging")
-	alias := flag.String("alias", "full", "alias generation style: short or full")
+	alias := flag.String("alias", "full", "alias generation style: short or full, or obfuscated")
 
 	flag.Parse()
 
 	unusedMode := parseUnusedMode(unusedModeStr)
-	var aliasStrategy AliasStrategy
-	if *alias == "short" {
-		aliasStrategy = &SimpleAliasStrategy{}
-	} else {
-		aliasStrategy = &ContextualAliasStrategy{}
-	}
+
+	aliasType, err := ParseAliasType(*alias)
+	aliasStrategy := NewAliasStrategy(aliasType)
 	debugf("alias strategy: %s", *alias)
 	pkg, pkgMap, err := loadAndValidatePackages()
 	if err != nil {
