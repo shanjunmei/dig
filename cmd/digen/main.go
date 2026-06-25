@@ -107,6 +107,7 @@ type Extractor struct {
 	pkgAliasMap       map[string]string
 	importAliasMap    map[string]string
 	typeStrCache      map[types.Type]string // 缓存类型字符串，避免重复解析
+	aliasStrategy     AliasStrategy
 }
 
 // ----------------------------------------------------------------------------
@@ -218,37 +219,6 @@ func checkExportedVisibility(obj types.Object, curPkg *types.Package) error {
 	}
 	return nil
 }
-
-func uniqueAlias(pkgPath string, existing map[string]bool) string {
-	parts := strings.Split(pkgPath, "/")
-	if len(parts) == 0 {
-		return "pkg"
-	}
-	for i := 1; i <= len(parts); i++ {
-		alias := strings.Join(parts[len(parts)-i:], "_")
-		alias = strings.ReplaceAll(alias, ".", "_")
-		alias = strings.ReplaceAll(alias, "-", "_")
-		if len(alias) > 0 && alias[0] >= '0' && alias[0] <= '9' {
-			alias = "_" + alias
-		}
-		if !existing[alias] {
-			return alias
-		}
-	}
-	fullAlias := strings.ReplaceAll(pkgPath, "/", "_")
-	fullAlias = strings.ReplaceAll(fullAlias, ".", "_")
-	fullAlias = strings.ReplaceAll(fullAlias, "-", "_")
-	if !existing[fullAlias] {
-		return fullAlias
-	}
-	for i := 2; ; i++ {
-		candidate := fmt.Sprintf("%s%d", fullAlias, i)
-		if !existing[candidate] {
-			return candidate
-		}
-	}
-}
-
 func fullFuncName(pkgAlias, funcName string) string {
 	if pkgAlias == "" {
 		return funcName
@@ -416,7 +386,7 @@ func (e *Extractor) loadImportAliases() {
 // Extractor 方法
 // ----------------------------------------------------------------------------
 
-func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string) *Extractor {
+func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, strategy AliasStrategy) *Extractor {
 	e := &Extractor{
 		pkgMap:            pkgMap,
 		mainPkgPath:       mainPkgPath,
@@ -425,6 +395,7 @@ func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string) *Extr
 		pkgAliasMap:       make(map[string]string),
 		importAliasMap:    make(map[string]string),
 		typeStrCache:      make(map[types.Type]string),
+		aliasStrategy:     strategy,
 	}
 	e.loadImportAliases()
 	return e
@@ -956,7 +927,7 @@ func (e *Extractor) collectPkgAlias(pkg *packages.Package) string {
 	for _, a := range e.importAliasMap {
 		existing[a] = true
 	}
-	alias := uniqueAlias(pp, existing)
+	alias := e.aliasStrategy.GenerateAlias(pp, existing)
 	if pp != e.mainPkgPath {
 		e.pkgAliasMap[pp] = alias
 	}
@@ -1485,7 +1456,7 @@ func checkUnusedProviders(nodes []Node, refCount map[string]int) error {
 // 代码生成（拆分）
 // ----------------------------------------------------------------------------
 
-func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName, diPath, diAlias, mainPkgPath string, pkgAliasMap map[string]string, unusedMode UnusedMode) string {
+func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName, diPath, diAlias, mainPkgPath string, pkgAliasMap map[string]string, unusedMode UnusedMode) (string, error) {
 	mainPkg := pkgName
 	if mainPkg == "" {
 		mainPkg = "main"
@@ -1519,10 +1490,10 @@ func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName
 
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
-		debugf("warning: failed to format generated code: %v; writing unformatted", err)
-		return buf.String()
+		return "", fmt.Errorf("formatting generated code failed: %w\nraw code:\n%s", err, buf.String())
+
 	}
-	return string(formatted)
+	return string(formatted), nil
 }
 
 func writeHeader(buf *bytes.Buffer, pkgName string) {
@@ -1555,9 +1526,9 @@ func writeImports(buf *bytes.Buffer, mainPkgPath string, pkgAliasMap map[string]
 		parts := strings.Split(path, "/")
 		defaultName := parts[len(parts)-1]
 		if alias == defaultName {
-			fmt.Fprintf(buf, "\t%q\n", path)
+			fmt.Fprintf(buf, "%q\n", path)
 		} else {
-			fmt.Fprintf(buf, "\t%s %q\n", alias, path)
+			fmt.Fprintf(buf, "%s %q\n", alias, path)
 		}
 	}
 	buf.WriteString(")\n\n")
@@ -1586,7 +1557,7 @@ func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName, diAlias stri
 	writeProviders(buf, nodes, refCount, unusedMode)
 	fmt.Fprintf(buf, "\treturn %s.New(func(ctx context.Context) error {\n", diAlias)
 	writeInvokes(buf, nodes)
-	buf.WriteString("\t\treturn nil\n\t})\n}\n\n")
+	buf.WriteString("\treturn nil\n})\n}\n\n")
 }
 
 func writeProviders(buf *bytes.Buffer, nodes []Node, refCount map[string]int, unusedMode UnusedMode) {
@@ -1622,19 +1593,19 @@ func writeInvokes(buf *bytes.Buffer, nodes []Node) {
 
 		if node.IsClosure {
 			if node.HasError {
-				fmt.Fprintf(buf, "\t\tif err := %s(%s); err != nil {\n", node.Func, argsStr)
+				fmt.Fprintf(buf, "\tif err := %s(%s); err != nil {\n", node.Func, argsStr)
 				emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), "err")
-				fmt.Fprintf(buf, "\t\t\treturn err\n\t\t}\n")
+				fmt.Fprintf(buf, "\treturn err\n}\n")
 			} else {
-				fmt.Fprintf(buf, "\t\t%s(%s)\n", node.Func, argsStr)
+				fmt.Fprintf(buf, "%s(%s)\n", node.Func, argsStr)
 			}
 		} else {
 			if node.HasError {
-				fmt.Fprintf(buf, "\t\tif err := %s(%s); err != nil {\n", callName, argsStr)
+				fmt.Fprintf(buf, "\tif err := %s(%s); err != nil {\n", callName, argsStr)
 				emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), "err")
-				fmt.Fprintf(buf, "\t\t\treturn err\n\t\t}\n")
+				fmt.Fprintf(buf, "\treturn err\n}\n")
 			} else {
-				fmt.Fprintf(buf, "\t\t%s(%s)\n", callName, argsStr)
+				fmt.Fprintf(buf, "%s(%s)\n", callName, argsStr)
 			}
 		}
 
@@ -1674,7 +1645,7 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 			expr = node.FuncPkg + "." + expr
 		}
 		emitLog(buf, "[SUPPLY] starting:  %s", strconv.Quote(node.RetType))
-		fmt.Fprintf(buf, "\t%s := %s\n", node.Name, expr)
+		fmt.Fprintf(buf, "%s := %s\n", node.Name, expr)
 		emitLog(buf, "[SUPPLY] completed:  %s", strconv.Quote(node.RetType))
 		return
 	}
@@ -1688,18 +1659,18 @@ func writeProviderStatement(buf *bytes.Buffer, node Node) {
 	emitLog(buf, "[PROVIDE] starting: %s", strconv.Quote(logName))
 
 	if node.IsClosure {
-		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, node.Func, argsStr)
+		fmt.Fprintf(buf, "%s := %s(%s)\n", node.Name, node.Func, argsStr)
 		emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(logName))
 		return
 	}
 
 	if node.HasError {
-		fmt.Fprintf(buf, "\t%s, err := %s(%s)\n", node.Name, callName, argsStr)
+		fmt.Fprintf(buf, "%s, err := %s(%s)\n", node.Name, callName, argsStr)
 		fmt.Fprintf(buf, "\tif err != nil {\n")
 		emitLog(buf, "[PROVIDE] failed: %s: %v", strconv.Quote(logName), "err")
-		fmt.Fprintf(buf, "\t\tpanic(err)\n\t}\n")
+		fmt.Fprintf(buf, "\tpanic(err)\n}\n")
 	} else {
-		fmt.Fprintf(buf, "\t%s := %s(%s)\n", node.Name, callName, argsStr)
+		fmt.Fprintf(buf, "%s := %s(%s)\n", node.Name, callName, argsStr)
 	}
 
 	emitLog(buf, "[PROVIDE] completed: %s", strconv.Quote(logName))
@@ -1746,10 +1717,18 @@ func main() {
 	outputFile := flag.String("out", "dig_gen.go", "output file name")
 	unusedModeStr := flag.String("unused", "error", "behavior for unused providers: error, ignore, drop")
 	flag.BoolVar(&debugEnabled, "debug", false, "enable debug logging")
+	alias := flag.String("alias", "full", "alias generation style: short or full")
+
 	flag.Parse()
 
 	unusedMode := parseUnusedMode(unusedModeStr)
-
+	var aliasStrategy AliasStrategy
+	if *alias == "short" {
+		aliasStrategy = &SimpleAliasStrategy{}
+	} else {
+		aliasStrategy = &ContextualAliasStrategy{}
+	}
+	debugf("alias strategy: %s", *alias)
 	pkg, pkgMap, err := loadAndValidatePackages()
 	if err != nil {
 		log.Fatalln(err)
@@ -1761,7 +1740,7 @@ func main() {
 	}
 	target.File = *outputFile
 
-	nodes, pkgAliasMap, err := extractAndBuildNodes(pkg, target, pkgMap)
+	nodes, pkgAliasMap, err := extractAndBuildNodes(pkg, target, pkgMap, aliasStrategy)
 	if err != nil {
 		log.Fatalln(fmt.Errorf("extract and build nodes failed: %v", err))
 	}
@@ -1838,14 +1817,14 @@ func loadAndValidatePackages() (*packages.Package, map[string]*packages.Package,
 	return mainPkg, pkgMap, nil
 }
 
-func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[string]*packages.Package) ([]Node, map[string]string, error) {
+func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[string]*packages.Package, strategy AliasStrategy) ([]Node, map[string]string, error) {
 	entryFunc := target.Node
 	buildCall := findBuildCall(entryFunc, pkg.TypesInfo)
 	if buildCall == nil {
 		return nil, nil, fmt.Errorf("no dig.Build call found")
 	}
 
-	extractor := NewExtractor(pkgMap, pkg.PkgPath)
+	extractor := NewExtractor(pkgMap, pkg.PkgPath, strategy)
 
 	for _, arg := range buildCall.Args {
 		if err := extractor.extractOptions(arg, pkg, pkg); err != nil {
@@ -1893,7 +1872,10 @@ func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, 
 		pkgAliasMap[diPkgPath] = diAlias
 	}
 
-	code := generateCode(nodes, refCount, pkg.Name, target.FuncName, diPkgPath, diAlias, pkg.PkgPath, pkgAliasMap, unusedMode)
+	code, err := generateCode(nodes, refCount, pkg.Name, target.FuncName, diPkgPath, diAlias, pkg.PkgPath, pkgAliasMap, unusedMode)
+	if err != nil {
+		return err
+	}
 	if err := os.WriteFile(target.File, []byte(code), 0644); err != nil {
 		return err
 	}
