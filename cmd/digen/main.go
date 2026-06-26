@@ -31,7 +31,6 @@ const (
 	tagBuild             = "digen"
 	closurePrefixInvoke  = "__i_"
 	closurePrefixProvide = "__p_"
-	defaultDigAlias      = "dig"
 )
 
 type UnusedMode int
@@ -138,8 +137,7 @@ func findDigCallInBlock(block *ast.BlockStmt, info *types.Info, methodName strin
 
 func findInjectorFunctions(pkg *packages.Package) (*GenTarget, error) {
 	var targets []GenTarget
-	for idx, f := range pkg.Syntax {
-		currentFile := pkg.GoFiles[idx]
+	for _, f := range pkg.Syntax {
 		for _, decl := range f.Decls {
 			fnDecl, ok := decl.(*ast.FuncDecl)
 			if !ok || fnDecl.Body == nil {
@@ -154,7 +152,6 @@ func findInjectorFunctions(pkg *packages.Package) (*GenTarget, error) {
 			targets = append(targets, GenTarget{
 				FuncName: fnDecl.Name.Name,
 				Node:     fnDecl,
-				File:     currentFile,
 			})
 		}
 	}
@@ -1488,7 +1485,7 @@ func checkUnusedProviders(nodes []Node, refCount map[string]int) error {
 // 代码生成（拆分）
 // ----------------------------------------------------------------------------
 
-func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName, diAlias, mainPkgPath string, pkgAliasMap map[string]string, unusedMode UnusedMode) (string, error) {
+func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName, mainPkgPath string, pkgAliasMap map[string]string, unusedMode UnusedMode) (string, error) {
 	mainPkg := pkgName
 	if mainPkg == "" {
 		mainPkg = "main"
@@ -1497,9 +1494,8 @@ func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName
 
 	writeHeader(buf, mainPkg)
 
-	usedPkgSet := make(map[string]bool, len(nodes)+2) // +2 for context and dig
+	usedPkgSet := make(map[string]bool, len(nodes)+1) // +1 for context
 	usedPkgSet["context"] = true
-	//	usedPkgSet[diPath] = true
 	if debugEnabled {
 		usedPkgSet["log"] = true
 	}
@@ -1519,7 +1515,7 @@ func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName
 	}
 
 	writeClosureDefs(buf, nodes, refCount, unusedMode)
-	writeMainFunc(buf, nodes, originFuncName, diAlias, unusedMode, refCount)
+	writeMainFunc(buf, nodes, originFuncName, unusedMode, refCount)
 
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
@@ -1584,7 +1580,7 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []Node, refCount map[string]int, 
 		buf.WriteString("\n")
 	}
 }
-func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName, diAlias string, unusedMode UnusedMode, refCount map[string]int) {
+func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName, unusedMode UnusedMode, refCount map[string]int) {
 	// 生成函数签名：func Init() func(context.Context) error
 	fmt.Fprintf(buf, "func %s() func(context.Context) error {\n", originFuncName)
 	writeProviders(buf, nodes, refCount, unusedMode)
@@ -1878,32 +1874,7 @@ func shouldGenerateProvider(node Node, refCount map[string]int, unusedMode Unuse
 }
 
 func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, refCount map[string]int, pkgAliasMap map[string]string, unusedMode UnusedMode) error {
-	diAlias := ""
-	for _, f := range pkg.Syntax {
-		for _, imp := range f.Imports {
-			path := strings.Trim(imp.Path.Value, `"`)
-			if path == diPkgPath {
-				if imp.Name != nil {
-					diAlias = imp.Name.Name
-				} else {
-					parts := strings.Split(path, "/")
-					diAlias = parts[len(parts)-1]
-				}
-				break
-			}
-		}
-		if diAlias != "" {
-			break
-		}
-	}
-	if diAlias == "" {
-		diAlias = defaultDigAlias
-	}
-	if _, ok := pkgAliasMap[diPkgPath]; !ok {
-		pkgAliasMap[diPkgPath] = diAlias
-	}
-
-	code, err := generateCode(nodes, refCount, pkg.Name, target.FuncName, diAlias, pkg.PkgPath, pkgAliasMap, unusedMode)
+	code, err := generateCode(nodes, refCount, pkg.Name, target.FuncName, pkg.PkgPath, pkgAliasMap, unusedMode)
 	if err != nil {
 		return err
 	}
