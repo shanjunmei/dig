@@ -156,12 +156,29 @@ func main() {
 
 ### 1.3 生成并运行
 
+有两种方式调用生成器：
+
+```bash
+# 只生成当前包（默认）
+digen
+
+# 递归生成所有子包
+digen ./...
+```
+
+或通过 `go generate`（如果你的 `di.go` 中包含 `//go:generate` 指令）：
+
 ```bash
 go generate ./...
+```
+
+生成后，构建并运行你的应用：
+
+```bash
 go run .
 ```
 
-生成器会解析依赖图并生成 `di_gen.go` – 一个完全自包含的文件，运行时不再依赖 `dig` 包。
+生成器会在每个包含 `dig.Build` 调用的包目录下输出 `dig_gen.go`。每个生成的文件都是自包含的，运行时不再依赖 `dig` 包。
 
 ---
 
@@ -550,6 +567,8 @@ func InitApp() func(context.Context) error {
 | `-unused` | `error` | 未使用 Provider 的处理方式：`error`、`ignore`、`drop` |
 | `-debug` | `false` | 在生成代码中启用调试日志（使用 `Logf`） |
 | `-alias` | `full` | 包别名策略：`short`、`full` 或 `obfuscated` |
+
+> **注意**：当 `digen` 使用 `./...`（多包模式）时，`-out` 参数会被忽略，每个包目录下统一使用 `dig_gen.go`。
 
 ---
 

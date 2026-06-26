@@ -2,7 +2,7 @@
 
 [中文文档](./README_zh.md) | English
 
-[![Go Reference](https://pkg.go.dev/badge/github.comshan Junmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
+[![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shanjunmei/dig)](https://goreportcard.com/report/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -157,12 +157,29 @@ func main() {
 
 ### 1.3 Generate and Run
 
+There are two ways to invoke the generator:
+
+```bash
+# Generate only the current package (default)
+digen
+
+# Generate for all sub‑packages recursively
+digen ./...
+```
+
+Or via `go generate` (if your `di.go` contains a `//go:generate` directive):
+
 ```bash
 go generate ./...
+```
+
+After generation, build and run your application:
+
+```bash
 go run .
 ```
 
-The generator resolves dependencies and produces `di_gen.go` – a completely self‑contained file with no runtime dependency on the `dig` package.
+The generator outputs `dig_gen.go` in each package directory that contains a `dig.Build` call. Each generated file is self‑contained with no runtime dependency on the `dig` package.
 
 ---
 
@@ -551,6 +568,8 @@ func InitApp() func(context.Context) error {
 | `-unused` | `error` | Behaviour for unused providers: `error`, `ignore`, `drop` |
 | `-debug` | `false` | Enable debug logs in generated code (uses `Logf`) |
 | `-alias` | `full` | Package alias strategy: `short`, `full`, or `obfuscated` |
+
+> **Note:** When `digen` is invoked with `./...` (multi‑package mode), the `-out` flag is ignored and `dig_gen.go` is used in each package directory.
 
 ---
 
