@@ -6,6 +6,11 @@ English | [中文文档](./README_zh.md)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shanjunmei/dig)](https://goreportcard.com/report/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+> **📢 版本说明**
+> - **v1.0.4** – 最后一个保留 `*dig.App` 结构体的版本
+> - **v2.0.0** – `InitApp()` 返回 `func(context.Context) error`
+> 迁移指南见 [从 v1.x 升级](#从-v1x-升级)。
+
 **dig** 是一个基于代码生成的 Go 依赖注入容器。  
 它在**编译时**完成所有依赖解析，生成纯 Go 源代码 – **无反射**、无运行时魔法，纯粹的原生 Go 风格。
 
@@ -21,7 +26,7 @@ English | [中文文档](./README_zh.md)
 - **内置 `Invoke`** – 所有启动/注册逻辑在所有 Provider 就绪后执行。
 - **可观测性** – 可选的调试日志，带 `before/after` 标记；`Logf` 可在运行时覆盖。
 - **未使用 Provider 策略** – 可选择 `error`（默认）、`ignore` 或 `drop`。
-- **无外部依赖** – 核心库仅使用 Go 标准库。
+- **零运行时依赖** – 生成的代码在运行时不再导入 `dig` 包。
 - **二进制体积小** – 无内嵌反射或框架运行时。
 - **学习曲线低** – 仅 4 个 API 和几条清晰的约束。
 
@@ -30,7 +35,7 @@ English | [中文文档](./README_zh.md)
 ## 安装
 
 ```bash
-go get github.com/shanjunmei/dig
+go get github.com/shanjunmei/dig@v2.0.0
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 
@@ -58,7 +63,7 @@ import (
 
 //go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go
 
-func InitApp() *dig.App {
+func InitApp() func(context.Context) error {
     return dig.Build(
         // 1) 普通函数构造函数
         dig.Provide(NewConfig),
@@ -142,8 +147,8 @@ func (s *Server) Run() error {
 
 // ---------- Main ----------
 func main() {
-    app := InitApp()
-    if err := app.Run(context.Background()); err != nil {
+    run := InitApp()
+    if err := run(context.Background()); err != nil {
         fmt.Printf("app failed: %v\n", err)
     }
 }
@@ -156,7 +161,7 @@ go generate ./...
 go run .
 ```
 
-生成器会解析依赖图并生成 `di_gen.go`。
+生成器会解析依赖图并生成 `di_gen.go` – 一个完全自包含的文件，运行时不再依赖 `dig` 包。
 
 ---
 
@@ -278,7 +283,7 @@ func Module() dig.Option { return dig.Module(dig.Provide(NewNoop), dig.Invoke(St
 
 然后在 `di.go` 中：
 ```go
-func InitApp() *dig.App {
+func InitApp() func(context.Context) error {
     return dig.Build(
         mod.Module(), // 构建标签决定编译哪个文件
     )
@@ -385,8 +390,8 @@ func main() {
     customLogger := log.New(os.Stdout, "[MYAPP] ", log.LstdFlags|log.Lshortfile)
     Logf = customLogger.Printf
 
-    app := InitApp()
-    if err := app.Run(context.Background()); err != nil {
+    run := InitApp()
+    if err := run(context.Background()); err != nil {
         customLogger.Fatalf("app failed: %v", err)
     }
 }
@@ -517,7 +522,7 @@ import (
     "github.com/shanjunmei/dig"
 )
 
-func InitApp() *dig.App {
+func InitApp() func(context.Context) error {
     return dig.Build(
         server.Module(),
         dig.Supply(common.DefaultTimeout),
@@ -548,13 +553,46 @@ func InitApp() *dig.App {
 
 ---
 
+## 从 v1.x 升级
+
+在 v1.x（最高 v1.0.4）中，`InitApp()` 返回 `*dig.App`，包含 `Run` 方法：
+
+```go
+app := InitApp()
+if err := app.Run(context.Background()); err != nil {
+    log.Fatal(err)
+}
+```
+
+在 **v2.0.0** 中，`InitApp()` 直接返回 `func(context.Context) error`：
+
+```go
+run := InitApp()
+if err := run(context.Background()); err != nil {
+    log.Fatal(err)
+}
+```
+
+**迁移步骤：**
+
+1. 将 `app.Run(ctx)` 改为 `run(ctx)`，其中 `run := InitApp()`
+2. 移除代码中所有对 `dig.App` 类型的引用
+3. 更新 `di.go` 中的函数签名：`func InitApp() *dig.App` → `func InitApp() func(context.Context) error`
+4. 运行 `go generate` 重新生成 `di_gen.go`
+5. 运行 `go mod tidy` 更新依赖
+
+**为什么做这个改动？** – 从 v2.0.0 开始，生成的代码在运行时不再导入 `dig` 包。这彻底消除了运行时依赖，带来更小的二进制体积和零反射开销。
+
+---
+
 ## 与其他 DI 工具的对比
 
 | 特性 | dig | Google Wire | Uber dig / FX |
 |------|-----|-------------|---------------|
 | **方式** | 代码生成（编译时） | 代码生成（编译时） | 运行时反射（无生成） |
-| **代码生成工作流** | ✅ `digen` CLI | ✅ `wire` CLI | ❌ 不适用（基于反射） |
+| **代码生成工作流** | ✅ `digen` CLI | ✅ `wire` CLI | ❌ 不适用 |
 | **零运行时反射** | ✅ | ✅ | ❌ |
+| **零运行时依赖** | ✅ | ✅ | ❌ |
 | **依赖校验** | 生成时 | 生成时 | 运行时 |
 | **专用 `Supply` API** | ✅ | ❌ | ❌ |
 | **闭包安全强制** | ✅（捕获检查） | ⚠️（无检查） | N/A |

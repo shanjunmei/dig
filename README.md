@@ -2,9 +2,14 @@
 
 [中文文档](./README_zh.md) | English
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
+[![Go Reference](https://pkg.go.dev/badge/github.comshan Junmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shanjunmei/dig)](https://goreportcard.com/report/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+> **📢 Version Note**
+> - **v1.0.4** – last release with `*dig.App` struct
+> - **v2.0.0** – `InitApp()` returns `func(context.Context) error`
+> See [Upgrading from v1.x](#upgrading-from-v1x) for migration instructions.
 
 **dig** is a code‑generation based dependency injection container for Go.  
 It resolves all dependencies at **compile time** and generates plain Go source code – **no reflection**, no runtime magic, just static, native Go.
@@ -21,7 +26,7 @@ It resolves all dependencies at **compile time** and generates plain Go source c
 - **Built‑in `Invoke`** – all startup/registration logic runs after all providers are ready.
 - **Observability** – optional debug logging with `before/after` markers; `Logf` can be overridden at runtime.
 - **Unused‑provider policies** – choose `error` (default), `ignore`, or `drop`.
-- **No external dependencies** – core library uses only the Go standard library.
+- **Zero runtime dependency** – generated code does not import the `dig` package at runtime.
 - **Small binary size** – no embedded reflection or framework runtime.
 - **Low learning curve** – just 4 APIs and a few clear constraints.
 
@@ -30,7 +35,7 @@ It resolves all dependencies at **compile time** and generates plain Go source c
 ## Installation
 
 ```bash
-go get github.com/shanjunmei/dig
+go get github.com/shanjunmei/dig@v2.0.0
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 
@@ -58,7 +63,7 @@ import (
 
 //go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go
 
-func InitApp() *dig.App {
+func InitApp() func(context.Context) error {
     return dig.Build(
         // 1) Ordinary function constructors
         dig.Provide(NewConfig),
@@ -143,8 +148,8 @@ func (s *Server) Run() error {
 
 // ---------- Main ----------
 func main() {
-    app := InitApp()
-    if err := app.Run(context.Background()); err != nil {
+    run := InitApp()
+    if err := run(context.Background()); err != nil {
         fmt.Printf("app failed: %v\n", err)
     }
 }
@@ -157,7 +162,7 @@ go generate ./...
 go run .
 ```
 
-The generator resolves dependencies and produces `di_gen.go`.
+The generator resolves dependencies and produces `di_gen.go` – a completely self‑contained file with no runtime dependency on the `dig` package.
 
 ---
 
@@ -279,7 +284,7 @@ func Module() dig.Option { return dig.Module(dig.Provide(NewNoop), dig.Invoke(St
 
 Then in `di.go`:
 ```go
-func InitApp() *dig.App {
+func InitApp() func(context.Context) error {
     return dig.Build(
         mod.Module(), // build tags decide which file is compiled
     )
@@ -386,8 +391,8 @@ func main() {
     customLogger := log.New(os.Stdout, "[MYAPP] ", log.LstdFlags|log.Lshortfile)
     Logf = customLogger.Printf
 
-    app := InitApp()
-    if err := app.Run(context.Background()); err != nil {
+    run := InitApp()
+    if err := run(context.Background()); err != nil {
         customLogger.Fatalf("app failed: %v", err)
     }
 }
@@ -518,7 +523,7 @@ import (
     "github.com/shanjunmei/dig"
 )
 
-func InitApp() *dig.App {
+func InitApp() func(context.Context) error {
     return dig.Build(
         server.Module(),
         dig.Supply(common.DefaultTimeout),
@@ -549,13 +554,46 @@ func InitApp() *dig.App {
 
 ---
 
+## Upgrading from v1.x
+
+In v1.x (up to v1.0.4), `InitApp()` returned `*dig.App` with a `Run` method:
+
+```go
+app := InitApp()
+if err := app.Run(context.Background()); err != nil {
+    log.Fatal(err)
+}
+```
+
+In **v2.0.0**, `InitApp()` returns `func(context.Context) error` directly:
+
+```go
+run := InitApp()
+if err := run(context.Background()); err != nil {
+    log.Fatal(err)
+}
+```
+
+**Migration steps:**
+
+1. Change `app.Run(ctx)` to `run(ctx)` where `run := InitApp()`
+2. Remove any references to the `dig.App` type in your code
+3. Update your `di.go` signature from `func InitApp() *dig.App` to `func InitApp() func(context.Context) error`
+4. Run `go generate` to regenerate `di_gen.go`
+5. Run `go mod tidy` to update dependencies
+
+**Why this change?** – Starting from v2.0.0, the generated code no longer imports the `dig` package at runtime. This eliminates the runtime dependency entirely, resulting in smaller binaries and zero reflection overhead.
+
+---
+
 ## Comparison with Other DI Tools
 
 | Feature | dig | Google Wire | Uber dig / FX |
 |---------|-----|-------------|---------------|
 | **Approach** | Code generation (compile‑time) | Code generation (compile‑time) | Runtime reflection (no generation) |
-| **Code generation workflow** | ✅ `digen` CLI | ✅ `wire` CLI | ❌ Not applicable (reflection‑based) |
+| **Code generation workflow** | ✅ `digen` CLI | ✅ `wire` CLI | ❌ Not applicable |
 | **Zero runtime reflection** | ✅ | ✅ | ❌ |
+| **Zero runtime dependency** | ✅ | ✅ | ❌ |
 | **Dependency validation** | At generation time | At generation time | At runtime |
 | **Dedicated `Supply` API** | ✅ | ❌ | ❌ |
 | **Closure safety enforcement** | ✅ (capture check) | ⚠️ (no check) | N/A |

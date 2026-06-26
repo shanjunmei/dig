@@ -333,7 +333,12 @@ func findBuildCall(fn *ast.FuncDecl, info *types.Info) *ast.CallExpr {
 }
 
 func isContextType(typ types.Type) bool {
-	return typ.String() == "context.Context"
+	named, ok := typ.(*types.Named)
+	if !ok {
+		return false
+	}
+	obj := named.Obj()
+	return obj.Pkg() != nil && obj.Pkg().Path() == "context" && obj.Name() == "Context"
 }
 
 type importInfo struct {
