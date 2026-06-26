@@ -3,11 +3,6 @@ package dig
 
 import "context"
 
-// App is the application runner.
-type App interface {
-	Run(context.Context) error
-}
-
 // Option is the interface that all DI options implement.
 // It is sealed by the private method `isOption()` to prevent external implementations.
 type Option interface {
