@@ -1782,7 +1782,7 @@ func main() {
 
 	// 记录处理成功的包数，用于最终输出
 	generatedCount := 0
-
+	failedCount := 0
 	var generatedPaths []string
 	for _, pkg := range pkgs {
 		// 查找包含 dig.Build 的目标函数
@@ -1838,6 +1838,7 @@ func main() {
 
 		if err := writeGeneratedCode(pkg, target, nodes, refCount, pkgAliasMap, unusedMode); err != nil {
 			log.Printf("write generated code failed for package %s: %v", pkg.PkgPath, err)
+			failedCount++
 			continue
 		}
 		generatedPaths = append(generatedPaths, outputPath)
@@ -1853,7 +1854,7 @@ func main() {
 		log.Fatalln("no packages with dig.Build found")
 	}
 
-	fmt.Printf("[digen] total %d packages generated, cost: %s\n", len(generatedPaths), time.Since(start))
+	fmt.Printf("[digen] total %d packages, %d generated, %d failed, cost: %s\n", generatedCount+failedCount, generatedCount, failedCount, time.Since(start))
 }
 func loadPackages(paths []string) ([]*packages.Package, map[string]*packages.Package, error) {
 	cfg := &packages.Config{
@@ -1899,47 +1900,6 @@ func parseUnusedMode(unusedModeStr *string) UnusedMode {
 	default:
 		return UnusedModeError
 	}
-}
-
-func loadAndValidatePackages() (*packages.Package, map[string]*packages.Package, error) {
-	cfg := &packages.Config{
-		Mode:       packages.NeedSyntax | packages.NeedTypes | packages.NeedName | packages.NeedModule | packages.NeedFiles | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps,
-		Tests:      false,
-		BuildFlags: []string{"-tags=" + tagBuild},
-	}
-	pkgs, err := packages.Load(cfg, ".")
-	if err != nil {
-		return nil, nil, fmt.Errorf("packages.Load failed: %w", err)
-	}
-	if len(pkgs) == 0 {
-		return nil, nil, fmt.Errorf("no packages loaded")
-	}
-
-	pkgMap := collectAllPackages(pkgs)
-
-	var errs []string
-	for _, p := range pkgMap {
-		if len(p.Errors) > 0 {
-			for _, e := range p.Errors {
-				debugf("package error in %s: %v", p.PkgPath, e)
-				errs = append(errs, fmt.Sprintf("package %s: %v", p.PkgPath, e))
-			}
-		}
-	}
-	if len(errs) > 0 {
-		return nil, nil, fmt.Errorf("compilation errors found in packages:\n%s", strings.Join(errs, "\n"))
-	}
-
-	mainPkg := pkgs[0]
-	if len(mainPkg.Errors) > 0 {
-		var mainErrs []string
-		for _, e := range mainPkg.Errors {
-			debugf("package error: %v", e)
-			mainErrs = append(mainErrs, e.Error())
-		}
-		return nil, nil, fmt.Errorf("main package contains errors: %s", strings.Join(mainErrs, "; "))
-	}
-	return mainPkg, pkgMap, nil
 }
 
 func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[string]*packages.Package, strategy alias.AliasStrategy) ([]Node, map[string]string, error) {
