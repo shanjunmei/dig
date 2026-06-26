@@ -8,8 +8,8 @@
 
 > **📢 Version Note**
 > - **v1.0.4** – last release with `*dig.App` struct
-> - **v2.0.0** – `InitApp()` returns `func(context.Context) error`
-> See [Upgrading from v1.x](#upgrading-from-v1x) for migration instructions.
+> - **v1.0.5** – `InitApp()` returns `func(context.Context) error`, with zero runtime dependency
+> See [Upgrading from v1.0.4](#upgrading-from-v104) for migration instructions.
 
 **dig** is a code‑generation based dependency injection container for Go.  
 It resolves all dependencies at **compile time** and generates plain Go source code – **no reflection**, no runtime magic, just static, native Go.
@@ -35,7 +35,7 @@ It resolves all dependencies at **compile time** and generates plain Go source c
 ## Installation
 
 ```bash
-go get github.com/shanjunmei/dig@v2.0.0
+go get github.com/shanjunmei/dig@v1.0.5
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 
@@ -573,9 +573,9 @@ func InitApp() func(context.Context) error {
 
 ---
 
-## Upgrading from v1.x
+## Upgrading from v1.0.4
 
-In v1.x (up to v1.0.4), `InitApp()` returned `*dig.App` with a `Run` method:
+In v1.0.4 and earlier, `InitApp()` returned `*dig.App` with a `Run` method:
 
 ```go
 app := InitApp()
@@ -584,7 +584,7 @@ if err := app.Run(context.Background()); err != nil {
 }
 ```
 
-In **v2.0.0**, `InitApp()` returns `func(context.Context) error` directly:
+In **v1.0.5**, `InitApp()` returns `func(context.Context) error` directly:
 
 ```go
 run := InitApp()
@@ -601,7 +601,7 @@ if err := run(context.Background()); err != nil {
 4. Run `go generate` to regenerate `di_gen.go`
 5. Run `go mod tidy` to update dependencies
 
-**Why this change?** – Starting from v2.0.0, the generated code no longer imports the `dig` package at runtime. This eliminates the runtime dependency entirely, resulting in smaller binaries and zero reflection overhead.
+**Why this change?** – Starting from v1.0.5, the generated code no longer imports the `dig` package at runtime. This eliminates the runtime dependency entirely, resulting in smaller binaries and zero reflection overhead.
 
 ---
 

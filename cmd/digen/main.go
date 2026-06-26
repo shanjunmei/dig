@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shanjunmei/dig/v2/pkg/alias"
-	"github.com/shanjunmei/dig/v2/pkg/functional"
+	"github.com/shanjunmei/dig/pkg/alias"
+	"github.com/shanjunmei/dig/pkg/functional"
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
 )
@@ -28,7 +28,7 @@ import (
 // ----------------------------------------------------------------------------
 
 const (
-	diPkgPath            = "github.com/shanjunmei/dig/v2"
+	diPkgPath            = "github.com/shanjunmei/dig"
 	tagBuild             = "digen"
 	closurePrefixInvoke  = "__i_"
 	closurePrefixProvide = "__p_"

@@ -1,4 +1,4 @@
-module github.com/shanjunmei/dig/v2
+module github.com/shanjunmei/dig
 
 go 1.26.4
 

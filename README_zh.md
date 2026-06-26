@@ -8,8 +8,8 @@ English | [中文文档](./README_zh.md)
 
 > **📢 版本说明**
 > - **v1.0.4** – 最后一个保留 `*dig.App` 结构体的版本
-> - **v2.0.0** – `InitApp()` 返回 `func(context.Context) error`
-> 迁移指南见 [从 v1.x 升级](#从-v1x-升级)。
+> - **v1.0.5** – `InitApp()` 返回 `func(context.Context) error`，零运行时依赖
+> 迁移指南见 [从 v1.0.4 升级](#从-v104-升级)。
 
 **dig** 是一个基于代码生成的 Go 依赖注入容器。  
 它在**编译时**完成所有依赖解析，生成纯 Go 源代码 – **无反射**、无运行时魔法，纯粹的原生 Go 风格。
@@ -35,7 +35,7 @@ English | [中文文档](./README_zh.md)
 ## 安装
 
 ```bash
-go get github.com/shanjunmei/dig@v2.0.0
+go get github.com/shanjunmei/dig@v1.0.5
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 
@@ -572,9 +572,9 @@ func InitApp() func(context.Context) error {
 
 ---
 
-## 从 v1.x 升级
+## 从 v1.0.4 升级
 
-在 v1.x（最高 v1.0.4）中，`InitApp()` 返回 `*dig.App`，包含 `Run` 方法：
+在 v1.0.4 及更早版本中，`InitApp()` 返回 `*dig.App`，包含 `Run` 方法：
 
 ```go
 app := InitApp()
@@ -583,7 +583,7 @@ if err := app.Run(context.Background()); err != nil {
 }
 ```
 
-在 **v2.0.0** 中，`InitApp()` 直接返回 `func(context.Context) error`：
+在 **v1.0.5** 中，`InitApp()` 直接返回 `func(context.Context) error`：
 
 ```go
 run := InitApp()
@@ -600,7 +600,7 @@ if err := run(context.Background()); err != nil {
 4. 运行 `go generate` 重新生成 `di_gen.go`
 5. 运行 `go mod tidy` 更新依赖
 
-**为什么做这个改动？** – 从 v2.0.0 开始，生成的代码在运行时不再导入 `dig` 包。这彻底消除了运行时依赖，带来更小的二进制体积和零反射开销。
+**为什么做这个改动？** – 从 v1.0.5 开始，生成的代码在运行时不再导入 `dig` 包。这彻底消除了运行时依赖，带来更小的二进制体积和零反射开销。
 
 ---
 
