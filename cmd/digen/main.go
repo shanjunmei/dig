@@ -1580,7 +1580,7 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []Node, refCount map[string]int, 
 		buf.WriteString("\n")
 	}
 }
-func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName, unusedMode UnusedMode, refCount map[string]int) {
+func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName string, unusedMode UnusedMode, refCount map[string]int) {
 	// 生成函数签名：func Init() func(context.Context) error
 	fmt.Fprintf(buf, "func %s() func(context.Context) error {\n", originFuncName)
 	writeProviders(buf, nodes, refCount, unusedMode)
