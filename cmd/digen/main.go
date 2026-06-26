@@ -28,7 +28,6 @@ import (
 
 const (
 	diPkgPath            = "github.com/shanjunmei/dig"
-	identDigApp          = "App"
 	tagBuild             = "digen"
 	closurePrefixInvoke  = "__i_"
 	closurePrefixProvide = "__p_"
@@ -109,7 +108,7 @@ type Extractor struct {
 	pkgAliasMap       map[string]string
 	importAliasMap    map[string]string
 	typeStrCache      map[types.Type]string // 缓存类型字符串，避免重复解析
-	aliasStrategy     AliasStrategy
+	aliasStrategy     alias.AliasStrategy
 }
 
 // ----------------------------------------------------------------------------
@@ -168,38 +167,51 @@ func findInjectorFunctions(pkg *packages.Package) (*GenTarget, error) {
 	return &targets[0], nil
 }
 
-func isDigAppPointer(typ types.Type) bool {
-	ptr, ok := typ.(*types.Pointer)
+// isContextFunc 检查类型是否为 func(context.Context) error
+func isContextFunc(typ types.Type) bool {
+	sig, ok := typ.(*types.Signature)
 	if !ok {
 		return false
 	}
-	elem := ptr.Elem()
-	named, ok := elem.(*types.Named)
-	if !ok {
-		return false
-	}
-	obj := named.Obj()
-	return obj.Pkg() != nil && obj.Pkg().Path() == diPkgPath && obj.Name() == identDigApp
-}
 
+	// 检查参数：必须只有一个参数，且为 context.Context
+	params := sig.Params()
+	if params.Len() != 1 {
+		return false
+	}
+	if params.At(0).Type().String() != "context.Context" {
+		return false
+	}
+
+	// 检查返回值：必须只有一个返回值，且为 error
+	results := sig.Results()
+	if results.Len() != 1 {
+		return false
+	}
+	return types.Identical(results.At(0).Type(), types.Universe.Lookup("error").Type())
+}
 func validateReturnType(fnDecl *ast.FuncDecl, info *types.Info) error {
 	if fnDecl.Type.Results == nil || len(fnDecl.Type.Results.List) == 0 {
-		return fmt.Errorf("function %q: must have return value, required: *dig.App", fnDecl.Name.Name)
+		return fmt.Errorf("function %q: must have a return value of type func(context.Context) error", fnDecl.Name.Name)
 	}
 	if len(fnDecl.Type.Results.List) > 1 {
-		return fmt.Errorf("function %q: only allow single return value, required: *dig.App", fnDecl.Name.Name)
+		return fmt.Errorf("function %q: only a single return value allowed, expected func(context.Context) error", fnDecl.Name.Name)
 	}
+
 	resField := fnDecl.Type.Results.List[0]
 	if len(resField.Names) > 0 {
-		return fmt.Errorf("function %q: named return value is not allowed, required: *dig.App", fnDecl.Name.Name)
+		return fmt.Errorf("function %q: named return value is not allowed, expected func(context.Context) error", fnDecl.Name.Name)
 	}
+
 	retType := info.TypeOf(resField.Type)
 	if retType == nil {
 		return fmt.Errorf("function %q: failed to resolve return type", fnDecl.Name.Name)
 	}
-	if !isDigAppPointer(retType) {
-		return fmt.Errorf("function %q: invalid return type %q, required: *dig.App", fnDecl.Name.Name, retType.String())
+
+	if !isContextFunc(retType) {
+		return fmt.Errorf("function %q: invalid return type %q, expected func(context.Context) error", fnDecl.Name.Name, retType.String())
 	}
+
 	return nil
 }
 
@@ -388,7 +400,7 @@ func (e *Extractor) loadImportAliases() {
 // Extractor 方法
 // ----------------------------------------------------------------------------
 
-func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, strategy AliasStrategy) *Extractor {
+func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, strategy alias.AliasStrategy) *Extractor {
 	e := &Extractor{
 		pkgMap:            pkgMap,
 		mainPkgPath:       mainPkgPath,
@@ -1476,7 +1488,7 @@ func checkUnusedProviders(nodes []Node, refCount map[string]int) error {
 // 代码生成（拆分）
 // ----------------------------------------------------------------------------
 
-func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName, diPath, diAlias, mainPkgPath string, pkgAliasMap map[string]string, unusedMode UnusedMode) (string, error) {
+func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName, diAlias, mainPkgPath string, pkgAliasMap map[string]string, unusedMode UnusedMode) (string, error) {
 	mainPkg := pkgName
 	if mainPkg == "" {
 		mainPkg = "main"
@@ -1487,7 +1499,7 @@ func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName
 
 	usedPkgSet := make(map[string]bool, len(nodes)+2) // +2 for context and dig
 	usedPkgSet["context"] = true
-	usedPkgSet[diPath] = true
+	//	usedPkgSet[diPath] = true
 	if debugEnabled {
 		usedPkgSet["log"] = true
 	}
@@ -1505,6 +1517,7 @@ func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName
 	if debugEnabled {
 		buf.WriteString("var Logf = log.Printf\n\n")
 	}
+
 	writeClosureDefs(buf, nodes, refCount, unusedMode)
 	writeMainFunc(buf, nodes, originFuncName, diAlias, unusedMode, refCount)
 
@@ -1571,13 +1584,14 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []Node, refCount map[string]int, 
 		buf.WriteString("\n")
 	}
 }
-
 func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName, diAlias string, unusedMode UnusedMode, refCount map[string]int) {
-	fmt.Fprintf(buf, "func %s() *%s.App {\n", originFuncName, diAlias)
+	// 生成函数签名：func Init() func(context.Context) error
+	fmt.Fprintf(buf, "func %s() func(context.Context) error {\n", originFuncName)
 	writeProviders(buf, nodes, refCount, unusedMode)
-	fmt.Fprintf(buf, "return %s.New(func(ctx context.Context) error {\n", diAlias)
+	// 返回闭包：func(ctx context.Context) error { ... }
+	fmt.Fprintf(buf, "\treturn func(ctx context.Context) error {\n")
 	writeInvokes(buf, nodes)
-	buf.WriteString("return nil\n})\n}\n\n")
+	buf.WriteString("\t\treturn nil\n\t}\n}\n\n")
 }
 
 func writeProviders(buf *bytes.Buffer, nodes []Node, refCount map[string]int, unusedMode UnusedMode) {
@@ -1834,7 +1848,7 @@ func loadAndValidatePackages() (*packages.Package, map[string]*packages.Package,
 	return mainPkg, pkgMap, nil
 }
 
-func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[string]*packages.Package, strategy AliasStrategy) ([]Node, map[string]string, error) {
+func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[string]*packages.Package, strategy alias.AliasStrategy) ([]Node, map[string]string, error) {
 	entryFunc := target.Node
 	buildCall := findBuildCall(entryFunc, pkg.TypesInfo)
 	if buildCall == nil {
@@ -1889,7 +1903,7 @@ func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, 
 		pkgAliasMap[diPkgPath] = diAlias
 	}
 
-	code, err := generateCode(nodes, refCount, pkg.Name, target.FuncName, diPkgPath, diAlias, pkg.PkgPath, pkgAliasMap, unusedMode)
+	code, err := generateCode(nodes, refCount, pkg.Name, target.FuncName, diAlias, pkg.PkgPath, pkgAliasMap, unusedMode)
 	if err != nil {
 		return err
 	}
