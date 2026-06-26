@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shanjunmei/dig/pkg/alias"
+	"github.com/shanjunmei/dig/pkg/functional"
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
 )
@@ -999,7 +1001,7 @@ func (e *Extractor) findCycle(adj [][]int) ([]int, error) {
 }
 
 func (e *Extractor) formatCycleError(cycle []int) error {
-	cycleDesc := Map(cycle, e.describeItem)
+	cycleDesc := functional.Map(cycle, e.describeItem)
 	cycleInfo := strings.Join(cycleDesc, " -> ")
 	return fmt.Errorf("circular dependency detected: %s", cycleInfo)
 }
@@ -1243,13 +1245,13 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 		path  string
 		alias string
 	}
-	pairs := MapEntries(e.pkgAliasMap, func(path, alias string) pair {
+	pairs := functional.MapEntries(e.pkgAliasMap, func(path, alias string) pair {
 		return pair{path, alias}
 	})
 	sort.Slice(pairs, func(i, j int) bool {
 		return len(pairs[i].path) > len(pairs[j].path)
 	})
-	result := Reduce(pairs, typeStr, func(res string, p pair) string {
+	result := functional.Reduce(pairs, typeStr, func(res string, p pair) string {
 		return strings.ReplaceAll(res, p.path+".", p.alias+".")
 	})
 	return prefix.String() + result
@@ -1304,7 +1306,7 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 	}
 	def := e.buildClosureDefString(it.FuncName, paramStr, bodyStr, retType)
 
-	usedList := Keys(usedPkgs)
+	usedList := functional.Keys(usedPkgs)
 	if it.Pkg.PkgPath != e.mainPkgPath {
 		comment := fmt.Sprintf("// original package: %s\n", it.Pkg.PkgPath)
 		def = comment + def
@@ -1497,7 +1499,7 @@ func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName
 			usedPkgSet[pkgPath] = true
 		}
 	}
-	usedPkgs := Keys(usedPkgSet)
+	usedPkgs := functional.Keys(usedPkgSet)
 
 	writeImports(buf, mainPkgPath, pkgAliasMap, usedPkgs)
 	if debugEnabled {
@@ -1535,7 +1537,7 @@ func writeImports(buf *bytes.Buffer, mainPkgPath string, pkgAliasMap map[string]
 		}
 		importMap[pkgPath] = alias
 	}
-	paths := Keys(importMap)
+	paths := functional.Keys(importMap)
 	sort.Strings(paths)
 
 	buf.WriteString("import (\n")
@@ -1735,15 +1737,15 @@ func main() {
 	outputFile := flag.String("out", "dig_gen.go", "output file name")
 	unusedModeStr := flag.String("unused", "error", "behavior for unused providers: error, ignore, drop")
 	flag.BoolVar(&debugEnabled, "debug", false, "enable debug logging")
-	alias := flag.String("alias", "full", "alias generation style: short or full, or obfuscated")
+	_alias := flag.String("alias", "full", "alias generation style: short, full, obfuscated, numeric")
 
 	flag.Parse()
 
 	unusedMode := parseUnusedMode(unusedModeStr)
 
-	aliasType, err := ParseAliasType(*alias)
-	aliasStrategy := NewAliasStrategy(aliasType)
-	debugf("alias strategy: %s", *alias)
+	aliasType, err := alias.ParseAliasType(*_alias)
+	aliasStrategy := alias.NewAliasStrategy(aliasType)
+	debugf("alias strategy: %s", *_alias)
 	pkg, pkgMap, err := loadAndValidatePackages()
 	if err != nil {
 		log.Fatalln(err)

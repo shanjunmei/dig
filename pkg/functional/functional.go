@@ -1,4 +1,4 @@
-package main
+package functional
 
 // Map 处理切片 []T，单参数转换
 func Map[T, R any](src []T, fn func(T) R) []R {

@@ -1,4 +1,4 @@
-package main
+package alias
 
 import (
 	"fmt"
@@ -8,9 +8,10 @@ import (
 type AliasType string
 
 const (
-	AliasStrategyShort      AliasType = "short"
-	AliasStrategyFull       AliasType = "full"
-	AliasStrategyObfuscated AliasType = "obfuscated"
+	AliasShort      AliasType = "short"
+	AliasFull       AliasType = "full"
+	AliasObfuscated AliasType = "obfuscated"
+	AliasNumeric    AliasType = "numeric" // 新增
 )
 
 func (t AliasType) String() string {
@@ -19,10 +20,10 @@ func (t AliasType) String() string {
 
 func ParseAliasType(s string) (AliasType, error) {
 	switch AliasType(s) {
-	case AliasStrategyShort, AliasStrategyFull, AliasStrategyObfuscated:
+	case AliasShort, AliasFull, AliasObfuscated, AliasNumeric:
 		return AliasType(s), nil
 	default:
-		return "", fmt.Errorf("invalid alias type %q, allowed: short, full, obfuscated", s)
+		return "", fmt.Errorf("invalid alias type %q, allowed: short, full, obfuscated, numeric", s)
 	}
 }
 func replacePkgChars(s string) string {
@@ -86,10 +87,12 @@ func (ContextualAliasStrategy) GenerateAlias(pkgPath string, existing map[string
 // NewAliasStrategy 工厂函数，根据参数返回对应策略
 func NewAliasStrategy(strategy AliasType) AliasStrategy {
 	switch strategy {
-	case AliasStrategyShort:
+	case AliasShort:
 		return SimpleAliasStrategy{}
-	case AliasStrategyObfuscated:
+	case AliasObfuscated:
 		return ObfuscatedAliasStrategy{}
+	case AliasNumeric:
+		return &NumericAliasStrategy{}
 	default: // full
 		return ContextualAliasStrategy{}
 	}
