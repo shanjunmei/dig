@@ -31,8 +31,8 @@ import (
 const (
 	diPkgPath            = "github.com/shanjunmei/dig"
 	tagBuild             = "digen"
-	closurePrefixInvoke  = "__i_"
-	closurePrefixProvide = "__p_"
+	closurePrefixInvoke  = "dig_invoke_"
+	closurePrefixProvide = "dig_provider_"
 )
 
 type UnusedMode int
