@@ -85,6 +85,7 @@ type extractedItem struct {
 	Pkg      *packages.Package
 	PkgAlias string
 	HasError bool
+	UsedPkgs []string
 
 	IsClosure       bool
 	ClosureLit      *ast.FuncLit
@@ -935,10 +936,13 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 	if _, dup := e.globalProviderMap[retType]; dup {
 		return fmt.Errorf("duplicate supply for type %q", retType)
 	}
+	usedPkgs := e.collectUsedPkgsFromExpr(expr, curPkg.TypesInfo)
+
 	item := e.newExtractedItem("", curPkg, alias, false)
 	item.IsSupply = true
 	item.RetType = retType
 	item.Expr = expr
+	item.UsedPkgs = usedPkgs
 
 	idx := len(e.items)
 	e.items = append(e.items, item)
@@ -1201,6 +1205,7 @@ func (e *Extractor) buildSupplyNode(it extractedItem, name string) Node {
 		FuncPkg:  it.PkgAlias,
 		PkgPath:  it.Pkg.PkgPath,
 		RetType:  it.RetType,
+		UsedPkgs: it.UsedPkgs,
 	}
 }
 
@@ -1562,6 +1567,39 @@ func writeHeader(buf *bytes.Buffer, pkgName string) {
 	fmt.Fprintf(buf, "package %s\n\n", pkgName)
 }
 
+// collectUsedPkgsFromExpr 提取表达式中所引用的包路径（例如 ctx.AppOpts 中的 ctx）
+func (e *Extractor) collectUsedPkgsFromExpr(expr ast.Expr, info *types.Info) []string {
+	var pkgs []string
+	seen := make(map[string]bool)
+	ast.Inspect(expr, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		obj := info.ObjectOf(ident)
+		if obj == nil {
+			return true
+		}
+		pkgName, ok := obj.(*types.PkgName)
+		if !ok {
+			return true
+		}
+		pkgPath := pkgName.Imported().Path()
+		if pkgPath == "" || pkgPath == e.mainPkgPath {
+			return true
+		}
+		if !seen[pkgPath] {
+			seen[pkgPath] = true
+			pkgs = append(pkgs, pkgPath)
+		}
+		return true
+	})
+	return pkgs
+}
 func writeImports(buf *bytes.Buffer, mainPkgPath string, pkgAliasMap map[string]string, usedPkgs []string) {
 	importMap := make(map[string]string)
 	for _, pkgPath := range usedPkgs {
