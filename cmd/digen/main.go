@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/format"
 	"go/printer"
+	"go/token"
 	"go/types"
 	"log"
 	"os"
@@ -920,6 +921,41 @@ func (e *Extractor) checkFreeVarVisibility(vars []*ast.Ident, curPkg *packages.P
 	return nil
 }
 
+// addExternalParams 将目标函数的参数注册为隐式 Supply 提供者
+func addExternalParams(extractor *Extractor, target *GenTarget, pkg *packages.Package) error {
+	params := target.Node.Type.Params
+	if params == nil {
+		return nil
+	}
+	seenTypes := make(map[string]bool)
+	for _, field := range params.List {
+		for _, name := range field.Names {
+			typ := pkg.TypesInfo.TypeOf(field.Type)
+			if typ == nil {
+				return fmt.Errorf("cannot resolve type of parameter %s", name.Name)
+			}
+			retType := extractor.getTypeFullName(typ)
+			if seenTypes[retType] {
+				return fmt.Errorf("duplicate parameter type %q (parameter %s)", retType, name.Name)
+			}
+			seenTypes[retType] = true
+			// 构造一个 Supply 项
+			expr := ast.NewIdent(name.Name)
+			item := extractedItem{
+				Pkg:      pkg,
+				PkgAlias: "", // 当前包，无别名
+				IsSupply: true,
+				RetType:  retType,
+				Expr:     expr,
+				UsedPkgs: nil, // 参数是当前包内标识符，无需额外导入
+			}
+			extractor.items = append(extractor.items, item)
+			idx := len(extractor.items) - 1
+			extractor.globalProviderMap[retType] = idx
+		}
+	}
+	return nil
+}
 func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error {
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
 	if obj != nil {
@@ -1519,7 +1555,7 @@ func checkUnusedProviders(nodes []Node, refCount map[string]int) error {
 // 代码生成（拆分）
 // ----------------------------------------------------------------------------
 
-func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName, mainPkgPath string, pkgAliasMap map[string]string, unusedMode UnusedMode) (string, error) {
+func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName, mainPkgPath string, pkgAliasMap map[string]string, unusedMode UnusedMode, params *ast.FieldList, fset *token.FileSet) (string, error) {
 	mainPkg := pkgName
 	if mainPkg == "" {
 		mainPkg = "main"
@@ -1549,7 +1585,7 @@ func generateCode(nodes []Node, refCount map[string]int, pkgName, originFuncName
 	}
 
 	writeClosureDefs(buf, nodes, refCount, unusedMode)
-	writeMainFunc(buf, nodes, originFuncName, unusedMode, refCount)
+	writeMainFunc(buf, nodes, originFuncName, unusedMode, refCount, params, fset)
 
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
@@ -1647,9 +1683,37 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []Node, refCount map[string]int, 
 		buf.WriteString("\n")
 	}
 }
-func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName string, unusedMode UnusedMode, refCount map[string]int) {
+
+// formatParams 将参数列表格式化为字符串，用于函数签名
+func formatParams(params *ast.FieldList, fset *token.FileSet) string {
+	if params == nil || len(params.List) == 0 {
+		return ""
+	}
+	var buf bytes.Buffer
+	for i, field := range params.List {
+		if i > 0 {
+			buf.WriteString(", ")
+		}
+		for j, name := range field.Names {
+			if j > 0 {
+				buf.WriteString(", ")
+			}
+			buf.WriteString(name.Name)
+		}
+		buf.WriteString(" ")
+		if err := printer.Fprint(&buf, fset, field.Type); err != nil {
+			panic(err) // 实际可返回错误，但此处简化
+		}
+	}
+	return buf.String()
+}
+func writeMainFunc(buf *bytes.Buffer, nodes []Node, originFuncName string, unusedMode UnusedMode, refCount map[string]int, params *ast.FieldList, fset *token.FileSet) {
 	// 生成函数签名：func Init() func(context.Context) error
-	fmt.Fprintf(buf, "func %s() func(context.Context) error {\n", originFuncName)
+	paramStr := formatParams(params, fset)
+	if paramStr != "" {
+		paramStr = " " + paramStr // 前导空格
+	}
+	fmt.Fprintf(buf, "func %s(%s) func(context.Context) error {\n", originFuncName, paramStr)
 	writeProviders(buf, nodes, refCount, unusedMode)
 	// 返回闭包：func(ctx context.Context) error { ... }
 	fmt.Fprintf(buf, "\treturn func(ctx context.Context) error {\n")
@@ -1837,7 +1901,7 @@ func processPackage(pkg *packages.Package, pkgMap map[string]*packages.Package, 
 		}
 	}
 
-	if err := writeGeneratedCode(pkg, target, nodes, refCount, pkgAliasMap, unusedMode); err != nil {
+	if err := writeGeneratedCode(pkg, target, nodes, refCount, pkgAliasMap, unusedMode, pkg.Fset); err != nil {
 		return fmt.Errorf("write generated code: %w", err)
 	}
 
@@ -1955,6 +2019,9 @@ func extractAndBuildNodes(pkg *packages.Package, target *GenTarget, pkgMap map[s
 	}
 
 	extractor := NewExtractor(pkgMap, pkg.PkgPath, strategy)
+	if err := addExternalParams(extractor, target, pkg); err != nil {
+		return nil, nil, err
+	}
 
 	for _, arg := range buildCall.Args {
 		if err := extractor.extractOptions(arg, pkg, pkg); err != nil {
@@ -1976,8 +2043,8 @@ func shouldGenerateProvider(node Node, refCount map[string]int, unusedMode Unuse
 	return refCount[node.Name] > 0 || node.HasError
 }
 
-func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, refCount map[string]int, pkgAliasMap map[string]string, unusedMode UnusedMode) error {
-	code, err := generateCode(nodes, refCount, pkg.Name, target.FuncName, pkg.PkgPath, pkgAliasMap, unusedMode)
+func writeGeneratedCode(pkg *packages.Package, target *GenTarget, nodes []Node, refCount map[string]int, pkgAliasMap map[string]string, unusedMode UnusedMode, fset *token.FileSet) error {
+	code, err := generateCode(nodes, refCount, pkg.Name, target.FuncName, pkg.PkgPath, pkgAliasMap, unusedMode, target.Node.Type.Params, fset)
 	if err != nil {
 		return err
 	}
