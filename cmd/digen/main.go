@@ -111,6 +111,8 @@ type Extractor struct {
 	importAliasMap    map[string]string
 	typeStrCache      map[types.Type]string // 缓存类型字符串，避免重复解析
 	aliasStrategy     alias.AliasStrategy
+	invokeIndex       int // 新增：invoke 闭包计数器
+	provideIndex      int // 新增：provider 闭包计数器
 }
 
 // ----------------------------------------------------------------------------
@@ -746,10 +748,13 @@ func (e *Extractor) determineReturnType(funcLit *ast.FuncLit, sig *types.Signatu
 }
 
 func (e *Extractor) generateFuncName(isInvoke bool) string {
+
 	if isInvoke {
-		return fmt.Sprintf("%s%d", closurePrefixInvoke, len(e.items))
+		e.invokeIndex++
+		return fmt.Sprintf("%s%d", closurePrefixInvoke, e.invokeIndex)
 	}
-	return fmt.Sprintf("%s%d", closurePrefixProvide, len(e.items))
+	e.provideIndex++
+	return fmt.Sprintf("%s%d", closurePrefixProvide, e.provideIndex)
 }
 
 func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error {
