@@ -621,7 +621,11 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	if !ok {
 		return fmt.Errorf("func literal is not a function type")
 	}
-
+	if isInvoke {
+		if err := validateInvokeSignature(sig, "anonymous function"); err != nil {
+			return err
+		}
+	}
 	paramNames, paramTypes, paramTypeStrs := e.extractClosureParams(funcLit, curPkg)
 
 	freeVars, freeTypes, freeTypeStrs, freeIsConst, freeLitValues, err := e.collectFreeVarsWithConst(funcLit, curPkg)
@@ -752,6 +756,9 @@ func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error 
 	}
 	name, sig, realPkg, err := getFuncMeta(expr, curPkg, e.pkgMap)
 	if err != nil {
+		return err
+	}
+	if err := validateInvokeSignature(sig, name); err != nil {
 		return err
 	}
 	alias := e.collectPkgAlias(realPkg)
@@ -1273,7 +1280,19 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 	})
 	return prefix.String() + result
 }
-
+func validateInvokeSignature(sig *types.Signature, funcName string) error {
+	res := sig.Results()
+	if res.Len() == 0 {
+		return nil // 无返回值，允许
+	}
+	if res.Len() == 1 {
+		if !types.Identical(res.At(0).Type(), types.Universe.Lookup("error").Type()) {
+			return fmt.Errorf("Invoke function %s: single return value must be error, got %s", funcName, res.At(0).Type().String())
+		}
+		return nil
+	}
+	return fmt.Errorf("Invoke function %s has %d return values (only 0 or error allowed)", funcName, res.Len())
+}
 func (e *Extractor) typePkg(typ types.Type) *types.Package {
 	switch t := typ.(type) {
 	case *types.Named:
@@ -1320,6 +1339,8 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 	retType := ""
 	if it.RetType != "" {
 		retType = e.replacePkgPathWithAlias(it.RetType)
+	} else if it.IsInvoke && it.HasError {
+		retType = "error" // <--- 关键修复
 	}
 	def := e.buildClosureDefString(it.FuncName, paramStr, bodyStr, retType)
 
