@@ -1724,12 +1724,6 @@ func debugf(format string, args ...any) {
 	}
 }
 
-func Debugf(buf *bytes.Buffer, format string, args ...any) {
-	if debugEnabled {
-		fmt.Fprintf(buf, format+"\n", args...)
-	}
-}
-
 func emitLog(buf *bytes.Buffer, format string, args ...string) {
 	if !debugEnabled {
 		return
@@ -1745,11 +1739,57 @@ func emitLog(buf *bytes.Buffer, format string, args ...string) {
 	}
 	buf.WriteString(")\n")
 }
+func processPackage(pkg *packages.Package, pkgMap map[string]*packages.Package, strategy alias.AliasStrategy, unusedMode UnusedMode, outputFile *string, paths []string) error {
+	target, err := findInjectorFunctions(pkg)
+	if err != nil {
+		return err // 将错误向上传递，由 main 判断是否是“没有 dig.Build”
+	}
+
+	// 确定输出路径
+	outputPath := *outputFile
+	if !(len(paths) == 1 && paths[0] == ".") {
+		if len(pkg.GoFiles) == 0 {
+			return fmt.Errorf("package %s has no Go files", pkg.PkgPath)
+		}
+		dir := filepath.Dir(pkg.GoFiles[0])
+		outputPath = filepath.Join(dir, "dig_gen.go")
+	}
+
+	srcFile := target.File
+	target.File = outputPath
+
+	debugf("generating for package %s -> %s", pkg.PkgPath, outputPath)
+
+	nodes, pkgAliasMap, err := extractAndBuildNodes(pkg, target, pkgMap, strategy)
+	if err != nil {
+		return fmt.Errorf("extract and build nodes: %w", err)
+	}
+
+	refCount := make(map[string]int)
+	for _, node := range nodes {
+		for _, arg := range node.Args {
+			refCount[arg]++
+		}
+	}
+
+	if unusedMode == UnusedModeError {
+		if err := checkUnusedProviders(nodes, refCount); err != nil {
+			return fmt.Errorf("unused provider check: %w", err)
+		}
+	}
+
+	if err := writeGeneratedCode(pkg, target, nodes, refCount, pkgAliasMap, unusedMode); err != nil {
+		return fmt.Errorf("write generated code: %w", err)
+	}
+
+	// 输出成功信息（这里也可以移到 main 中，但为了解耦，可以在这里直接打印）
+	fmt.Printf("[digen] generated: %s -> %s\n", srcFile, outputPath)
+	return nil
+}
 
 // ----------------------------------------------------------------------------
 // 主流程
 // ----------------------------------------------------------------------------
-
 func main() {
 	start := time.Now()
 	outputFile := flag.String("out", "dig_gen.go", "output file name")
@@ -1760,7 +1800,6 @@ func main() {
 	flag.Parse()
 
 	unusedMode := parseUnusedMode(unusedModeStr)
-
 	aliasType, err := alias.ParseAliasType(*_alias)
 	if err != nil {
 		log.Fatalln(err)
@@ -1768,93 +1807,40 @@ func main() {
 	aliasStrategy := alias.NewAliasStrategy(aliasType)
 	debugf("alias strategy: %s", *_alias)
 
-	// 获取剩余参数作为包路径
 	paths := flag.Args()
 	if len(paths) == 0 {
-		paths = []string{"."} // 默认当前目录
+		paths = []string{"."}
 	}
 
-	// 加载所有包
 	pkgs, pkgMap, err := loadPackages(paths)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	// 记录处理成功的包数，用于最终输出
-	generatedCount := 0
-	failedCount := 0
-	var generatedPaths []string
+	var (
+		generatedCount int
+		failedCount    int
+	)
+
 	for _, pkg := range pkgs {
-		// 查找包含 dig.Build 的目标函数
-		target, err := findInjectorFunctions(pkg)
-		if err != nil {
-			// 如果当前包没有目标函数，跳过（不报错）
+		// 处理单个包，返回是否成功
+		if err := processPackage(pkg, pkgMap, aliasStrategy, unusedMode, outputFile, paths); err != nil {
+			// 如果是“没有 dig.Build”的错误，跳过不计入失败
 			if strings.Contains(err.Error(), "no function containing dig.Build call found") {
 				continue
 			}
-			log.Printf("error in package %s: %v", pkg.PkgPath, err)
-			continue
-		}
-
-		// 确定输出文件路径
-		// 多包模式下，忽略 -out 参数，固定使用 dig_gen.go
-		var outputPath string
-		if len(paths) == 1 && paths[0] == "." {
-			// 单包模式，使用 -out 参数指定的文件
-			outputPath = *outputFile
-		} else {
-			// 多包模式，使用包目录下的 dig_gen.go
-			if len(pkg.GoFiles) == 0 {
-				log.Printf("warning: package %s has no Go files, skipping", pkg.PkgPath)
-				continue
-			}
-			dir := filepath.Dir(pkg.GoFiles[0])
-			outputPath = filepath.Join(dir, "dig_gen.go")
-		}
-		srcFile := target.File
-		target.File = outputPath
-
-		debugf("generating for package %s -> %s", pkg.PkgPath, outputPath)
-
-		nodes, pkgAliasMap, err := extractAndBuildNodes(pkg, target, pkgMap, aliasStrategy)
-		if err != nil {
-			log.Printf("extract and build nodes failed for package %s: %v", pkg.PkgPath, err)
-			continue
-		}
-
-		refCount := make(map[string]int)
-		for _, node := range nodes {
-			for _, arg := range node.Args {
-				refCount[arg]++
-			}
-		}
-
-		if unusedMode == UnusedModeError {
-			if err := checkUnusedProviders(nodes, refCount); err != nil {
-				log.Printf("unused provider check failed for package %s: %v", pkg.PkgPath, err)
-				continue
-			}
-		}
-
-		if err := writeGeneratedCode(pkg, target, nodes, refCount, pkgAliasMap, unusedMode); err != nil {
-			log.Printf("write generated code failed for package %s: %v", pkg.PkgPath, err)
+			log.Printf("failed to process package %s: %v", pkg.PkgPath, err)
 			failedCount++
-			continue
+		} else {
+			generatedCount++
 		}
-		generatedPaths = append(generatedPaths, outputPath)
-
-		// 可转为相对路径（相对于当前工作目录）
-
-		fmt.Printf("[digen] generated: %s -> %s\n", srcFile, outputPath)
-		generatedCount++
-		//lastOutputFile = outputPath
 	}
 
 	if generatedCount == 0 {
 		log.Fatalln("no packages with dig.Build found")
 	}
-
-	fmt.Printf("[digen] total %d packages, %d generated, %d failed, cost: %s\n", generatedCount+failedCount, generatedCount, failedCount, time.Since(start))
+	fmt.Printf("[digen] total %d packages, %d generated, %d failed, cost: %s\n",
+		generatedCount+failedCount, generatedCount, failedCount, time.Since(start))
 }
 func loadPackages(paths []string) ([]*packages.Package, map[string]*packages.Package, error) {
 	cfg := &packages.Config{
