@@ -1361,6 +1361,29 @@ func (e *Extractor) typePkg(typ types.Type) *types.Package {
 // ----------------------------------------------------------------------------
 
 func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, error) {
+	allTypes := append(it.ClosureParamTypes, it.FreeTypes...)
+	if it.ClosureLit.Type.Results != nil && len(it.ClosureLit.Type.Results.List) > 0 {
+		// 取第一个返回值（一般只有一个，如果有多个可能有 error，但我们的提供者只能有一个返回值）
+		retExpr := it.ClosureLit.Type.Results.List[0].Type
+		if typ := it.Pkg.TypesInfo.TypeOf(retExpr); typ != nil {
+			allTypes = append(allTypes, typ)
+		}
+	}
+	for _, t := range allTypes {
+		if pkg := e.typePkg(t); pkg != nil && pkg.Path() != e.mainPkgPath {
+			if _, ok := e.pkgAliasMap[pkg.Path()]; !ok {
+				// 从已加载的包映射中获取 *packages.Package
+				if pkgPkg, ok := e.pkgMap[pkg.Path()]; ok {
+					e.collectPkgAlias(pkgPkg)
+				} else {
+					// 兜底：生成默认别名
+					parts := strings.Split(pkg.Path(), "/")
+					alias := parts[len(parts)-1]
+					e.pkgAliasMap[pkg.Path()] = alias
+				}
+			}
+		}
+	}
 	usedPkgs := make(map[string]bool)
 
 	paramList, freeVarMap, err := e.buildParamListAndFreeVarMap(it, usedPkgs)
