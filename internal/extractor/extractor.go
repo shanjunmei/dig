@@ -1475,6 +1475,3 @@ func (e *Extractor) loadImportAliases() {
 		}
 	}
 }
-
-// 其余全部原方法原样复制（包括所有未导出函数）
-// ... 此处省略所有方法体，实际实现中需完整复制自原 main.go 中的 Extractor 及所有辅助函数。

@@ -17,13 +17,10 @@ import (
 	"github.com/shanjunmei/dig/pkg/alias"
 )
 
-//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go
-
 // InitApp 使用 dig 组装所有组件，返回应用入口函数
 func InitApp(cfg *config.Config) func(context.Context) error {
 	return dig.Build(
 		// 基础组件
-		//dig.Supply(cfg),
 		dig.Provide(logger.NewLogger),
 		dig.Provide(loader.NewPackageLoader),
 		dig.Provide(func(_cfg *config.Config) string { return _cfg.AliasType }),
@@ -33,12 +30,12 @@ func InitApp(cfg *config.Config) func(context.Context) error {
 				log.Fatalln(err)
 			}
 			return alias.NewAliasStrategy(aliasType)
-		}), // 假设该函数存在，实际需调整
+		}),
 
 		// 核心组件
+		dig.Provide(app.NewApp),
 		dig.Provide(generator.NewGenerator),
 		dig.Provide(processor.NewProcessor),
-		dig.Provide(app.NewApp),
 
 		// 启动
 		dig.Invoke(func(a *app.App) error {

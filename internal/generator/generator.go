@@ -338,6 +338,3 @@ func (g *Generator) writeMainFunc(buf *bytes.Buffer, nodes []model.Node, originF
 	g.writeInvokes(buf, nodes)
 	buf.WriteString("\t\treturn nil\n\t}\n}\n\n")
 }
-
-// 以下为原 writeHeader, writeImports, writeClosureDefs, writeMainFunc, writeProviders, writeInvokes, handleUnusedProvider, writeProviderStatement, formatParams, buildCallArgs, emitLog 等函数，全部原样复制，但将 emitLog 改为使用 g.logger 或直接判断 g.cfg.Debug。
-// 由于篇幅，省略具体实现，实际迁移时全部复制。
