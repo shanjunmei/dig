@@ -17,13 +17,18 @@ type GenTarget struct {
 	Node     *ast.FuncDecl
 	File     string
 }
-
+type Arg struct {
+	Name       string // 参数变量名
+	IsConst    bool   // 是否常量
+	ConstValue string // 常量字面值（若 IsConst 为 true）
+	IsContext  bool   // 是否 context.Context
+}
 type Node struct {
 	Name      string
 	Func      string
 	FuncPkg   string
 	RetType   string
-	Args      []string
+	Args      []Arg
 	IsInvoke  bool
 	IsSupply  bool
 	Value     string
@@ -33,10 +38,6 @@ type Node struct {
 	ClosureDef string
 	UsedPkgs   []string
 	PkgPath    string
-
-	IsConstArg     []bool
-	ConstLitValues []string
-	IsContextArg   []bool
 }
 
 // fullFuncName 返回 包别名.函数名

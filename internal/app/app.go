@@ -49,6 +49,7 @@ func (a *App) Run() error {
 			if strings.Contains(err.Error(), "no function containing dig.Build call found") {
 				continue
 			}
+			a.logger.Debugf("failed to process package %s: %v", pkg.PkgPath, err)
 			failedCount++
 		} else {
 			generatedCount++

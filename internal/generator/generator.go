@@ -142,6 +142,7 @@ func (g *Generator) GenerateCode(nodes []model.Node, refCount map[string]int, pk
 	}
 	return string(formatted), nil
 }
+
 func formatParams(params *ast.FieldList, fset *token.FileSet) string {
 	if params == nil || len(params.List) == 0 {
 		return ""
@@ -180,6 +181,8 @@ func (g *Generator) emitLog(buf *bytes.Buffer, format string, args ...string) {
 	}
 	buf.WriteString(")\n")
 }
+
+// ---------- 使用 node.Args 代替旧字段 ----------
 func (g *Generator) handleUnusedProvider(buf *bytes.Buffer, node model.Node) {
 	logName := node.LongName()
 	if node.IsSupply {
@@ -191,27 +194,35 @@ func (g *Generator) handleUnusedProvider(buf *bytes.Buffer, node model.Node) {
 		fmt.Fprintf(buf, "_ = %s\n", expr)
 		g.emitLog(buf, "[SUPPLY] after:  %s", strconv.Quote(logName))
 	} else if node.IsClosure {
-		argsStr := strings.Join(node.Args, ", ")
+		argNames := make([]string, len(node.Args))
+		for i, arg := range node.Args {
+			argNames[i] = arg.Name
+		}
+		argsStr := strings.Join(argNames, ", ")
 		g.emitLog(buf, "[PROVIDE] before: %s", strconv.Quote(logName))
 		fmt.Fprintf(buf, "_ = %s(%s)\n", node.Func, argsStr)
 		g.emitLog(buf, "[PROVIDE] after: %s", strconv.Quote(logName))
 	} else {
 		full := model.FullFuncName(node.FuncPkg, node.Func)
-		args := strings.Join(node.Args, ", ")
+		argNames := make([]string, len(node.Args))
+		for i, arg := range node.Args {
+			argNames[i] = arg.Name
+		}
+		argsStr := strings.Join(argNames, ", ")
 		g.emitLog(buf, "[PROVIDE] before: %s", strconv.Quote(logName))
-		fmt.Fprintf(buf, "_ = %s(%s)\n", full, args)
+		fmt.Fprintf(buf, "_ = %s(%s)\n", full, argsStr)
 		g.emitLog(buf, "[PROVIDE] after: %s", strconv.Quote(logName))
-
 	}
 }
 
+// ---------- buildCallArgs 从 model.Arg 读取 ----------
 func buildCallArgs(node model.Node) []string {
 	args := make([]string, len(node.Args))
 	for i, arg := range node.Args {
-		if len(node.IsContextArg) > i && node.IsContextArg[i] {
+		if arg.IsContext {
 			args[i] = "ctx"
 		} else {
-			args[i] = arg
+			args[i] = arg.Name
 		}
 	}
 	return args
@@ -231,7 +242,6 @@ func (g *Generator) writeProviderStatement(buf *bytes.Buffer, node model.Node) {
 
 	callName := node.ShortName()
 	logName := node.LongName()
-
 	args := buildCallArgs(node)
 	argsStr := strings.Join(args, ", ")
 
@@ -254,6 +264,7 @@ func (g *Generator) writeProviderStatement(buf *bytes.Buffer, node model.Node) {
 
 	g.emitLog(buf, "[PROVIDE] after: %s", strconv.Quote(logName))
 }
+
 func (g *Generator) writeProviders(buf *bytes.Buffer, nodes []model.Node, refCount map[string]int, unusedMode model.UnusedMode) {
 	for _, node := range nodes {
 		if node.IsInvoke {
@@ -279,7 +290,6 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node) {
 		}
 		callName := node.ShortName()
 		logName := node.LongName()
-
 		args := buildCallArgs(node)
 		argsStr := strings.Join(args, ", ")
 
@@ -308,14 +318,12 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node) {
 }
 
 func (g *Generator) writeMainFunc(buf *bytes.Buffer, nodes []model.Node, originFuncName string, unusedMode model.UnusedMode, refCount map[string]int, params *ast.FieldList, fset *token.FileSet) {
-	// 生成函数签名：func Init() func(context.Context) error
 	paramStr := formatParams(params, fset)
 	if paramStr != "" {
 		paramStr = " " + paramStr // 前导空格
 	}
 	fmt.Fprintf(buf, "func %s(%s) func(context.Context) error {\n", originFuncName, paramStr)
 	g.writeProviders(buf, nodes, refCount, unusedMode)
-	// 返回闭包：func(ctx context.Context) error { ... }
 	fmt.Fprintf(buf, "\treturn func(ctx context.Context) error {\n")
 	g.writeInvokes(buf, nodes)
 	buf.WriteString("\t\treturn nil\n\t}\n}\n\n")

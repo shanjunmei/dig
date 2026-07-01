@@ -60,7 +60,7 @@ func (p *Processor) Process(pkg *packages.Package, pkgMap map[string]*packages.P
 	refCount := make(map[string]int)
 	for _, node := range nodes {
 		for _, arg := range node.Args {
-			refCount[arg]++
+			refCount[arg.Name]++
 		}
 	}
 
