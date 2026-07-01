@@ -1093,6 +1093,11 @@ func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) model.N
 	return node
 }
 
+type pair struct {
+	path  string
+	alias string
+}
+
 func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 	var prefix strings.Builder
 	for {
@@ -1107,35 +1112,20 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 		}
 	}
 
-	// 本地包直接裁剪前缀
+	// 主包路径前缀替换（一次 ReplaceAll 等价于原循环）
 	mainPrefix := e.mainPkgPath + "."
-	for strings.Contains(typeStr, mainPrefix) {
-		typeStr = strings.ReplaceAll(typeStr, mainPrefix, "")
-	}
+	typeStr = strings.ReplaceAll(typeStr, mainPrefix, "")
 
-	type pair struct {
-		path  string
-		alias string
-	}
 	pairs := functional.MapEntries(e.pkgAliasMap, func(path, alias string) pair {
 		return pair{path, alias}
 	})
-	// 长路径优先
 	sort.Slice(pairs, func(i, j int) bool {
 		return len(pairs[i].path) > len(pairs[j].path)
 	})
 
-	// 关键修复：循环替换，把所有嵌套里的包路径全部替换干净
-	changed := true
-	for changed {
-		changed = false
-		for _, p := range pairs {
-			old := typeStr
-			typeStr = strings.ReplaceAll(typeStr, p.path+".", p.alias+".")
-			if old != typeStr {
-				changed = true
-			}
-		}
+	// 单次遍历（无需循环，因为替换后不会产生新的包路径）
+	for _, p := range pairs {
+		typeStr = strings.ReplaceAll(typeStr, p.path+".", p.alias+".")
 	}
 
 	return prefix.String() + typeStr
