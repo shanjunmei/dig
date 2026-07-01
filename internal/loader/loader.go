@@ -10,7 +10,7 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-const tagBuild = "digen"
+const tagBuild = model.TagBuild
 
 // 为了简化，我们不在此处导入 logger，而是将日志功能通过参数传递，或直接在函数内使用全局？
 // 更好的方式是让 loader 不依赖 logger，而是由上层处理错误和日志。

@@ -19,8 +19,8 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-const tagBuild = "digen"
-const diPkgPath = "github.com/shanjunmei/dig"
+const tagBuild = model.TagBuild
+const diPkgPath = model.DiPkgPath
 
 type Generator struct {
 	logger *logger.Logger
@@ -165,24 +165,6 @@ func formatParams(params *ast.FieldList, fset *token.FileSet) string {
 	return buf.String()
 }
 
-func fullFuncName(pkgAlias, funcName string) string {
-	if pkgAlias == "" {
-		return funcName
-	}
-	return pkgAlias + "." + funcName
-}
-func shortName(node model.Node) string {
-	return fullFuncName(node.FuncPkg, node.Func)
-}
-
-// longName 返回用于日志的完整路径（包路径.函数名）
-func longName(node model.Node) string {
-	if node.PkgPath == "" {
-		return node.Func
-	}
-	return node.PkgPath + "." + node.Func
-}
-
 func (g *Generator) emitLog(buf *bytes.Buffer, format string, args ...string) {
 	if !g.cfg.Debug {
 		return
@@ -199,7 +181,7 @@ func (g *Generator) emitLog(buf *bytes.Buffer, format string, args ...string) {
 	buf.WriteString(")\n")
 }
 func (g *Generator) handleUnusedProvider(buf *bytes.Buffer, node model.Node) {
-	logName := longName(node)
+	logName := node.LongName()
 	if node.IsSupply {
 		expr := node.Value
 		if node.FuncPkg != "" && !strings.HasPrefix(expr, node.FuncPkg+".") {
@@ -214,7 +196,7 @@ func (g *Generator) handleUnusedProvider(buf *bytes.Buffer, node model.Node) {
 		fmt.Fprintf(buf, "_ = %s(%s)\n", node.Func, argsStr)
 		g.emitLog(buf, "[PROVIDE] after: %s", strconv.Quote(logName))
 	} else {
-		full := fullFuncName(node.FuncPkg, node.Func)
+		full := model.FullFuncName(node.FuncPkg, node.Func)
 		args := strings.Join(node.Args, ", ")
 		g.emitLog(buf, "[PROVIDE] before: %s", strconv.Quote(logName))
 		fmt.Fprintf(buf, "_ = %s(%s)\n", full, args)
@@ -247,8 +229,8 @@ func (g *Generator) writeProviderStatement(buf *bytes.Buffer, node model.Node) {
 		return
 	}
 
-	callName := shortName(node)
-	logName := longName(node)
+	callName := node.ShortName()
+	logName := node.LongName()
 
 	args := buildCallArgs(node)
 	argsStr := strings.Join(args, ", ")
@@ -295,8 +277,8 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node) {
 		if !node.IsInvoke {
 			continue
 		}
-		callName := shortName(node)
-		logName := longName(node)
+		callName := node.ShortName()
+		logName := node.LongName()
 
 		args := buildCallArgs(node)
 		argsStr := strings.Join(args, ", ")

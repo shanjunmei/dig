@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	diPkgPath            = "github.com/shanjunmei/dig"
+	diPkgPath            = model.DiPkgPath
 	closurePrefixInvoke  = "dig_invoke_"
 	closurePrefixProvide = "dig_provider_"
 )
@@ -812,7 +812,7 @@ func (e *Extractor) buildDependencyGraph(items []extractedItem) ([][]int, []int,
 			}
 			providerIdx, ok := e.globalProviderMap[argType]
 			if !ok {
-				funcName := fullFuncName(it.Pkg.PkgPath, it.FuncName)
+				funcName := model.FullFuncName(it.Pkg.PkgPath, it.FuncName)
 				return nil, nil, fmt.Errorf("no provider for type %q (required by %s)", argType, funcName)
 			}
 			adj[providerIdx] = append(adj[providerIdx], i)
@@ -820,13 +820,6 @@ func (e *Extractor) buildDependencyGraph(items []extractedItem) ([][]int, []int,
 		}
 	}
 	return adj, indeg, nil
-}
-
-func fullFuncName(pkgAlias, funcName string) string {
-	if pkgAlias == "" {
-		return funcName
-	}
-	return pkgAlias + "." + funcName
 }
 
 func topologicalSort(n int, adj [][]int, indeg []int) ([]int, error) {
@@ -899,10 +892,10 @@ func (e *Extractor) describeItem(idx int) string {
 	if it.IsSupply {
 		desc = fmt.Sprintf("Supply of type %q", it.RetType)
 	} else if it.IsInvoke {
-		funcName := fullFuncName(it.Pkg.PkgPath, it.FuncName)
+		funcName := model.FullFuncName(it.Pkg.PkgPath, it.FuncName)
 		desc = fmt.Sprintf("Invoke %q", funcName)
 	} else {
-		funcName := fullFuncName(it.Pkg.PkgPath, it.FuncName)
+		funcName := model.FullFuncName(it.Pkg.PkgPath, it.FuncName)
 		desc = fmt.Sprintf("Provider %q (returns %q)", funcName, it.RetType)
 	}
 	if len(it.ArgTypes) > 0 {

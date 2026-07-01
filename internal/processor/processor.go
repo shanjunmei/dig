@@ -114,7 +114,7 @@ func (p *Processor) checkUnusedProviders(nodes []model.Node, refCount map[string
 			continue
 		}
 		if refCount[node.Name] == 0 {
-			funcDesc := model.LongName(node)
+			funcDesc := node.LongName()
 			return fmt.Errorf("unused provider: %s (returns %s)", funcDesc, node.RetType)
 		}
 	}
