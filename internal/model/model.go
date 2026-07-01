@@ -38,6 +38,8 @@ type Node struct {
 	ClosureDef string
 	UsedPkgs   []string
 	PkgPath    string
+
+	GenericArgs string
 }
 
 // fullFuncName 返回 包别名.函数名

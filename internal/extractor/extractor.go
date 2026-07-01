@@ -64,6 +64,8 @@ type extractedItem struct {
 
 	Params        []ExtractedArg // 合并后的参数列表（闭包参数 + 自由变量）
 	ClosureParams []ExtractedArg // 闭包自身的原始参数
+
+	GenericArgsStr string
 }
 
 // NewExtractor 创建提取器
@@ -83,6 +85,52 @@ func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, strat
 	return e
 }
 
+// extractGenericArgStr 从带泛型索引的 expr 取出 [T1,T2] 字符串，清洗包路径
+func (e *Extractor) extractGenericArgStr(expr ast.Expr, curPkg *packages.Package) (string, error) {
+	var indexNode ast.Node
+	fun := expr
+	// 循环剥离 X，拿到纯 Index / IndexList 节点（只存 [T] 部分）
+	for {
+		switch n := fun.(type) {
+		case *ast.IndexExpr:
+			indexNode = n
+			fun = n.X
+		case *ast.IndexListExpr:
+			indexNode = n
+			fun = n.X
+		default:
+			goto endLoop
+		}
+	}
+endLoop:
+	if indexNode == nil {
+		return "", nil
+	}
+
+	// 只打印泛型参数列表，丢弃前面的函数标识符
+	var buf bytes.Buffer
+	switch idx := indexNode.(type) {
+	case *ast.IndexExpr:
+		// 单泛型参数 [T]
+		if err := printer.Fprint(&buf, curPkg.Fset, idx.Index); err != nil {
+			return "", err
+		}
+		return "[" + e.replacePkgPathWithAlias(buf.String()) + "]", nil
+	case *ast.IndexListExpr:
+		// 多泛型参数 [T,K]
+		var parts []string
+		for _, item := range idx.Indices {
+			var subBuf bytes.Buffer
+			if err := printer.Fprint(&subBuf, curPkg.Fset, item); err != nil {
+				return "", err
+			}
+			parts = append(parts, e.replacePkgPathWithAlias(subBuf.String()))
+		}
+		return "[" + strings.Join(parts, ", ") + "]", nil
+	default:
+		return "", nil
+	}
+}
 func (e *Extractor) extractOptions(expr ast.Expr, curPkg, realPkg *packages.Package) error {
 	expr = ast.Unparen(expr)
 	call, ok := expr.(*ast.CallExpr)
@@ -605,7 +653,13 @@ func getFuncMeta(expr ast.Expr, curPkg *packages.Package, pkgMap map[string]*pac
 	if !ok {
 		return "", nil, nil, fmt.Errorf("package %s not found in pkgMap", fnPkg.Path())
 	}
-	return fn.Name(), fn.Type().(*types.Signature), realPkg, nil
+	instFuncType := curPkg.TypesInfo.TypeOf(expr)
+	instSig, ok := instFuncType.(*types.Signature)
+	if !ok {
+		return "", nil, nil, fmt.Errorf("failed to get instantiated signature for %s", fn.Name())
+	}
+
+	return fn.Name(), instSig, realPkg, nil
 }
 
 func validateInvokeSignature(sig *types.Signature, funcName string) error {
@@ -646,12 +700,17 @@ func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error 
 	if err := validateInvokeSignature(sig, name); err != nil {
 		return err
 	}
+	genericStr, err := e.extractGenericArgStr(expr, curPkg)
+	if err != nil {
+		return err
+	}
 	alias := e.collectPkgAlias(realPkg)
 	argTypes, isContext := e.buildArgInfo(sig)
 	hasErr := sigHasError(sig)
 	item := e.newExtractedItem(name, realPkg, alias, hasErr)
 	item.IsInvoke = true
 	item.Params = buildParamsFromSignature(sig, argTypes, isContext)
+	item.GenericArgsStr = genericStr
 	e.items = append(e.items, item)
 	return nil
 }
@@ -683,6 +742,10 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	if err != nil {
 		return err
 	}
+	genericStr, err := e.extractGenericArgStr(expr, curPkg)
+	if err != nil {
+		return err
+	}
 	alias := e.collectPkgAlias(realPkg)
 
 	res := sig.Results()
@@ -709,6 +772,7 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	item := e.newExtractedItem(name, realPkg, alias, hasErr)
 	item.RetType = retType
 	item.Params = buildParamsFromSignature(sig, argTypes, isContext)
+	item.GenericArgsStr = genericStr
 	idx := len(e.items)
 	e.items = append(e.items, item)
 	e.globalProviderMap[retType] = idx
@@ -1001,10 +1065,11 @@ func (e *Extractor) baseNode(it extractedItem, name string, argNames []string) m
 		}
 	}
 	return model.Node{
-		Name:    name,
-		PkgPath: it.Pkg.PkgPath,
-		FuncPkg: it.PkgAlias,
-		Args:    args,
+		Name:        name,
+		PkgPath:     it.Pkg.PkgPath,
+		FuncPkg:     it.PkgAlias,
+		Args:        args,
+		GenericArgs: it.GenericArgsStr,
 	}
 }
 
@@ -1042,8 +1107,10 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 		}
 	}
 
-	if strings.HasPrefix(typeStr, e.mainPkgPath+".") {
-		typeStr = typeStr[len(e.mainPkgPath)+1:]
+	// 本地包直接裁剪前缀
+	mainPrefix := e.mainPkgPath + "."
+	for strings.Contains(typeStr, mainPrefix) {
+		typeStr = strings.ReplaceAll(typeStr, mainPrefix, "")
 	}
 
 	type pair struct {
@@ -1053,13 +1120,25 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 	pairs := functional.MapEntries(e.pkgAliasMap, func(path, alias string) pair {
 		return pair{path, alias}
 	})
+	// 长路径优先
 	sort.Slice(pairs, func(i, j int) bool {
 		return len(pairs[i].path) > len(pairs[j].path)
 	})
-	result := functional.Reduce(pairs, typeStr, func(res string, p pair) string {
-		return strings.ReplaceAll(res, p.path+".", p.alias+".")
-	})
-	return prefix.String() + result
+
+	// 关键修复：循环替换，把所有嵌套里的包路径全部替换干净
+	changed := true
+	for changed {
+		changed = false
+		for _, p := range pairs {
+			old := typeStr
+			typeStr = strings.ReplaceAll(typeStr, p.path+".", p.alias+".")
+			if old != typeStr {
+				changed = true
+			}
+		}
+	}
+
+	return prefix.String() + typeStr
 }
 
 // ---------- buildParamListAndFreeVarMap 使用新字段 ----------

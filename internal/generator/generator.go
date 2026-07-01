@@ -204,13 +204,15 @@ func (g *Generator) handleUnusedProvider(buf *bytes.Buffer, node model.Node) {
 		g.emitLog(buf, "[PROVIDE] after: %s", strconv.Quote(logName))
 	} else {
 		full := model.FullFuncName(node.FuncPkg, node.Func)
+		// 拼接泛型参数
+		fullCall := full + node.GenericArgs
 		argNames := make([]string, len(node.Args))
 		for i, arg := range node.Args {
 			argNames[i] = arg.Name
 		}
 		argsStr := strings.Join(argNames, ", ")
 		g.emitLog(buf, "[PROVIDE] before: %s", strconv.Quote(logName))
-		fmt.Fprintf(buf, "_ = %s(%s)\n", full, argsStr)
+		fmt.Fprintf(buf, "_ = %s(%s)\n", fullCall, argsStr)
 		g.emitLog(buf, "[PROVIDE] after: %s", strconv.Quote(logName))
 	}
 }
@@ -245,6 +247,9 @@ func (g *Generator) writeProviderStatement(buf *bytes.Buffer, node model.Node) {
 	args := buildCallArgs(node)
 	argsStr := strings.Join(args, ", ")
 
+	// 拼接泛型参数
+	fullCall := callName + node.GenericArgs
+
 	g.emitLog(buf, "[PROVIDE] before: %s", strconv.Quote(logName))
 
 	if node.IsClosure {
@@ -254,12 +259,12 @@ func (g *Generator) writeProviderStatement(buf *bytes.Buffer, node model.Node) {
 	}
 
 	if node.HasError {
-		fmt.Fprintf(buf, "%s, err := %s(%s)\n", node.Name, callName, argsStr)
+		fmt.Fprintf(buf, "%s, err := %s(%s)\n", node.Name, fullCall, argsStr)
 		fmt.Fprintf(buf, "if err != nil {\n")
 		g.emitLog(buf, "[PROVIDE] failed: %s: %v", strconv.Quote(logName), "err")
 		fmt.Fprintf(buf, "panic(err)\n}\n")
 	} else {
-		fmt.Fprintf(buf, "%s := %s(%s)\n", node.Name, callName, argsStr)
+		fmt.Fprintf(buf, "%s := %s(%s)\n", node.Name, fullCall, argsStr)
 	}
 
 	g.emitLog(buf, "[PROVIDE] after: %s", strconv.Quote(logName))
@@ -289,6 +294,8 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node) {
 			continue
 		}
 		callName := node.ShortName()
+		fullCall := callName + node.GenericArgs
+		g.logger.Debugf("callName=%q GenericArgs=%q\n", callName, node.GenericArgs)
 		logName := node.LongName()
 		args := buildCallArgs(node)
 		argsStr := strings.Join(args, ", ")
@@ -305,11 +312,11 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node) {
 			}
 		} else {
 			if node.HasError {
-				fmt.Fprintf(buf, "if err := %s(%s); err != nil {\n", callName, argsStr)
+				fmt.Fprintf(buf, "if err := %s(%s); err != nil {\n", fullCall, argsStr)
 				g.emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), "err")
 				fmt.Fprintf(buf, "return err\n}\n")
 			} else {
-				fmt.Fprintf(buf, "%s(%s)\n", callName, argsStr)
+				fmt.Fprintf(buf, "%s(%s)\n", fullCall, argsStr)
 			}
 		}
 
