@@ -128,37 +128,19 @@ func (e *Extractor) buildExtractedParams(sig *types.Signature) []ExtractedArg {
 
 // extractGenericArgStr 从带泛型索引的 expr 取出 [T1,T2] 字符串，清洗包路径
 func (e *Extractor) extractGenericArgStr(expr ast.Expr, curPkg *packages.Package) (string, error) {
-	var indexNode ast.Node
-	fun := expr
-	// 循环剥离 X，拿到纯 Index / IndexList 节点（只存 [T] 部分）
-	for {
-		switch n := fun.(type) {
-		case *ast.IndexExpr:
-			indexNode = n
-			fun = n.X
-		case *ast.IndexListExpr:
-			indexNode = n
-			fun = n.X
-		default:
-			goto endLoop
-		}
-	}
-endLoop:
+	_, indexNode := stripGenericIndexes(expr)
 	if indexNode == nil {
 		return "", nil
 	}
 
-	// 只打印泛型参数列表，丢弃前面的函数标识符
 	var buf bytes.Buffer
 	switch idx := indexNode.(type) {
 	case *ast.IndexExpr:
-		// 单泛型参数 [T]
 		if err := printer.Fprint(&buf, curPkg.Fset, idx.Index); err != nil {
 			return "", err
 		}
 		return "[" + e.replacePkgPathWithAlias(buf.String()) + "]", nil
 	case *ast.IndexListExpr:
-		// 多泛型参数 [T,K]
 		var parts []string
 		for _, item := range idx.Indices {
 			var subBuf bytes.Buffer
@@ -222,20 +204,8 @@ func stripGenericIndexes(expr ast.Expr) (base ast.Expr, indexNode ast.Node) {
 
 // ---------- resolveFunctionObject 保持原样 ----------
 func resolveFunctionObject(call *ast.CallExpr, curPkg *packages.Package) types.Object {
-	fun := call.Fun
-	// 展开所有泛型索引表达式
-	for {
-		switch f := fun.(type) {
-		case *ast.IndexExpr:
-			fun = f.X
-		case *ast.IndexListExpr:
-			fun = f.X
-		default:
-			goto end
-		}
-	}
-end:
-	switch fun := fun.(type) {
+	base, _ := stripGenericIndexes(call.Fun)
+	switch fun := base.(type) {
 	case *ast.Ident:
 		return curPkg.TypesInfo.ObjectOf(fun)
 	case *ast.SelectorExpr:
