@@ -180,6 +180,24 @@ func formatParams(params *ast.FieldList, fset *token.FileSet) string {
 	return buf.String()
 }
 
+// isIdentOrSelector 判断字符串是否为合法的 Go 标识符或选择器表达式
+func isIdentOrSelector(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	// 首字符必须是字母或下划线
+	if (s[0] < 'a' || s[0] > 'z') && (s[0] < 'A' || s[0] > 'Z') && s[0] != '_' {
+		return false
+	}
+	for _, c := range s {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // emitLog writes a debug log statement if debug mode is enabled.
 func (g *Generator) emitLog(buf *bytes.Buffer, format string, args ...string) {
 	if !g.cfg.Debug {
@@ -215,7 +233,7 @@ func buildCallArgs(node model.Node) []string {
 func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool) {
 	if node.IsSupply {
 		expr := node.Value
-		if node.FuncPkg != "" && !strings.HasPrefix(expr, node.FuncPkg+".") {
+		if node.FuncPkg != "" && isIdentOrSelector(expr) && !strings.HasPrefix(expr, node.FuncPkg+".") {
 			expr = node.FuncPkg + "." + expr
 		}
 		g.emitLog(buf, "[SUPPLY] before: %s", strconv.Quote(node.RetType))
