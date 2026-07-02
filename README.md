@@ -73,7 +73,7 @@ func InitApp() func(context.Context) error {
         dig.Supply(DefaultTimeout),
 
         // 3) Provide using an inline closure – acceptable as long as
-        //    it only uses constant literals or supplied globals.
+        //    it only uses constant literals or package-level variables.
         dig.Provide(func(timeout Timeout) *Server {
             return NewServer(timeout)
         }),
@@ -187,11 +187,12 @@ The generator outputs `dig_gen.go` in each package directory that contains a `di
 
 ### 2.1 Supply – Injecting Existing Values
 
-You've already seen `Supply` in the basic example – it injects a package‑level variable. You can use it for any global, constant, or runtime‑computed value.
+`Supply` injects a value directly without a constructor function. It's perfect for constants, package‑level variables, or values computed at runtime.
 
 ```go
 dig.Supply(globalDBConn)
 dig.Supply(apiKey)
+dig.Supply(DefaultTimeout)
 ```
 
 ### 2.2 Wrapper Types to Resolve Primitive Conflicts
@@ -220,11 +221,12 @@ The generator sees each wrapper type as unique, so there is no conflict.
 
 ### 2.3 Closure Constraint (Critical)
 
-When you write an inline anonymous function inside `dig.Provide`, you **must not** capture variables from the outer scope of `InitApp()`.
+When you write an inline anonymous function inside `dig.Provide` or `dig.Invoke`, you **must not** capture variables from the outer scope of `InitApp()`.
 
-✅ **Correct** – uses only constant literals:
+✅ **Correct** – uses only constant literals or package‑level variables:
 ```go
 dig.Provide(func() QueryTimeout { return QueryTimeout(5 * time.Second) })
+dig.Provide(func() Timeout { return DefaultTimeout }) // DefaultTimeout is package-level
 ```
 
 ❌ **Wrong** – captures a local variable `t`:
@@ -234,190 +236,122 @@ dig.Provide(func() QueryTimeout { return QueryTimeout(t) })
 // generator error: cannot capture local variable "t"
 ```
 
-**Why?**  
-The generator extracts the closure body and lifts it into a top‑level function in `di_gen.go`. This new function is defined at **package level** – it does **not** have access to `InitApp()`'s stack frame. If the closure captures a local variable from `InitApp()`, that variable does not exist in the package scope, causing an "undefined symbol" compile error.
+**Why?** The generator extracts the closure body and lifts it into a top‑level function in `di_gen.go`. This new function is defined at **package level** – it does **not** have access to `InitApp()`'s stack frame. Only package‑level symbols (global variables, constants, functions, types) and literal values are accessible.
 
-**Important**: Even if the captured value is a constant, it is still bound to `InitApp`'s scope. Only **constant literals** (like `true`, `3`, `"hello"`) and **package‑level variables/constants** are allowed, because they are resolvable at package level.
+**What about `InitApp` parameters?** They are also local to `InitApp` and cannot be captured either. However, `digen` automatically registers all `InitApp` parameters as `Supply` providers, so you don't need to capture them – you can simply request them in `Provide`/`Invoke` closures.
 
-**If you need a value that is computed at runtime, define it as a package‑level variable and use `dig.Supply` to inject it.**
+### 2.4 External Parameters (InitApp Arguments)
 
-### 2.4 Where Conditional Logic Works (and Where It Doesn't)
+You can pass external dependencies into `InitApp` as parameters. The generator automatically registers each parameter as a `Supply` provider, making them available for injection.
 
-Because dig is a **code generator**, not a runtime framework, it performs **static analysis** on your `di.go` and module files. This means the generator reads your code as text, but **does not execute it**. Therefore, conditional logic works differently depending on where you place it.
-
-#### ✅ Conditionals inside `Provide`/`Invoke` closures (works)
-
-The body of a closure passed to `dig.Provide` or `dig.Invoke` is copied as-is into the generated code. All conditional logic inside it will execute **at runtime** as expected.
-
-**Example (classic conditional injection):**
 ```go
-dig.Provide(func(t QueryTimeout, useMySQL UseMySQL, cache EnableCache) Store {
+// di.go
+//go:build digen
+func InitApp(cfg *Config, logger *Logger) func(context.Context) error {
+    return dig.Build(
+        dig.Provide(NewDB),          // can depend on *Config (from parameter)
+        dig.Invoke(func(db *DB) error { // can also depend on *Config or *Logger
+            logger.Info("db initialized")
+            return nil
+        }),
+    )
+}
+```
+
+**How it works**: The generator adds a `Supply` for each parameter of `InitApp`, so you can directly use those types in your providers and invokes. They are treated exactly like explicit `dig.Supply` calls.
+
+**Key distinction**: 
+- **InitApp parameters** are injected automatically as supplies.
+- **Local variables** defined inside `InitApp` cannot be captured by closures.
+
+If you need to provide a value that is computed at runtime inside `InitApp`, define it as a package‑level variable or function, or use `dig.Supply` with a package‑level variable.
+
+### 2.5 Generic Support
+
+`digen` fully supports generic functions and types. You can use them directly in `Provide` and `Invoke`.
+
+**Generic types**:
+```go
+type Store[T any] struct { items []T }
+func NewStore[T any]() *Store[T] { return &Store[T]{} }
+```
+
+In `di.go`:
+```go
+dig.Provide(NewStore[int])          // concrete instantiation
+dig.Provide(NewStore[string])       // another concrete instantiation
+dig.Invoke(func(s *Store[int]) error { ... })
+```
+
+**Generic functions**:
+```go
+func Process[T any](s *Store[T]) error { ... }
+```
+
+```go
+dig.Invoke(Process[int])            // instantiate generic function
+dig.Invoke(Process[string])
+```
+
+**Generic closures**:
+```go
+dig.Provide(func() *Store[bool] { return NewStore[bool]() })
+```
+
+The generator handles generic instantiations correctly and includes type arguments in the generated function calls.
+
+### 2.6 Conditional Logic
+
+Because dig is a **code generator**, not a runtime framework, conditional logic works correctly **inside** `Provide`/`Invoke` closures, but not inside `Module()` functions.
+
+✅ **Inside closures – works at runtime**:
+```go
+dig.Provide(func(useMySQL UseMySQL) Store {
     if useMySQL {
-        return NewMySQLStore(t)
+        return NewMySQLStore()
     }
-    return NewRedisStore(cache)
+    return NewRedisStore()
 })
 ```
 
-The generator copies the entire closure body into a generated function like `__p_xxx`. At runtime, `useMySQL` determines which store is created.
-
-**This is the recommended way to handle conditional logic.**
-
-#### ❌ Conditionals inside `Module()` function body (does NOT work)
-
-The `Module()` function is parsed statically. The generator **does not execute** any `if` statements, loops, or branches inside it. All `dig.Provide`, `dig.Invoke`, and `dig.Supply` calls are extracted regardless of which branch they appear in.
-
-**Example of what does NOT work as expected:**
+❌ **Inside `Module()` – does NOT work as expected** (all branches are parsed and registered):
 ```go
 func Module() dig.Option {
     if enableCache {
-        return dig.Module(
-            dig.Provide(NewCache),
-            dig.Invoke(StartCache),
-        )
+        return dig.Module(dig.Provide(NewCache))
     }
-    return dig.Module(
-        dig.Provide(NewNoop),
-        dig.Invoke(StartNoop),
-    )
+    return dig.Module(dig.Provide(NewNoop))
 }
+// Both NewCache and NewNoop will be registered
 ```
 
-The generator will parse **both branches** and register **all** providers (`NewCache`, `NewNoop`, `StartCache`, `StartNoop`) into the dependency graph, regardless of `enableCache`. The condition is never evaluated during generation.
-
-**To achieve conditional module inclusion**, use **build tags** instead:
-
+**Use build tags for compile‑time selection**:
 ```go
 // module_cache.go
 //go:build enable_cache
-package mod
-func Module() dig.Option { return dig.Module(dig.Provide(NewCache), dig.Invoke(StartCache)) }
+func Module() dig.Option { return dig.Module(dig.Provide(NewCache)) }
 
 // module_noop.go
 //go:build !enable_cache
-package mod
-func Module() dig.Option { return dig.Module(dig.Provide(NewNoop), dig.Invoke(StartNoop)) }
+func Module() dig.Option { return dig.Module(dig.Provide(NewNoop)) }
 ```
 
-Then in `di.go`:
-```go
-func InitApp() func(context.Context) error {
-    return dig.Build(
-        mod.Module(), // build tags decide which file is compiled
-    )
-}
-```
+### 2.7 Observability (Debug Logging & Custom Logging)
 
-#### ✅ Conditionals inside `Invoke` closures (works)
+Enable debug logging with the `-debug` flag when running `digen`. The generated code will insert `Logf` calls around each provider and invoker.
 
-Same as `Provide` closures — the entire body is copied and runs at runtime.
+Override `Logf` at runtime in your `main.go`:
 
 ```go
-dig.Invoke(func(config Config) {
-    if config.Debug {
-        log.Println("debug mode enabled")
-    }
-})
-```
-
-#### ❌ `dig.Module` with IIFE (not recommended)
-
-You may attempt to use an immediately-invoked function expression (IIFE) inside `dig.Module`:
-
-```go
-dig.Module(
-    func() dig.Option {
-        if someCondition {
-            return dig.Provide(NewCache)
-        }
-        return dig.Provide(NewNoop)
-    }(),
-)
-```
-
-This does NOT work because `someCondition` cannot be evaluated at generation time. The generator will parse both branches and register both providers. Avoid this pattern.
-
-#### Summary Table
-
-| Location | Conditional Logic Works? | Why |
-|----------|--------------------------|-----|
-| Inside `Provide`/`Invoke` closure body | ✅ Yes | Body is copied and runs at runtime |
-| Inside `Module()` function body | ❌ No | Generator does not execute control flow |
-| Inside `dig.Module` arguments via IIFE | ❌ No | Condition cannot be evaluated at generation time |
-| Using build tags | ✅ Yes | Compile-time selection controlled by Go |
-
-**Rule of thumb:**
-- Put runtime decisions **inside** `Provide`/`Invoke` closures.
-- Use **build tags** for compile-time module selection.
-- Keep `Module()` functions **pure** — only `dig.Module` calls and `return`.
-
-### 2.5 Observability (Debug Logging & Custom Logging)
-
-**Enable debug logging** with the `-debug` flag.
-
-Run the generator directly:
-```bash
-digen -debug -out di_gen.go
-```
-
-Or add `-debug` to the `//go:generate` directive in `di.go`:
-```go
-//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -debug -out di_gen.go
-```
-
-When enabled, the generated code will insert `Logf` calls like this:
-
-```go
-Logf("[PROVIDE] before: %s\n", "main.NewConfig")
-v0, err := NewConfig()
-if err != nil {
-    Logf("[PROVIDE] failed: %s: %v\n", "main.NewConfig", err)
-    panic(err)
-}
-Logf("[PROVIDE] after: %s\n", "main.NewConfig")
-```
-
-You'll see runtime output such as:
-
-```
-[PROVIDE] before: main.NewConfig
-[PROVIDE] after:  main.NewConfig
-[PROVIDE] before: main.NewDB
-[PROVIDE] after:  main.NewDB
-[INVOKE]  before: main.(*Server).Run
-[INVOKE]  after:  main.(*Server).Run
-```
-
-**Override `Logf` at runtime** – The generated file declares:
-
-```go
-var Logf = log.Printf
-```
-
-You can override this in your `main.go` before calling `InitApp()`:
-
-```go
-package main
-
-import (
-    "log"
-    "os"
-)
+var Logf = log.Printf // declared in dig_gen.go
 
 func main() {
-    customLogger := log.New(os.Stdout, "[MYAPP] ", log.LstdFlags|log.Lshortfile)
-    Logf = customLogger.Printf
-
-    run := InitApp()
-    if err := run(context.Background()); err != nil {
-        customLogger.Fatalf("app failed: %v", err)
-    }
+    Logf = myLogger.Printf // custom logger
+    // ...
 }
 ```
 
-**No external dependency** – `Logf` uses standard `log` by default.
-
-### 2.6 Unused Provider Policies
+### 2.8 Unused Provider Policies
 
 - **`error`** (default) – generation fails if unused providers exist.
 - **`ignore`** – keep unused providers with `_ = fn()`.
@@ -427,13 +361,13 @@ func main() {
 digen -unused=drop -out di_gen.go
 ```
 
-### 2.7 Package Alias Strategies
+### 2.9 Package Alias Strategies
 
 - **`full`** (default) – `addr_handler`, `user_handler`
 - **`short`** – `handler`, `handler2`
 - **`obfuscated`** – `a`, `b`, `c1`
 
-### 2.8 Module‑Style Code Organisation with `dig.Module`
+### 2.10 Module‑Style Code Organisation with `dig.Module`
 
 For larger projects, each module defines its own `Module()` function that returns a `dig.Option`. Modules can be **nested** – a module can include other modules, allowing hierarchical organisation.
 
@@ -528,7 +462,7 @@ func Module() dig.Option {
 }
 ```
 
-**`di.go`** – top‑level composition (mixing modules with plain providers):
+**`di.go`** – top‑level composition:
 ```go
 //go:build digen
 package main
@@ -557,6 +491,33 @@ func InitApp() func(context.Context) error {
 - The top‑level `di.go` stays clean even as the project grows.
 
 **Important**: Do not include the same module twice (directly or transitively) – the generator will report a duplicate provider error. Design your module hierarchy so each module is included only once.
+
+---
+
+## 3. Complete Example
+
+The [`example/`](./example) directory contains a comprehensive demonstration covering all features:
+
+- Cross‑package dependencies
+- Generic types and functions
+- Same‑name modules from different paths (`user/repository` and `role/repository`)
+- Module nesting
+- External parameters (`InitApp` with arguments)
+- Supply with type conversions
+- Closure usage
+- Debug logging
+- Build tags
+- Package alias strategies
+
+To run the example:
+
+```bash
+cd example
+go generate ./...
+go run .
+```
+
+Refer to the example code for a full-featured real-world style dependency injection setup.
 
 ---
 
@@ -607,18 +568,20 @@ if err := run(context.Background()); err != nil {
 
 ## Comparison with Other DI Tools
 
-| Feature | dig | Google Wire | Uber dig / FX |
-|---------|-----|-------------|---------------|
-| **Approach** | Code generation (compile‑time) | Code generation (compile‑time) | Runtime reflection (no generation) |
-| **Code generation workflow** | ✅ `digen` CLI | ✅ `wire` CLI | ❌ Not applicable |
-| **Zero runtime reflection** | ✅ | ✅ | ❌ |
-| **Zero runtime dependency** | ✅ | ✅ | ❌ |
+| Feature | dig | Google Wire | Uber Fx |
+|---------|-----|-------------|---------|
+| **Approach** | Code generation (compile‑time) | Code generation (compile‑time) | Runtime reflection |
+| **Code generation workflow** | ✅ `digen` CLI | ✅ `wire` CLI | N/A |
+| **Zero runtime reflection** | ✅ | ✅ | N/A |
+| **Zero runtime dependency** | ✅ | ✅ | N/A (requires `fx` runtime) |
 | **Dependency validation** | At generation time | At generation time | At runtime |
-| **Dedicated `Supply` API** | ✅ | ❌ | ❌ |
+| **Dedicated `Supply` API** | ✅ (`dig.Supply`) | ✅ (`wire.Value`/`wire.InterfaceValue`) | ✅ (`fx.Supply`) |
+| **Direct value injection cost** | Zero (compile‑time) | Zero (compile‑time) | Runtime reflection overhead |
 | **Closure safety enforcement** | ✅ (capture check) | ⚠️ (no check) | N/A |
-| **Wrapper type support** | ✅ | ⚠️ (manual) | ❌ |
-| **Built‑in `Invoke`** | ✅ | ❌ | ✅ (lifecycle hooks) |
-| **`dig.Module` composition** | ✅ (with nesting) | ❌ | ✅ (fx.Module) |
+| **Wrapper type support** | ✅ | ⚠️ (manual) | N/A |
+| **Built‑in `Invoke`** | ✅ | N/A | ✅ (lifecycle hooks) |
+| **Module composition** | ✅ (`dig.Module`, with nesting) | ✅ (`wire.NewSet`, with nesting) | ✅ (`fx.Module`) |
+| **Generic support** | ✅ (compile‑time, full) | ✅ (requires explicit instantiation) | ✅ (runtime, via reflection) |
 | **Unused provider policies** | 3 modes | only `drop` | N/A |
 | **Built‑in debug logging** | ✅ (with runtime override) | ⚠️ (manual) | ✅ (tracing) |
 | **External dependencies** | none (std only) | none | many |

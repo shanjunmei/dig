@@ -59,7 +59,6 @@ func (a *App) Run() error {
 	if generatedCount == 0 {
 		return fmt.Errorf("no packages with dig.Build found")
 	}
-	fmt.Printf("total %d packages, %d generated, %d failed, cost: %s",
-		generatedCount+failedCount, generatedCount, failedCount, time.Since(start))
+	fmt.Printf("[digen] generated %d/%d packages (%d failed), cost: %s\n", generatedCount, generatedCount+failedCount, failedCount, time.Since(start))
 	return nil
 }
