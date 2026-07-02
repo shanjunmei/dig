@@ -18,14 +18,12 @@ import (
 	"log"
 )
 
-var Logf = log.Printf
-
-// provide closure defined at cmd/digen/di.go:26
+// closure defined at cmd/digen/di.go:26
 func dig_provider_1(_cfg *config.Config) string {
 	return _cfg.AliasType
 }
 
-// provide closure defined at cmd/digen/di.go:27
+// closure defined at cmd/digen/di.go:27
 func dig_provider_2(_aliasType string) alias.AliasStrategy {
 	aliasType, err := alias.ParseAliasType(_aliasType)
 	if err != nil {
@@ -34,44 +32,25 @@ func dig_provider_2(_aliasType string) alias.AliasStrategy {
 	return alias.NewAliasStrategy(aliasType)
 }
 
-// invoke closure defined at cmd/digen/di.go:41
+// closure defined at cmd/digen/di.go:41
 func dig_invoke_1(a *app.App) error {
 	return a.Run()
 }
 
 func InitApp(cfg *config.Config) func(context.Context) error {
-	Logf("[SUPPLY] before: %s\n", "*github.com/shanjunmei/dig/internal/config.Config")
 	// supplied from function 'InitApp' argument 'cfg' (type *github.com/shanjunmei/dig/internal/config.Config) at cmd/digen/di.go:21
 	v0 := cfg
-	Logf("[SUPPLY] after: %s\n", "*github.com/shanjunmei/dig/internal/config.Config")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/internal/loader.NewPackageLoader")
 	v1 := loader.NewPackageLoader()
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/internal/loader.NewPackageLoader")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/internal/logger.NewLogger")
 	v2 := logger.NewLogger(v0)
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/internal/logger.NewLogger")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/cmd/digen.dig_provider_1")
 	v3 := dig_provider_1(v0)
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/cmd/digen.dig_provider_1")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/internal/generator.NewGenerator")
 	v4 := generator.NewGenerator(v2, v0)
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/internal/generator.NewGenerator")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/cmd/digen.dig_provider_2")
 	v5 := dig_provider_2(v3)
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/cmd/digen.dig_provider_2")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/internal/processor.NewProcessor")
 	v6 := processor.NewProcessor(v1, v4, v2, v0)
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/internal/processor.NewProcessor")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/internal/app.NewApp")
 	v7 := app.NewApp(v6, v1, v2, v5, v0)
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/internal/app.NewApp")
 	return func(ctx context.Context) error {
-		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/cmd/digen.dig_invoke_1")
 		if err := dig_invoke_1(v7); err != nil {
-			Logf("[INVOKE] failed: %s: %v\n", "github.com/shanjunmei/dig/cmd/digen.dig_invoke_1", err)
 			return err
 		}
-		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/cmd/digen.dig_invoke_1")
 		return nil
 	}
 }

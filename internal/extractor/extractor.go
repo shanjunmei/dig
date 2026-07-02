@@ -663,9 +663,7 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 
 	pos := curPkg.Fset.Position(funcLit.Pos())
 	relPath := e.relPath(pos.Filename)
-	comment := fmt.Sprintf("// %s closure defined at %s:%d",
-		map[bool]string{true: "invoke", false: "provide"}[isInvoke],
-		relPath, pos.Line)
+	comment := fmt.Sprintf("// closure defined at %s:%d", relPath, pos.Line)
 	item.SourceComment = comment
 
 	idx := len(e.items)

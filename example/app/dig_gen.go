@@ -15,18 +15,15 @@ import (
 	role_repository "github.com/shanjunmei/dig/example/role/repository"
 	"github.com/shanjunmei/dig/example/user"
 	"github.com/shanjunmei/dig/example/user/repository"
-	"log"
 )
 
-var Logf = log.Printf
-
 // original package: github.com/shanjunmei/dig/example/user
-// provide closure defined at example/user/module.go:12
+// closure defined at example/user/module.go:12
 func dig_provider_1() string {
 	return "user-module"
 }
 
-// provide closure defined at example/app/app.go:33
+// closure defined at example/app/app.go:33
 func dig_provider_2() *user.Store[string] {
 	s := user.NewStore[string]()
 	s.Add("hello")
@@ -34,96 +31,62 @@ func dig_provider_2() *user.Store[string] {
 }
 
 // original package: github.com/shanjunmei/dig/example/user/repository
-// invoke closure defined at example/user/repository/module.go:8
+// closure defined at example/user/repository/module.go:8
 func dig_invoke_1(r *repository.Repository[string]) {
 	r.Print()
 }
 
 // original package: github.com/shanjunmei/dig/example/role/repository
-// invoke closure defined at example/role/repository/module.go:8
+// closure defined at example/role/repository/module.go:8
 func dig_invoke_2(r *role_repository.Repository[int]) {
 	r.Add(42)
 	r.Print()
 }
 
 // original package: github.com/shanjunmei/dig/example/role
-// invoke closure defined at example/role/module.go:19
+// closure defined at example/role/module.go:19
 func dig_invoke_3(cfg role.Config) {
 	fmt.Printf("Config supplied: %s\n", cfg)
 }
 
 // original package: github.com/shanjunmei/dig/example/role
-// invoke closure defined at example/role/module.go:22
+// closure defined at example/role/module.go:22
 func dig_invoke_4(s *role.Server) {
 	s.Run()
 }
 
-// invoke closure defined at example/app/app.go:40
+// closure defined at example/app/app.go:40
 func dig_invoke_5(s *user.Store[string], cfg *common.Config, log *logger.Logger) error {
 	log.Println("App Invoke: store len =", len(s.GetAll()))
 	return nil
 }
 
 func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error {
-	Logf("[SUPPLY] before: %s\n", "*github.com/shanjunmei/dig/example/common.Config")
 	// supplied from function 'InitApp' argument 'cfg' (type *github.com/shanjunmei/dig/example/common.Config) at example/app/app.go:18
 	v0 := cfg
-	Logf("[SUPPLY] after: %s\n", "*github.com/shanjunmei/dig/example/common.Config")
-	Logf("[SUPPLY] before: %s\n", "*github.com/shanjunmei/dig/example/internal/logger.Logger")
 	// supplied from function 'InitApp' argument 'log' (type *github.com/shanjunmei/dig/example/internal/logger.Logger) at example/app/app.go:18
 	v1 := log
-	Logf("[SUPPLY] after: %s\n", "*github.com/shanjunmei/dig/example/internal/logger.Logger")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/user.NewStore")
 	v2 := user.NewStore[int]()
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/user.NewStore")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/user/repository.NewRepository")
 	v3 := repository.NewRepository[string]()
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/user/repository.NewRepository")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_1")
 	_ = dig_provider_1()
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_1")
-	Logf("[SUPPLY] before: %s\n", "int")
 	// supply from github.com/shanjunmei/dig/example/role at example/role/module.go:14
 	v5 := 100
-	Logf("[SUPPLY] after: %s\n", "int")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/role/repository.NewRepository")
 	v6 := role_repository.NewRepository[int]()
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/role/repository.NewRepository")
-	Logf("[SUPPLY] before: %s\n", "github.com/shanjunmei/dig/example/role.Config")
 	// supply from github.com/shanjunmei/dig/example/role at example/role/module.go:16
 	v7 := role.Config("production")
-	Logf("[SUPPLY] after: %s\n", "github.com/shanjunmei/dig/example/role.Config")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_2")
 	v8 := dig_provider_2()
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_2")
-	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/role.NewServer")
 	v9 := role.NewServer(v5)
-	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/role.NewServer")
 	return func(ctx context.Context) error {
-		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_1")
 		dig_invoke_1(v3)
-		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_1")
-		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/user.ProcessStore")
 		if err := user.ProcessStore[int](v2); err != nil {
-			Logf("[INVOKE] failed: %s: %v\n", "github.com/shanjunmei/dig/example/user.ProcessStore", err)
 			return err
 		}
-		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/user.ProcessStore")
-		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_2")
 		dig_invoke_2(v6)
-		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_2")
-		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_3")
 		dig_invoke_3(v7)
-		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_3")
-		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_4")
 		dig_invoke_4(v9)
-		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_4")
-		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_5")
 		if err := dig_invoke_5(v8, v0, v1); err != nil {
-			Logf("[INVOKE] failed: %s: %v\n", "github.com/shanjunmei/dig/example/app.dig_invoke_5", err)
 			return err
 		}
-		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_5")
 		return nil
 	}
 }
