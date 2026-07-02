@@ -696,11 +696,11 @@ func validateInvokeSignature(sig *types.Signature, funcName string) error {
 	}
 	if res.Len() == 1 {
 		if !isErrorType(res.At(0).Type()) {
-			return fmt.Errorf("Invoke function %s: single return value must be error, got %s", funcName, res.At(0).Type().String())
+			return fmt.Errorf("invoke function %s: single return value must be error, got %s", funcName, res.At(0).Type().String())
 		}
 		return nil
 	}
-	return fmt.Errorf("Invoke function %s has %d return values (only 0 or error allowed)", funcName, res.Len())
+	return fmt.Errorf("invoke function %s has %d return values (only 0 or error allowed)", funcName, res.Len())
 }
 
 // ---------- handleInvoke 使用新模型 ----------
@@ -755,8 +755,8 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 			return fmt.Errorf("func %s: second return value must be error, got %s", name, res.At(1).Type().String())
 		}
 	default:
-		return fmt.Errorf("func %s: too many return values (%d), only (T) or (T, error) are allowed. "+
-			"If you need to provide multiple types, define a plain struct that bundles them and return that struct.", name, res.Len())
+		return fmt.Errorf("func %s: too many return values (%d), only (T) or (T, error) are allowed "+
+			"(if you need to provide multiple types, define a plain struct that bundles them and return that struct)", name, res.Len())
 	}
 
 	retType := e.getTypeFullName(res.At(0).Type())
