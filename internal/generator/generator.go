@@ -180,22 +180,20 @@ func formatParams(params *ast.FieldList, fset *token.FileSet) string {
 	return buf.String()
 }
 
-// isIdentOrSelector 判断字符串是否为合法的 Go 标识符或选择器表达式
-func isIdentOrSelector(s string) bool {
-	if len(s) == 0 {
-		return false
+// isLiteral 判断字符串是否为 Go 字面量（数字、字符串、布尔、nil）
+func isLiteral(s string) bool {
+	if s == "true" || s == "false" || s == "nil" {
+		return true
 	}
-	// 首字符必须是字母或下划线
-	if (s[0] < 'a' || s[0] > 'z') && (s[0] < 'A' || s[0] > 'Z') && s[0] != '_' {
-		return false
+	// 数字：整数、浮点数、复数
+	if _, err := strconv.ParseFloat(s, 64); err == nil {
+		return true
 	}
-	for _, c := range s {
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' {
-			continue
-		}
-		return false
+	// 字符串：以 " 或 ` 开头
+	if strings.HasPrefix(s, `"`) || strings.HasPrefix(s, "`") {
+		return true
 	}
-	return true
+	return false
 }
 
 // emitLog writes a debug log statement if debug mode is enabled.
@@ -233,10 +231,13 @@ func buildCallArgs(node model.Node) []string {
 func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool) {
 	if node.IsSupply {
 		expr := node.Value
-		if node.FuncPkg != "" && isIdentOrSelector(expr) && !strings.HasPrefix(expr, node.FuncPkg+".") {
+		if node.FuncPkg != "" && !isLiteral(expr) && !strings.HasPrefix(expr, node.FuncPkg+".") {
 			expr = node.FuncPkg + "." + expr
 		}
 		g.emitLog(buf, "[SUPPLY] before: %s", strconv.Quote(node.RetType))
+		if node.Comment != "" {
+			fmt.Fprintf(buf, "\t%s\n", node.Comment)
+		}
 		if blank {
 			fmt.Fprintf(buf, "_ = %s\n", expr)
 		} else {

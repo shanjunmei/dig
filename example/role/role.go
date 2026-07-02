@@ -2,6 +2,8 @@ package role
 
 import "fmt"
 
+type Config string
+
 type Server struct {
 	ID int
 }

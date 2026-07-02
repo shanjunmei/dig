@@ -40,6 +40,8 @@ type Node struct {
 	PkgPath    string
 
 	GenericArgs string
+
+	Comment string
 }
 
 // fullFuncName 返回 包别名.函数名

@@ -6,6 +6,8 @@ import (
 	"go/ast"
 	"go/printer"
 	"go/types"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -35,6 +37,7 @@ type Extractor struct {
 	aliasStrategy     alias.AliasStrategy
 	invokeIndex       int
 	provideIndex      int
+	moduleRoot        string
 }
 
 // ---------- 新模型 ----------
@@ -65,10 +68,42 @@ type extractedItem struct {
 	ClosureParams []ExtractedArg // 闭包自身的原始参数
 
 	GenericArgsStr string
+
+	SourceComment string
+}
+
+// findModuleRoot 向上查找 go.mod 所在目录
+func findModuleRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+func (e *Extractor) relPath(absPath string) string {
+	if e.moduleRoot == "" {
+		return filepath.Base(absPath)
+	}
+	rel, err := filepath.Rel(e.moduleRoot, absPath)
+	if err != nil {
+		return filepath.Base(absPath)
+	}
+	return filepath.ToSlash(rel)
 }
 
 // NewExtractor 创建提取器
 func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, strategy alias.AliasStrategy) *Extractor {
+	rootDir := findModuleRoot()
 	e := &Extractor{
 		pkgMap:            pkgMap,
 		mainPkgPath:       mainPkgPath,
@@ -78,6 +113,7 @@ func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, strat
 		importAliasMap:    make(map[string]string),
 		typeStrCache:      make(map[types.Type]string),
 		aliasStrategy:     strategy,
+		moduleRoot:        rootDir,
 	}
 	e.loadImportAliases()
 	return e
@@ -311,6 +347,11 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 	item.RetType = retType
 	item.Expr = expr
 	item.UsedPkgs = usedPkgs
+
+	pos := curPkg.Fset.Position(expr.Pos())
+	relPath := e.relPath(pos.Filename)
+	sourceComment := fmt.Sprintf("// supply from %s at %s:%d", curPkg.PkgPath, relPath, pos.Line)
+	item.SourceComment = sourceComment
 
 	idx := len(e.items)
 	e.items = append(e.items, item)
@@ -1347,6 +1388,7 @@ func (e *Extractor) buildSupplyNode(it extractedItem, name string) model.Node {
 		PkgPath:  it.Pkg.PkgPath,
 		RetType:  it.RetType,
 		UsedPkgs: it.UsedPkgs,
+		Comment:  it.SourceComment,
 	}
 }
 
@@ -1406,6 +1448,8 @@ func addExternalParams(extractor *Extractor, target *model.GenTarget, pkg *packa
 		return nil
 	}
 	seenTypes := make(map[string]bool)
+	pos := pkg.Fset.Position(target.Node.Pos())
+	relPath := extractor.relPath(pos.Filename)
 	for _, field := range params.List {
 		for _, name := range field.Names {
 			typ := pkg.TypesInfo.TypeOf(field.Type)
@@ -1417,14 +1461,16 @@ func addExternalParams(extractor *Extractor, target *model.GenTarget, pkg *packa
 				return fmt.Errorf("duplicate parameter type %q (parameter %s)", retType, name.Name)
 			}
 			seenTypes[retType] = true
+			sourceComment := fmt.Sprintf("// external parameter %s (type %s) from %s:%d", name.Name, retType, relPath, pos.Line)
 			expr := ast.NewIdent(name.Name)
 			item := extractedItem{
-				Pkg:      pkg,
-				PkgAlias: "",
-				IsSupply: true,
-				RetType:  retType,
-				Expr:     expr,
-				UsedPkgs: nil,
+				Pkg:           pkg,
+				PkgAlias:      "",
+				IsSupply:      true,
+				RetType:       retType,
+				Expr:          expr,
+				UsedPkgs:      nil,
+				SourceComment: sourceComment,
 			}
 			extractor.items = append(extractor.items, item)
 			idx := len(extractor.items) - 1
