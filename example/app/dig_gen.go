@@ -21,9 +21,12 @@ import (
 var Logf = log.Printf
 
 // original package: github.com/shanjunmei/dig/example/user
+// provide closure defined at example/user/module.go:12
 func dig_provider_1() string {
 	return "user-module"
 }
+
+// provide closure defined at example/app/app.go:33
 func dig_provider_2() *user.Store[string] {
 	s := user.NewStore[string]()
 	s.Add("hello")
@@ -31,25 +34,31 @@ func dig_provider_2() *user.Store[string] {
 }
 
 // original package: github.com/shanjunmei/dig/example/user/repository
+// invoke closure defined at example/user/repository/module.go:8
 func dig_invoke_1(r *repository.Repository[string]) {
 	r.Print()
 }
 
 // original package: github.com/shanjunmei/dig/example/role/repository
+// invoke closure defined at example/role/repository/module.go:8
 func dig_invoke_2(r *role_repository.Repository[int]) {
 	r.Add(42)
 	r.Print()
 }
 
 // original package: github.com/shanjunmei/dig/example/role
+// invoke closure defined at example/role/module.go:19
 func dig_invoke_3(cfg role.Config) {
 	fmt.Printf("Config supplied: %s\n", cfg)
 }
 
 // original package: github.com/shanjunmei/dig/example/role
+// invoke closure defined at example/role/module.go:22
 func dig_invoke_4(s *role.Server) {
 	s.Run()
 }
+
+// invoke closure defined at example/app/app.go:40
 func dig_invoke_5(s *user.Store[string], cfg *common.Config, log *logger.Logger) error {
 	log.Println("App Invoke: store len =", len(s.GetAll()))
 	return nil
@@ -57,11 +66,11 @@ func dig_invoke_5(s *user.Store[string], cfg *common.Config, log *logger.Logger)
 
 func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error {
 	Logf("[SUPPLY] before: %s\n", "*github.com/shanjunmei/dig/example/common.Config")
-	// external parameter cfg (type *github.com/shanjunmei/dig/example/common.Config) from example/app/app.go:18
+	// supplied from function 'InitApp' argument 'cfg' (type *github.com/shanjunmei/dig/example/common.Config) at example/app/app.go:18
 	v0 := cfg
 	Logf("[SUPPLY] after: %s\n", "*github.com/shanjunmei/dig/example/common.Config")
 	Logf("[SUPPLY] before: %s\n", "*github.com/shanjunmei/dig/example/internal/logger.Logger")
-	// external parameter log (type *github.com/shanjunmei/dig/example/internal/logger.Logger) from example/app/app.go:18
+	// supplied from function 'InitApp' argument 'log' (type *github.com/shanjunmei/dig/example/internal/logger.Logger) at example/app/app.go:18
 	v1 := log
 	Logf("[SUPPLY] after: %s\n", "*github.com/shanjunmei/dig/example/internal/logger.Logger")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/user.NewStore")

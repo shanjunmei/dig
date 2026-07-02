@@ -661,6 +661,13 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 		item.RetType = retType
 	}
 
+	pos := curPkg.Fset.Position(funcLit.Pos())
+	relPath := e.relPath(pos.Filename)
+	comment := fmt.Sprintf("// %s closure defined at %s:%d",
+		map[bool]string{true: "invoke", false: "provide"}[isInvoke],
+		relPath, pos.Line)
+	item.SourceComment = comment
+
 	idx := len(e.items)
 	e.items = append(e.items, item)
 	if !isInvoke && retType != "" {
@@ -1324,7 +1331,9 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 		retType = "error"
 	}
 	def := e.buildClosureDefString(it.FuncName, paramStr, bodyStr, retType)
-
+	if it.SourceComment != "" {
+		def = it.SourceComment + "\n" + def
+	}
 	usedList := functional.Keys(usedPkgs)
 	if it.Pkg.PkgPath != e.mainPkgPath {
 		comment := fmt.Sprintf("// original package: %s\n", it.Pkg.PkgPath)
@@ -1461,7 +1470,7 @@ func addExternalParams(extractor *Extractor, target *model.GenTarget, pkg *packa
 				return fmt.Errorf("duplicate parameter type %q (parameter %s)", retType, name.Name)
 			}
 			seenTypes[retType] = true
-			sourceComment := fmt.Sprintf("// external parameter %s (type %s) from %s:%d", name.Name, retType, relPath, pos.Line)
+			sourceComment := fmt.Sprintf("// supplied from function '%s' argument '%s' (type %s) at %s:%d", target.Node.Name.Name, name.Name, retType, relPath, pos.Line)
 			expr := ast.NewIdent(name.Name)
 			item := extractedItem{
 				Pkg:           pkg,
