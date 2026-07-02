@@ -40,7 +40,7 @@ func (p *Processor) Process(pkg *packages.Package, pkgMap map[string]*packages.P
 
 	// 确定输出路径
 	outputPath := p.cfg.OutputFile
-	if !(len(p.cfg.Paths) == 1 && p.cfg.Paths[0] == ".") {
+	if len(p.cfg.Paths) != 1 || p.cfg.Paths[0] != "." {
 		if len(pkg.GoFiles) == 0 {
 			return fmt.Errorf("package %s has no Go files", pkg.PkgPath)
 		}

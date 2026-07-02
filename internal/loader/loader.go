@@ -93,7 +93,7 @@ func FindInjectorFunctions(pkg *packages.Package) (*model.GenTarget, error) {
 				continue
 			}
 			if err := extractor.ValidateReturnType(fnDecl, pkg.TypesInfo); err != nil {
-				return nil, fmt.Errorf("function %q: %v", fnDecl.Name.Name, err)
+				return nil, fmt.Errorf("function %q: %w", fnDecl.Name.Name, err)
 			}
 			targets = append(targets, model.GenTarget{
 				FuncName: fnDecl.Name.Name,

@@ -8,6 +8,7 @@ import (
 	"go/types"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/shanjunmei/dig/internal/model"
@@ -202,6 +203,11 @@ func stripGenericIndexes(expr ast.Expr) (base ast.Expr, indexNode ast.Node) {
 	}
 }
 
+// isErrorType reports whether typ is the built-in error type.
+func isErrorType(typ types.Type) bool {
+	return types.Identical(typ, types.Universe.Lookup("error").Type())
+}
+
 // ---------- resolveFunctionObject 保持原样 ----------
 func resolveFunctionObject(call *ast.CallExpr, curPkg *packages.Package) types.Object {
 	base, _ := stripGenericIndexes(call.Fun)
@@ -327,7 +333,7 @@ func sigHasError(sig *types.Signature) bool {
 		return false
 	}
 	lastTyp := res.At(res.Len() - 1).Type()
-	return types.Identical(lastTyp, types.Universe.Lookup("error").Type())
+	return isErrorType(lastTyp)
 }
 
 func (e *Extractor) extractClosureParams(funcLit *ast.FuncLit, curPkg *packages.Package) ([]string, []types.Type, []string) {
@@ -689,7 +695,7 @@ func validateInvokeSignature(sig *types.Signature, funcName string) error {
 		return nil
 	}
 	if res.Len() == 1 {
-		if !types.Identical(res.At(0).Type(), types.Universe.Lookup("error").Type()) {
+		if !isErrorType(res.At(0).Type()) {
 			return fmt.Errorf("Invoke function %s: single return value must be error, got %s", funcName, res.At(0).Type().String())
 		}
 		return nil
@@ -745,7 +751,7 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	case 1:
 		// ok
 	case 2:
-		if !types.Identical(res.At(1).Type(), types.Universe.Lookup("error").Type()) {
+		if !isErrorType(res.At(1).Type()) {
 			return fmt.Errorf("func %s: second return value must be error, got %s", name, res.At(1).Type().String())
 		}
 	default:
@@ -1005,7 +1011,7 @@ func (e *Extractor) computeOrder(adj [][]int, indeg []int) ([]int, error) {
 	if err != nil {
 		cycle, cycleErr := e.findCycle(adj)
 		if cycleErr != nil {
-			return nil, fmt.Errorf("circular dependency (failed to locate cycle): %v", err)
+			return nil, fmt.Errorf("circular dependency (failed to locate cycle): %w", err)
 		}
 		return nil, e.formatCycleError(cycle)
 	}
@@ -1121,7 +1127,7 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 }
 
 // ---------- buildParamListAndFreeVarMap 使用新字段 ----------
-func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[string]bool) ([]string, map[string]string, error) {
+func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[string]bool) ([]string, map[string]string) {
 	var paramList []string
 	freeVarMap := make(map[string]string)
 
@@ -1139,14 +1145,14 @@ func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[
 		if arg.IsConst {
 			continue
 		}
-		paramName := "p" + string(rune(i-startIdx+'0'))
+		paramName := "p" + strconv.Itoa(i-startIdx)
 		typStr := e.replacePkgPathWithAlias(arg.TypeString)
 		paramList = append(paramList, paramName+" "+typStr)
 		freeVarMap[arg.Name] = paramName
 		e.addPkgToUsed(arg.Type, usedPkgs)
 	}
 
-	return paramList, freeVarMap, nil
+	return paramList, freeVarMap
 }
 
 func (e *Extractor) typePkg(typ types.Type) *types.Package {
@@ -1255,10 +1261,8 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 		}
 	}
 
-	paramList, freeVarMap, err := e.buildParamListAndFreeVarMap(it, usedPkgs)
-	if err != nil {
-		return "", nil, err
-	}
+	paramList, freeVarMap := e.buildParamListAndFreeVarMap(it, usedPkgs)
+
 	paramStr := strings.Join(paramList, ", ")
 
 	rewrittenBody := e.replaceFreeVarsInBody(it.ClosureLit.Body, freeVarMap)
@@ -1439,14 +1443,14 @@ func isContextFunc(typ types.Type) bool {
 	if params.Len() != 1 {
 		return false
 	}
-	if params.At(0).Type().String() != "context.Context" {
+	if !isContextType(params.At(0).Type()) {
 		return false
 	}
 	results := sig.Results()
 	if results.Len() != 1 {
 		return false
 	}
-	return types.Identical(results.At(0).Type(), types.Universe.Lookup("error").Type())
+	return isErrorType(results.At(0).Type())
 }
 
 func validateReturnType(fnDecl *ast.FuncDecl, info *types.Info) error {

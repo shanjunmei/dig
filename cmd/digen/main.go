@@ -153,7 +153,7 @@ func findInjectorFunctions(pkg *packages.Package) (*GenTarget, error) {
 				continue
 			}
 			if err := validateReturnType(fnDecl, pkg.TypesInfo); err != nil {
-				return nil, fmt.Errorf("function %q: %v", fnDecl.Name.Name, err)
+				return nil, fmt.Errorf("function %q: %w", fnDecl.Name.Name, err)
 			}
 			targets = append(targets, GenTarget{
 				FuncName: fnDecl.Name.Name,
@@ -1149,7 +1149,7 @@ func (e *Extractor) computeOrder(adj [][]int, indeg []int) ([]int, error) {
 	if err != nil {
 		cycle, cycleErr := e.findCycle(adj)
 		if cycleErr != nil {
-			return nil, fmt.Errorf("circular dependency (failed to locate cycle): %v", err)
+			return nil, fmt.Errorf("circular dependency (failed to locate cycle): %w", err)
 		}
 		return nil, e.formatCycleError(cycle)
 	}
@@ -1898,7 +1898,7 @@ func processPackage(pkg *packages.Package, pkgMap map[string]*packages.Package, 
 
 	// 确定输出路径
 	outputPath := *outputFile
-	if !(len(paths) == 1 && paths[0] == ".") {
+	if len(paths) != 1 || paths[0] != "." {
 		if len(pkg.GoFiles) == 0 {
 			return fmt.Errorf("package %s has no Go files", pkg.PkgPath)
 		}
