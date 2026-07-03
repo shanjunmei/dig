@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -57,6 +58,13 @@ func (a *App) Run() error {
 	}
 
 	if generatedCount == 0 {
+		if failedCount > 0 {
+			msg := fmt.Sprintf("%d package(s) with dig.Build found but failed to generate", failedCount)
+			if !a.cfg.Debug {
+				msg += "\n💡 Run with -debug flag for more detailed error information"
+			}
+			return errors.New(msg)
+		}
 		return fmt.Errorf("no packages with dig.Build found")
 	}
 	fmt.Printf("[digen] generated %d/%d packages (%d failed), cost: %s\n", generatedCount, generatedCount+failedCount, failedCount, time.Since(start))
