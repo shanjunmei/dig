@@ -485,7 +485,7 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 				if o.Pkg() == nil || o.Parent() == nil {
 					return true
 				}
-				err = fmt.Errorf("cannot capture local variable %q defined in InitApp scope; move it to package level", ident.Name)
+				err = fmt.Errorf("cannot capture local variable %q defined in InitApp scope; pass it as a parameter to the function (preferred) or move it to package level", ident.Name)
 				return false
 			}
 			if seen[ident.Name] {
@@ -504,7 +504,7 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 				if o.Pkg() == nil || o.Parent() == nil {
 					return true
 				}
-				err = fmt.Errorf("cannot capture local constant %q defined in InitApp scope; move it to package level", ident.Name)
+				err = fmt.Errorf("cannot capture local constant %q defined in InitApp scope; pass it as a parameter to the function (preferred) or move it to package level", ident.Name)
 				return false
 			}
 			return true
@@ -892,7 +892,7 @@ func (e *Extractor) findSingleModuleCall(body *ast.BlockStmt, info *types.Info, 
 		return nil, fmt.Errorf("function %s does not contain dig.Module", funcName)
 	case 1:
 		if moduleInControl[0] {
-			return nil, fmt.Errorf("function %s contains dig.Module inside control flow (if/switch/for/select), which is not supported; move it to top level", funcName)
+			return nil, fmt.Errorf("function %s contains dig.Module inside control flow (if/switch/for/select), which is not supported; pass it as a parameter to the function (preferred) or move it to package level", funcName)
 		}
 		return moduleCalls[0], nil
 	default:
