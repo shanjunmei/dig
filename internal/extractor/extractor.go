@@ -70,6 +70,8 @@ type extractedItem struct {
 	GenericArgsStr string
 
 	SourceComment string
+
+	Position string
 }
 
 // findModuleRoot 向上查找 go.mod 所在目录
@@ -337,9 +339,6 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 		return fmt.Errorf("resolve supply type failed")
 	}
 	retType := e.getTypeFullName(typ)
-	if _, dup := e.globalProviderMap[retType]; dup {
-		return fmt.Errorf("duplicate supply for type %q", retType)
-	}
 	usedPkgs := e.collectUsedPkgsFromExpr(expr, curPkg.TypesInfo)
 
 	item := e.newExtractedItem("", curPkg, alias, false)
@@ -352,6 +351,13 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 	relPath := e.relPath(pos.Filename)
 	sourceComment := fmt.Sprintf("// supply from %s at %s:%d", curPkg.PkgPath, relPath, pos.Line)
 	item.SourceComment = sourceComment
+	item.Position = fmt.Sprintf("%s:%d", relPath, pos.Line)
+	if oldIdx, exists := e.globalProviderMap[retType]; exists {
+		oldDesc := e.describeItem(oldIdx)
+		currentDesc := e.describeItemByIt(item) // 即将添加的item索引
+		return fmt.Errorf("duplicate binding for %s:\n\tprevious: %s\n\tcurrent: %s",
+			retType, oldDesc, currentDesc)
+	}
 
 	idx := len(e.items)
 	e.items = append(e.items, item)
@@ -665,6 +671,7 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	relPath := e.relPath(pos.Filename)
 	comment := fmt.Sprintf("// closure defined at %s:%d", relPath, pos.Line)
 	item.SourceComment = comment
+	item.Position = fmt.Sprintf("%s:%d", relPath, pos.Line)
 
 	idx := len(e.items)
 	e.items = append(e.items, item)
@@ -806,14 +813,22 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	}
 
 	retType := e.getTypeFullName(res.At(0).Type())
-	if _, dup := e.globalProviderMap[retType]; dup {
-		return fmt.Errorf("duplicate provide for type %q", retType)
-	}
 	hasErr := sigHasError(sig)
 	item := e.newExtractedItem(name, realPkg, alias, hasErr)
 	item.RetType = retType
 	item.Params = e.buildExtractedParams(sig)
 	item.GenericArgsStr = genericStr
+
+	pos := curPkg.Fset.Position(expr.Pos())
+	relPath := e.relPath(pos.Filename)
+	item.Position = fmt.Sprintf("%s:%d", relPath, pos.Line)
+	if oldIdx, exists := e.globalProviderMap[retType]; exists {
+		oldDesc := e.describeItem(oldIdx)
+		currentDesc := e.describeItemByIt(item) // 即将添加的item索引
+		return fmt.Errorf("duplicate binding for %s:\n\tprevious: %s\n\tcurrent: %s",
+			retType, oldDesc, currentDesc)
+	}
+
 	idx := len(e.items)
 	e.items = append(e.items, item)
 	e.globalProviderMap[retType] = idx
@@ -948,7 +963,12 @@ func (e *Extractor) buildDependencyGraph(items []extractedItem) ([][]int, []int,
 			providerIdx, ok := e.globalProviderMap[arg.TypeString]
 			if !ok {
 				funcName := model.FullFuncName(it.Pkg.PkgPath, it.FuncName)
-				return nil, nil, fmt.Errorf("no provider for type %q (required by %s)", arg.TypeString, funcName)
+				if it.IsClosure {
+					funcName = it.FuncName + " (closure)"
+				}
+				pos := it.Position
+				return nil, nil, fmt.Errorf("no provider for type %s required by %s at %s",
+					arg.TypeString, funcName, pos)
 			}
 			adj[providerIdx] = append(adj[providerIdx], i)
 			indeg[i]++
@@ -1019,29 +1039,54 @@ func (e *Extractor) findCycle(adj [][]int) ([]int, error) {
 	return nil, fmt.Errorf("no cycle found")
 }
 
-// ---------- describeItem 使用 Params ----------
-func (e *Extractor) describeItem(idx int) string {
-	it := e.items[idx]
-	var desc string
+// describeItemByIt 直接根据 extractedItem 生成描述，不依赖索引
+func (e *Extractor) describeItemByIt(it extractedItem) string {
 	if it.IsSupply {
-		desc = fmt.Sprintf("Supply of type %q", it.RetType)
-	} else if it.IsInvoke {
-		funcName := model.FullFuncName(it.Pkg.PkgPath, it.FuncName)
-		desc = fmt.Sprintf("Invoke %q", funcName)
-	} else {
-		funcName := model.FullFuncName(it.Pkg.PkgPath, it.FuncName)
-		desc = fmt.Sprintf("Provider %q (returns %q)", funcName, it.RetType)
-	}
-	if len(it.Params) > 0 {
-		typeStrs := make([]string, len(it.Params))
-		for i, arg := range it.Params {
-			typeStrs[i] = arg.TypeString
+		kind := "Supply"
+		if it.FuncName != "" {
+			// 外部参数或带名字的 Supply
+			kind += fmt.Sprintf(": argument '%s'", it.FuncName)
+		} else if it.Expr != nil {
+			// 如果是 dig.Supply 直接调用，打印表达式
+			var buf strings.Builder
+			_ = printer.Fprint(&buf, it.Pkg.Fset, it.Expr)
+			kind += ": " + buf.String()
+		} else {
+			kind += ": <anonymous>"
 		}
-		desc += fmt.Sprintf(" depends on [%s]", strings.Join(typeStrs, ", "))
+		desc := fmt.Sprintf("%s -> %s", kind, it.RetType)
+		if it.Position != "" {
+			desc += fmt.Sprintf(" at %s", it.Position)
+		}
+		return desc
+	}
+	var kind string
+	if it.IsInvoke {
+		kind = "Invoke"
+	} else {
+		kind = "Provide"
+	}
+	funcName := model.FullFuncName(it.Pkg.PkgPath, it.FuncName)
+	if it.IsClosure {
+		funcName = it.FuncName + " (closure)"
+	}
+	desc := fmt.Sprintf("%s: %s", kind, funcName)
+	if it.RetType != "" {
+		desc += fmt.Sprintf(" -> %s", it.RetType)
+	}
+	if it.Position != "" {
+		desc += fmt.Sprintf(" at %s", it.Position)
 	}
 	return desc
 }
 
+// ---------- describeItem 使用 Params ----------
+func (e *Extractor) describeItem(idx int) string {
+	if idx < 0 || idx >= len(e.items) {
+		return fmt.Sprintf("invalid index %d", idx)
+	}
+	return e.describeItemByIt(e.items[idx])
+}
 func (e *Extractor) formatCycleError(cycle []int) error {
 	cycleDesc := functional.Map(cycle, e.describeItem)
 	cycleInfo := strings.Join(cycleDesc, " -> ")
@@ -1473,11 +1518,13 @@ func addExternalParams(extractor *Extractor, target *model.GenTarget, pkg *packa
 			item := extractedItem{
 				Pkg:           pkg,
 				PkgAlias:      "",
+				FuncName:      name.Name,
 				IsSupply:      true,
 				RetType:       retType,
 				Expr:          expr,
 				UsedPkgs:      nil,
 				SourceComment: sourceComment,
+				Position:      fmt.Sprintf("%s:%d", relPath, pos.Line),
 			}
 			extractor.items = append(extractor.items, item)
 			idx := len(extractor.items) - 1
