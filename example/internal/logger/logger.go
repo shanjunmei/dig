@@ -8,6 +8,6 @@ func NewLogger() *Logger {
 	return &Logger{}
 }
 
-func (l *Logger) Println(v ...interface{}) {
+func (l *Logger) Println(v ...any) {
 	log.Println(v...)
 }
