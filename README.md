@@ -3,7 +3,6 @@
 [中文文档](./README_zh.md) | English
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
-[![Go Report Card](https://goreportcard.com/badge/github.com/shanjunmei/dig)](https://goreportcard.com/report/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **Version**: v1.0.5 – `InitApp()` returns `func(context.Context) error`; generated code has **zero runtime dependency** on `dig`.  
