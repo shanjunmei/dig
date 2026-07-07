@@ -86,7 +86,8 @@ func (p *Processor) extractAndBuildNodes(pkg *packages.Package, target *model.Ge
 		return nil, nil, fmt.Errorf("no dig.Build call found")
 	}
 
-	extr := extractor.NewExtractor(pkgMap, pkg.PkgPath, strategy)
+	startDir := filepath.Dir(target.File)
+	extr := extractor.NewExtractor(pkgMap, pkg.PkgPath, strategy, startDir)
 	if err := extractor.AddExternalParams(extr, target, pkg); err != nil {
 		return nil, nil, err
 	}

@@ -75,11 +75,8 @@ type extractedItem struct {
 }
 
 // findModuleRoot 向上查找 go.mod 所在目录
-func findModuleRoot() string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
+func findModuleRoot(startDir string) string {
+	dir := startDir
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			return dir
@@ -104,8 +101,8 @@ func (e *Extractor) relPath(absPath string) string {
 }
 
 // NewExtractor 创建提取器
-func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, strategy alias.AliasStrategy) *Extractor {
-	rootDir := findModuleRoot()
+func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, strategy alias.AliasStrategy, startDir string) *Extractor {
+	rootDir := findModuleRoot(startDir)
 	e := &Extractor{
 		pkgMap:            pkgMap,
 		mainPkgPath:       mainPkgPath,
