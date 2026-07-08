@@ -210,7 +210,7 @@ See [`example/`](./example) for a full demonstration covering cross‑package de
 
 ```bash
 cd example
-go generate ./...
+digen -unused=ignore ./...
 go run .
 ```
 

@@ -210,7 +210,7 @@ func main() { Logf = myLogger.Printf }
 
 ```bash
 cd example
-go generate ./...
+digen -unused=ignore ./...
 go run .
 ```
 
