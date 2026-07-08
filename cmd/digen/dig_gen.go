@@ -18,12 +18,9 @@ import (
 	"log"
 )
 
-// closure defined at cmd/digen/di.go:26
 func dig_provider_1(_cfg *config.Config) string {
 	return _cfg.AliasType
 }
-
-// closure defined at cmd/digen/di.go:27
 func dig_provider_2(_aliasType string) alias.AliasStrategy {
 	aliasType, err := alias.ParseAliasType(_aliasType)
 	if err != nil {
@@ -31,14 +28,11 @@ func dig_provider_2(_aliasType string) alias.AliasStrategy {
 	}
 	return alias.NewAliasStrategy(aliasType)
 }
-
-// closure defined at cmd/digen/di.go:41
 func dig_invoke_1(a *app.App) error {
 	return a.Run()
 }
 
 func InitApp(cfg *config.Config) func(context.Context) error {
-	// supplied from function 'InitApp' argument 'cfg' (type *github.com/shanjunmei/dig/internal/config.Config) at cmd/digen/di.go:21
 	v0 := cfg
 	v1 := loader.NewPackageLoader()
 	v2 := logger.NewLogger(v0)

@@ -17,62 +17,40 @@ import (
 	"github.com/shanjunmei/dig/example/user/repository"
 )
 
-// original package: github.com/shanjunmei/dig/example/user
-// closure defined at example/user/module.go:12
 func dig_provider_1() string {
 	return "user-module"
 }
-
-// closure defined at example/app/app.go:33
 func dig_provider_2() *user.Store[string] {
 	s := user.NewStore[string]()
 	s.Add("hello")
 	return s
 }
-
-// original package: github.com/shanjunmei/dig/example/user/repository
-// closure defined at example/user/repository/module.go:8
 func dig_invoke_1(r *repository.Repository[string]) {
 	r.Print()
 }
-
-// original package: github.com/shanjunmei/dig/example/role/repository
-// closure defined at example/role/repository/module.go:8
 func dig_invoke_2(r *role_repository.Repository[int]) {
 	r.Add(42)
 	r.Print()
 }
-
-// original package: github.com/shanjunmei/dig/example/role
-// closure defined at example/role/module.go:19
 func dig_invoke_3(cfg role.Config) {
 	fmt.Printf("Config supplied: %s\n", cfg)
 }
-
-// original package: github.com/shanjunmei/dig/example/role
-// closure defined at example/role/module.go:22
 func dig_invoke_4(s *role.Server) {
 	s.Run()
 }
-
-// closure defined at example/app/app.go:40
 func dig_invoke_5(s *user.Store[string], cfg *common.Config, log *logger.Logger) error {
 	log.Println("App Invoke: store len =", len(s.GetAll()))
 	return nil
 }
 
 func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error {
-	// supplied from function 'InitApp' argument 'cfg' (type *github.com/shanjunmei/dig/example/common.Config) at example/app/app.go:18
 	v0 := cfg
-	// supplied from function 'InitApp' argument 'log' (type *github.com/shanjunmei/dig/example/internal/logger.Logger) at example/app/app.go:18
 	v1 := log
 	v2 := user.NewStore[int]()
 	v3 := repository.NewRepository[string]()
 	_ = dig_provider_1()
-	// supply from github.com/shanjunmei/dig/example/role at example/role/module.go:14
 	v5 := 100
 	v6 := role_repository.NewRepository[int]()
-	// supply from github.com/shanjunmei/dig/example/role at example/role/module.go:16
 	v7 := role.Config("production")
 	v8 := dig_provider_2()
 	v9 := role.NewServer(v5)

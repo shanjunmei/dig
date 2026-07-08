@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/shanjunmei/dig/internal/config"
 	"github.com/shanjunmei/dig/internal/model"
 	"github.com/shanjunmei/dig/pkg/alias"
 	"github.com/shanjunmei/dig/pkg/functional"
@@ -38,6 +39,7 @@ type Extractor struct {
 	invokeIndex       int
 	provideIndex      int
 	moduleRoot        string
+	cfg               *config.Config
 }
 
 // ---------- 新模型 ----------
@@ -101,9 +103,10 @@ func (e *Extractor) relPath(absPath string) string {
 }
 
 // NewExtractor 创建提取器
-func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, strategy alias.AliasStrategy, startDir string) *Extractor {
+func NewExtractor(cfg *config.Config, pkgMap map[string]*packages.Package, mainPkgPath string, strategy alias.AliasStrategy, startDir string) *Extractor {
 	rootDir := findModuleRoot(startDir)
 	e := &Extractor{
+		cfg:               cfg,
 		pkgMap:            pkgMap,
 		mainPkgPath:       mainPkgPath,
 		items:             []extractedItem{},
@@ -116,6 +119,12 @@ func NewExtractor(pkgMap map[string]*packages.Package, mainPkgPath string, strat
 	}
 	e.loadImportAliases()
 	return e
+}
+func (g *Extractor) ConditionalDebugf(pred func() bool, tpl string, args ...any) string {
+	if !g.cfg.Debug || !pred() {
+		return ""
+	}
+	return fmt.Sprintf(tpl, args...)
 }
 
 // ---------- 辅助构造函数 ----------
@@ -346,7 +355,7 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 
 	pos := curPkg.Fset.Position(expr.Pos())
 	relPath := e.relPath(pos.Filename)
-	sourceComment := fmt.Sprintf("// supply from %s at %s:%d", curPkg.PkgPath, relPath, pos.Line)
+	sourceComment := e.ConditionalDebugf(func() bool { return true }, "// supply from %s at %s:%d", curPkg.PkgPath, relPath, pos.Line)
 	item.SourceComment = sourceComment
 	item.Position = fmt.Sprintf("%s:%d", relPath, pos.Line)
 	if oldIdx, exists := e.globalProviderMap[retType]; exists {
@@ -666,7 +675,7 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 
 	pos := curPkg.Fset.Position(funcLit.Pos())
 	relPath := e.relPath(pos.Filename)
-	comment := fmt.Sprintf("// closure defined at %s:%d", relPath, pos.Line)
+	comment := e.ConditionalDebugf(func() bool { return true }, "// closure defined at %s:%d", relPath, pos.Line)
 	item.SourceComment = comment
 	item.Position = fmt.Sprintf("%s:%d", relPath, pos.Line)
 
@@ -818,7 +827,7 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 
 	pos := curPkg.Fset.Position(expr.Pos())
 	relPath := e.relPath(pos.Filename)
-	item.Position = fmt.Sprintf("%s:%d", relPath, pos.Line)
+	item.Position = e.ConditionalDebugf(func() bool { return true }, "%s:%d", relPath, pos.Line)
 	if oldIdx, exists := e.globalProviderMap[retType]; exists {
 		oldDesc := e.describeItem(oldIdx)
 		currentDesc := e.describeItemByIt(item) // 即将添加的item索引
@@ -1375,10 +1384,8 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 		def = it.SourceComment + "\n" + def
 	}
 	usedList := functional.Keys(usedPkgs)
-	if it.Pkg.PkgPath != e.mainPkgPath {
-		comment := fmt.Sprintf("// original package: %s\n", it.Pkg.PkgPath)
-		def = comment + def
-	}
+	comment := e.ConditionalDebugf(func() bool { return it.Pkg.PkgPath != e.mainPkgPath }, "// original package: %s\n", it.Pkg.PkgPath)
+	def = comment + def
 	return def, usedList, nil
 }
 
@@ -1510,7 +1517,7 @@ func addExternalParams(extractor *Extractor, target *model.GenTarget, pkg *packa
 				return fmt.Errorf("duplicate parameter type %q (parameter %s)", retType, name.Name)
 			}
 			seenTypes[retType] = true
-			sourceComment := fmt.Sprintf("// supplied from function '%s' argument '%s' (type %s) at %s:%d", target.Node.Name.Name, name.Name, retType, relPath, pos.Line)
+			sourceComment := extractor.ConditionalDebugf(func() bool { return true }, "// supplied from function '%s' argument '%s' (type %s) at %s:%d", target.Node.Name.Name, name.Name, retType, relPath, pos.Line)
 			expr := ast.NewIdent(name.Name)
 			item := extractedItem{
 				Pkg:           pkg,
