@@ -143,8 +143,19 @@ func newExtractedArg(name string, typ types.Type, typeStr string, isConst bool, 
 
 // addPkgToUsed 将类型所在的非主包添加到 usedPkgs 中
 func (e *Extractor) addPkgToUsed(typ types.Type, usedPkgs map[string]bool) {
-	if pkg := e.typePkg(typ); pkg != nil && pkg.Path() != e.mainPkgPath {
-		usedPkgs[pkg.Path()] = true
+	switch t := typ.(type) {
+	case *types.Map:
+		// 分别处理键和值
+		if pkg := e.typePkg(t.Key()); pkg != nil && pkg.Path() != e.mainPkgPath {
+			usedPkgs[pkg.Path()] = true
+		}
+		if pkg := e.typePkg(t.Elem()); pkg != nil && pkg.Path() != e.mainPkgPath {
+			usedPkgs[pkg.Path()] = true
+		}
+	default:
+		if pkg := e.typePkg(t); pkg != nil && pkg.Path() != e.mainPkgPath {
+			usedPkgs[pkg.Path()] = true
+		}
 	}
 }
 
@@ -1347,6 +1358,8 @@ func (e *Extractor) typePkg(typ types.Type) *types.Package {
 		return e.typePkg(t.Elem())
 	case *types.Map:
 		return nil
+	case *types.Chan:
+		return e.typePkg(t.Elem())
 	default:
 		return nil
 	}
@@ -1482,9 +1495,12 @@ func (e *Extractor) ensureAlias(pkgPath string) string {
 	if pkg, ok := e.pkgMap[pkgPath]; ok {
 		return e.collectPkgAlias(pkg)
 	}
-	// 不在 pkgMap 中，使用最后一段作为别名
-	parts := strings.Split(pkgPath, "/")
-	alias := parts[len(parts)-1]
+	// 不在 pkgMap 中，使用策略生成唯一别名
+	existing := make(map[string]bool)
+	for _, a := range e.pkgAliasMap {
+		existing[a] = true
+	}
+	alias := e.aliasStrategy.GenerateAlias(pkgPath, existing)
 	e.pkgAliasMap[pkgPath] = alias
 	return alias
 }
