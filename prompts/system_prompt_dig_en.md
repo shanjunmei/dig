@@ -29,18 +29,17 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 5. `dig.Module(opts ...Option)`: Group options for reusable, nested modules with duplicate detection.
 
 ### 2.3 Mandatory Syntax Restrictions (Enforced by digen Generator)
-1. Closure capture ban: Anonymous functions inside `Provide`/`Invoke` cannot capture local variables declared inside `InitApp`. Only package-level variables & literals are allowed.
-2. `di.go` must carry build tag `//go:build digen` (only parsed during code generation).
-3. Standard generate directive:
-```go
-//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go
-```
-4. Resolve primitive type conflicts with custom wrapper types (e.g. `type UseMySQL bool`, `type UseRedis bool`).
-5. Generics must be explicitly instantiated: `dig.Provide(NewStore[int])`.
-6. Conditional logic limits:
-   - Allowed: `if/else` inside closures passed to Provide/Invoke (runtime branch).
-   - Forbidden: Top-level `if` wrapping `Module()` — all branches will be registered simultaneously. Use Go build tags for compile-time switching.
-7. All parameters of `InitApp` are auto-registered as Supply providers for direct injection.
+1. Closure capture rule: Anonymous closures passed to Provide/Invoke cannot capture local variables declared inside InitApp; only package-level variables and literals are permitted.
+2. Strict isolation rule for DI config files:
+   - This file is only parsed by digen, and will be completely skipped by standard `go build` / `go run` commands. **Do NOT define business structs, constructors, custom types, or global constants inside this file**.
+   - All business types, constructors and constants must be placed in separate `.go` files without build tags (e.g. main.go). Failing to do so will cause missing-type compilation errors during normal builds.
+   - This file may only contain imports, generate comments, the InitApp function, and calls to dig APIs; no business definitions are allowed.
+3. Resolution for primitive type conflicts: Define custom wrapper types to distinguish identical underlying primitive types (e.g. `type UseMySQL bool`, `type UseRedis bool`).
+4. Generic usage rule: Generic functions and generic types must be explicitly instantiated when passed in, e.g. `dig.Provide(NewStore[int])`.
+5. Conditional branch limitations:
+   - Allowed: Runtime if/else branches inside closures passed to Provide/Invoke.
+   - Forbidden: Wrapping `Module()` with top-level if conditions; all branches will be registered simultaneously. Use Go build tags for compile-time branch switching.
+6. InitApp parameter injection: All input parameters of InitApp are automatically registered as Supply values, no manual capture via closures is required.
 
 ### 2.4 All digen CLI Flags
 | Flag | Default | Description |
@@ -87,7 +86,7 @@ import (
     "github.com/shanjunmei/dig"
 )
 
-//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go
+
 func InitApp() func(context.Context) error {
     return dig.Build(
         // Register constructors
@@ -111,8 +110,6 @@ func InitApp() func(context.Context) error {
 ```bash
 # Generate DI source code
 digen ./...
-# Alternative via go generate
-go generate ./...
 # Launch application
 go run .
 ```

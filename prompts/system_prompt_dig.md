@@ -27,16 +27,18 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 4. dig.Invoke(functions ...any)：所有依赖就绪后执行启动逻辑，支持返回error；
 5. dig.Module(opts ...Option)：模块分组，支持多层嵌套复用，自动检测重复模块。
 
-### 3. 强制语法约束（生成器会校验，违规直接报错）
+### 3. 强制语法约束（digen生成器静态校验，违规直接报错）
 1. 闭包捕获限制：Provide/Invoke 内匿名闭包禁止捕获InitApp内局部变量，仅允许包级变量、字面量；
-2. di.go 必须携带构建标签 //go:build digen，仅代码生成阶段解析；
-3. 生成指令固定写法：//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go；
-4. 基础类型冲突解决方案：自定义包装类型区分同底层原始类型（如type UseMySQL bool、type UseRedis bool）；
-5. 泛型使用：必须显式实例化泛型函数/类型，如dig.Provide(NewStore[int])；
-6. 条件分支限制：
+2. DI 配置文件隔离强约束：
+   - 该文件仅 digen 工具读取，`go build/go run` 会直接跳过整个文件，**严禁在此文件定义业务结构体、构造函数、自定义类型、全局常量**；
+   - 所有业务类型、构造器、常量必须拆分到**无构建标签**的独立 `.go` 文件（如 main.go），否则正常编译时类型缺失、直接编译失败；
+   - 此文件仅允许 import、generate 注释、InitApp 函数与 dig 系列API调用，不允许任何业务定义。
+3. 基础类型冲突解决方案：自定义包装类型区分同底层原始类型（如type UseMySQL bool、type UseRedis bool）；
+4. 泛型使用：必须显式实例化泛型函数/类型，如dig.Provide(NewStore[int])；
+5. 条件分支限制：
    - 允许：Provide/Invoke 内部闭包写运行时if分支；
    - 禁止：Module() 外层使用if判断，所有分支都会被同时注册；编译期分支切换使用Go build标签；
-7. InitApp入参会自动转为Supply注入，无需手动捕获。
+6. InitApp入参会自动转为Supply注入，无需手动捕获。
 
 ### 4. digen 全部CLI参数
 | 参数 | 默认值 | 作用 |
@@ -83,7 +85,6 @@ import (
     "github.com/shanjunmei/dig"
 )
 
-//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go
 func InitApp() func(context.Context) error {
     return dig.Build(
         // 注册构造器
@@ -107,8 +108,6 @@ func InitApp() func(context.Context) error {
 ```bash
 # 生成DI代码
 digen ./...
-# 或使用go generate
-go generate ./...
 # 运行程序
 go run .
 ```
