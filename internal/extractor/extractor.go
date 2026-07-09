@@ -1387,13 +1387,11 @@ func (e *Extractor) collectTypeNameAndUsedPkgs(body *ast.BlockStmt, pkg *package
 		if typeName, ok := obj.(*types.TypeName); ok {
 			pkgObj := typeName.Pkg()
 			if pkgObj != nil && pkgObj.Path() != e.mainPkgPath {
-				alias, found := e.pkgAliasMap[pkgObj.Path()]
-				if !found {
-					parts := strings.Split(pkgObj.Path(), "/")
-					alias = parts[len(parts)-1]
+				alias := e.ensureAlias(pkgObj.Path())
+				if alias != "" {
+					typeNameMap[ident.Name] = alias + "." + ident.Name
+					usedPkgs[pkgObj.Path()] = true
 				}
-				typeNameMap[ident.Name] = alias + "." + ident.Name
-				usedPkgs[pkgObj.Path()] = true
 			}
 			return true
 		}
@@ -1435,15 +1433,7 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 	for _, t := range allTypes {
 		if pkg := e.typePkg(t); pkg != nil && pkg.Path() != e.mainPkgPath {
 			usedPkgs[pkg.Path()] = true
-			if _, ok := e.pkgAliasMap[pkg.Path()]; !ok {
-				if pkgPkg, ok := e.pkgMap[pkg.Path()]; ok {
-					e.collectPkgAlias(pkgPkg)
-				} else {
-					parts := strings.Split(pkg.Path(), "/")
-					alias := parts[len(parts)-1]
-					e.pkgAliasMap[pkg.Path()] = alias
-				}
-			}
+			e.ensureAlias(pkg.Path())
 		}
 	}
 
@@ -1478,6 +1468,26 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 	return def, usedList, nil
 }
 
+// ensureAlias 确保指定包路径在 pkgAliasMap 中存在别名，如果不存在则生成并缓存。
+// 若包在 pkgMap 中，则调用 collectPkgAlias（会基于策略和冲突处理生成）；
+// 否则使用路径最后一段作为别名并缓存。
+// 返回别名（若包路径为主包或空，返回空字符串）。
+func (e *Extractor) ensureAlias(pkgPath string) string {
+	if pkgPath == "" || pkgPath == e.mainPkgPath {
+		return ""
+	}
+	if alias, ok := e.pkgAliasMap[pkgPath]; ok {
+		return alias
+	}
+	if pkg, ok := e.pkgMap[pkgPath]; ok {
+		return e.collectPkgAlias(pkg)
+	}
+	// 不在 pkgMap 中，使用最后一段作为别名
+	parts := strings.Split(pkgPath, "/")
+	alias := parts[len(parts)-1]
+	e.pkgAliasMap[pkgPath] = alias
+	return alias
+}
 func (e *Extractor) buildClosureDefString(funcName, paramStr, bodyStr, retType string) string {
 	if retType != "" {
 		return fmt.Sprintf("func %s(%s) %s %s", funcName, paramStr, retType, bodyStr)
