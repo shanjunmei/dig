@@ -45,7 +45,7 @@ Go 的依赖注入工具分为两大阵营：
 ## 安装
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.8
+go get github.com/shanjunmei/dig@v1.0.10
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 要求 Go 1.21+。
