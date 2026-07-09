@@ -2,6 +2,10 @@
 所有大模型专用系统指令文件统一存放在 [`prompts`](./prompts) 目录
 - [`system_prompt_dig.md`](./prompts/system_prompt_dig.md)：适配 github.com/shanjunmei/dig 编译期DI库的专业AI开发技能
 
+### 官方工业级模块化开发规范手册
+一套基于 dig 构建、面向业务微服务的完整标准化生产级编码规范手册：
+[工业级模块化编码规范手册](./prompts/industrial_modular_coding_skill_cn.md)
+
 # dig — 编译期依赖注入 for Go
 
 中文文档| [English](./README.md) 

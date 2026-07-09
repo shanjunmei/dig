@@ -1,6 +1,9 @@
 ## LLM Agent Skills
 All system prompts for AI assistant are stored in [`prompts`](./prompts)
 - [`system_prompt_dig_en.md`](./prompts/system_prompt_dig_en.md): Professional skill for github.com/shanjunmei/dig compile-time DI library
+### Official Industrial Modular Coding Skill
+A complete standardized production coding convention skill for business microservice based on dig:
+[Industrial Modular Coding Skill](./prompts/industrial_modular_coding_skill.md)
 
 # dig — Compile‑time Dependency Injection for Go
 
