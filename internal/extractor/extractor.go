@@ -299,7 +299,7 @@ func (e *Extractor) getTypeFullName(typ types.Type) string {
 
 func (e *Extractor) collectPkgAlias(pkg *packages.Package) string {
 	pp := pkg.PkgPath
-	if pp == "" || pkg.Module == nil {
+	if pp == "" {
 		return ""
 	}
 	if alias, ok := e.importAliasMap[pp]; ok {
@@ -332,6 +332,88 @@ func (e *Extractor) collectPkgAlias(pkg *packages.Package) string {
 	return alias
 }
 
+// collectUsedPkgsFromType 递归提取类型中引用的非主包路径
+func (e *Extractor) collectUsedPkgsFromType(typ types.Type) []string {
+	var pkgs []string
+	seen := make(map[string]bool)
+	var walk func(t types.Type)
+	walk = func(t types.Type) {
+		switch t := t.(type) {
+		case *types.Named:
+			if pkg := t.Obj().Pkg(); pkg != nil && pkg.Path() != e.mainPkgPath {
+				if !seen[pkg.Path()] {
+					seen[pkg.Path()] = true
+					pkgs = append(pkgs, pkg.Path())
+				}
+			}
+			if params := t.TypeParams(); params != nil {
+				for tparam := range params.TypeParams() {
+					walk(tparam)
+				}
+			}
+		case *types.Pointer, *types.Slice, *types.Array, *types.Chan:
+			walk(t.(interface{ Elem() types.Type }).Elem())
+		case *types.Map:
+			walk(t.Key())
+			walk(t.Elem())
+		case *types.Struct:
+			for field := range t.Fields() {
+				walk(field.Type())
+			}
+		case *types.Interface:
+			for method := range t.Methods() {
+				walk(method.Type())
+			}
+		}
+	}
+	walk(typ)
+	return pkgs
+}
+
+// populateUsedPkgs 为所有非闭包 item 填充 UsedPkgs
+func (e *Extractor) populateUsedPkgs() {
+	for i := range e.items {
+		it := &e.items[i]
+		if it.IsClosure {
+			continue
+		}
+		if len(it.UsedPkgs) > 0 {
+			continue
+		}
+		usedMap := make(map[string]bool)
+
+		// 从表达式中收集（函数名/值可能带包前缀）
+		if it.Expr != nil {
+			// 语法层面收集（如选择器）
+			for _, p := range e.collectUsedPkgsFromExpr(it.Expr, it.Pkg.TypesInfo) {
+				usedMap[p] = true
+			}
+			// 类型层面收集（如标识符）
+			typ := it.Pkg.TypesInfo.TypeOf(it.Expr)
+			if typ != nil {
+				for _, p := range e.collectUsedPkgsFromType(typ) {
+					usedMap[p] = true
+				}
+			}
+		}
+
+		// 从参数类型收集
+		for _, arg := range it.Params {
+			if arg.Type != nil {
+				for _, p := range e.collectUsedPkgsFromType(arg.Type) {
+					usedMap[p] = true
+				}
+			}
+		}
+
+		// 转为切片
+		used := make([]string, 0, len(usedMap))
+		for p := range usedMap {
+			used = append(used, p)
+		}
+		it.UsedPkgs = used
+	}
+}
 func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error {
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
 	if obj != nil {
@@ -947,6 +1029,7 @@ func (e *Extractor) ExtractOptions(expr ast.Expr, curPkg, realPkg *packages.Pack
 }
 
 func (e *Extractor) BuildFinalNodes() ([]model.Node, error) {
+	e.populateUsedPkgs()
 	return e.buildFinalNodes()
 }
 
@@ -1300,6 +1383,7 @@ func (e *Extractor) collectTypeNameAndUsedPkgs(body *ast.BlockStmt, pkg *package
 			return true
 		}
 
+		// 处理类型名（如 config.Config）
 		if typeName, ok := obj.(*types.TypeName); ok {
 			pkgObj := typeName.Pkg()
 			if pkgObj != nil && pkgObj.Path() != e.mainPkgPath {
@@ -1309,14 +1393,18 @@ func (e *Extractor) collectTypeNameAndUsedPkgs(body *ast.BlockStmt, pkg *package
 					alias = parts[len(parts)-1]
 				}
 				typeNameMap[ident.Name] = alias + "." + ident.Name
+				usedPkgs[pkgObj.Path()] = true
 			}
+			return true
 		}
 
-		if objPkg := obj.Pkg(); objPkg != nil {
-			pkgPath := objPkg.Path()
+		// 处理包名（如 alias.ParseAliasType 中的 alias）
+		if pkgName, ok := obj.(*types.PkgName); ok {
+			pkgPath := pkgName.Imported().Path()
 			if pkgPath != "" && pkgPath != e.mainPkgPath {
 				usedPkgs[pkgPath] = true
 			}
+			return true
 		}
 
 		return true
@@ -1346,6 +1434,7 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 	usedPkgs := make(map[string]bool)
 	for _, t := range allTypes {
 		if pkg := e.typePkg(t); pkg != nil && pkg.Path() != e.mainPkgPath {
+			usedPkgs[pkg.Path()] = true
 			if _, ok := e.pkgAliasMap[pkg.Path()]; !ok {
 				if pkgPkg, ok := e.pkgMap[pkg.Path()]; ok {
 					e.collectPkgAlias(pkgPkg)
@@ -1526,7 +1615,7 @@ func addExternalParams(extractor *Extractor, target *model.GenTarget, pkg *packa
 				IsSupply:      true,
 				RetType:       retType,
 				Expr:          expr,
-				UsedPkgs:      nil,
+				UsedPkgs:      extractor.collectUsedPkgsFromType(typ),
 				SourceComment: sourceComment,
 				Position:      fmt.Sprintf("%s:%d", relPath, pos.Line),
 			}
