@@ -4,7 +4,7 @@
 
 ### 官方工业级模块化开发规范手册
 一套基于 dig 构建、面向业务微服务的完整标准化生产级编码规范手册：
-[工业级模块化编码规范手册](./prompts/industrial_modular_coding_skill_cn.md)
+[工业级模块化编码规范手册](./prompts/industrial_modular_coding_skill_zh.md)
 
 # dig — 编译期依赖注入 for Go
 
