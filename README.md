@@ -1,6 +1,6 @@
 ## LLM Agent Skills
-All system prompts for AI assistant are stored in `/prompts/`
-- `system_prompt_dig.md`: Professional skill for github.com/shanjunmei/dig compile-time DI library
+All system prompts for AI assistant are stored in [`prompts`](./prompts)
+- [`system_prompt_dig.md`](./prompts/system_prompt_dig.md): Professional skill for github.com/shanjunmei/dig compile-time DI library
 
 # dig — Compile‑time Dependency Injection for Go
 
