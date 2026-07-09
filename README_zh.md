@@ -1,3 +1,7 @@
+## LLM 智能助手提示词
+所有大模型专用系统指令文件统一存放在 `/prompts/` 目录
+- `system_prompt_dig.md`：适配 github.com/shanjunmei/dig 编译期DI库的专业AI开发技能
+
 # dig — 编译期依赖注入 for Go
 
 中文文档| [English](./README.md) 
