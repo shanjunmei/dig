@@ -1,5 +1,7 @@
 //go:build digen
 
+//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen
+
 package main
 
 import (

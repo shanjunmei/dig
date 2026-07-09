@@ -48,7 +48,7 @@ func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error
 	v1 := log
 	v2 := user.NewStore[int]()
 	v3 := repository.NewRepository[string]()
-	_ = dig_provider_1()
+	v4 := dig_provider_1()
 	v5 := 100
 	v6 := role_repository.NewRepository[int]()
 	v7 := role.Config("production")
@@ -56,7 +56,7 @@ func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error
 	v9 := role.NewServer(v5)
 	return func(ctx context.Context) error {
 		dig_invoke_1(v3)
-		if err := user.ProcessStore[int](v2); err != nil {
+		if err := user.ProcessStore[int](v2, v4); err != nil {
 			return err
 		}
 		dig_invoke_2(v6)
