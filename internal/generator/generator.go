@@ -111,7 +111,7 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []model.Node, refCount map[string
 			continue
 		}
 		if node.IsInvoke || shouldGenerateProvider(node, refCount, unusedMode) {
-			fmt.Fprintf(buf, "%s\n", node.ClosureDef)
+			fmt.Fprintf(buf, "%s\n\n", node.ClosureDef)
 		}
 	}
 	if len(nodes) > 0 {

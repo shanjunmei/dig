@@ -1464,7 +1464,10 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 	}
 	bodyStr := bodyBuf.String()
 	bodyStr = e.applyTypeAliasReplacements(bodyStr, typeNameMap)
-
+	// 将左大括号后的多个换行压缩为单个换行
+	bodyStr = regexp.MustCompile(`\{\n{2,}`).ReplaceAllString(bodyStr, "{\n")
+	// 并将多余的空行（连续 3 个以上换行）压缩为两个换行
+	bodyStr = regexp.MustCompile(`\n{3,}`).ReplaceAllString(bodyStr, "\n\n")
 	retType := ""
 	if it.RetType != "" {
 		retType = e.replacePkgPathWithAlias(it.RetType)
