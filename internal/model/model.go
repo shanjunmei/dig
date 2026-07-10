@@ -21,7 +21,7 @@ func (m UnusedMode) String() string {
 	case UnusedModeDrop:
 		return "drop"
 	default:
-		return ""
+		panic("Unknown Unused Mode")
 	}
 }
 
