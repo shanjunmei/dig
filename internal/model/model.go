@@ -12,6 +12,19 @@ const (
 	UnusedModeDrop
 )
 
+func (m UnusedMode) String() string {
+	switch m {
+	case UnusedModeError:
+		return "error"
+	case UnusedModeIgnore:
+		return "ignore"
+	case UnusedModeDrop:
+		return "drop"
+	default:
+		return ""
+	}
+}
+
 type GenTarget struct {
 	FuncName string
 	Node     *ast.FuncDecl

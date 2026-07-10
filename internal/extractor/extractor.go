@@ -120,8 +120,8 @@ func NewExtractor(cfg *config.Config, pkgMap map[string]*packages.Package, mainP
 	e.loadImportAliases()
 	return e
 }
-func (g *Extractor) ConditionalDebugf(pred func() bool, tpl string, args ...any) string {
-	if !g.cfg.Debug || !pred() {
+func (e *Extractor) ConditionalDebugf(pred func() bool, tpl string, args ...any) string {
+	if !e.cfg.Debug || !pred() {
 		return ""
 	}
 	return fmt.Sprintf(tpl, args...)
