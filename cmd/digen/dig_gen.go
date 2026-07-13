@@ -21,6 +21,7 @@ import (
 func dig_provider_1(_cfg *config.Config) string {
 	return _cfg.AliasType
 }
+
 func dig_provider_2(_aliasType string) alias.AliasStrategy {
 	aliasType, err := alias.ParseAliasType(_aliasType)
 	if err != nil {
@@ -28,6 +29,7 @@ func dig_provider_2(_aliasType string) alias.AliasStrategy {
 	}
 	return alias.NewAliasStrategy(aliasType)
 }
+
 func dig_invoke_1(a *app.App) error {
 	return a.Run()
 }

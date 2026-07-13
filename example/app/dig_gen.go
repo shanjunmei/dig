@@ -20,24 +20,30 @@ import (
 func dig_provider_1() string {
 	return "user-module"
 }
+
 func dig_provider_2() *user.Store[string] {
 	s := user.NewStore[string]()
 	s.Add("hello")
 	return s
 }
+
 func dig_invoke_1(r *repository.Repository[string]) {
 	r.Print()
 }
+
 func dig_invoke_2(r *role_repository.Repository[int]) {
 	r.Add(42)
 	r.Print()
 }
+
 func dig_invoke_3(cfg role.Config) {
 	fmt.Printf("Config supplied: %s\n", cfg)
 }
+
 func dig_invoke_4(s *role.Server) {
 	s.Run()
 }
+
 func dig_invoke_5(s *user.Store[string], cfg *common.Config, log *logger.Logger) error {
 	log.Println("App Invoke: store len =", len(s.GetAll()))
 	return nil
