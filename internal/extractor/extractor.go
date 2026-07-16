@@ -216,30 +216,26 @@ func (e *Extractor) extractOptions(expr ast.Expr, curPkg, realPkg *packages.Pack
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
 		pos := curPkg.Fset.Position(expr.Pos())
-		return fmt.Errorf("at %s: unsupported option expression (must be a direct call to Provide, Invoke, Supply, or Module, got %T)", pos, expr)
+		return fmt.Errorf("at %s: invalid option expression (expected a call expression, got %T)", pos, expr)
 	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return e.extractOptionsFromFuncCall(call, curPkg)
+	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+		obj := curPkg.TypesInfo.ObjectOf(sel.Sel)
+		if obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == diPkgPath {
+			switch obj.Name() {
+			case "Provide":
+				return e.processArgs(call.Args, realPkg, e.handleProvide)
+			case "Invoke":
+				return e.processArgs(call.Args, realPkg, e.handleInvoke)
+			case "Supply":
+				return e.processArgs(call.Args, realPkg, e.handleSupply)
+			case "Module":
+				return e.processArgs(call.Args, curPkg, func(arg ast.Expr, _ *packages.Package) error {
+					return e.extractOptions(arg, curPkg, realPkg)
+				})
+			}
+		}
 	}
-	obj := curPkg.TypesInfo.ObjectOf(sel.Sel)
-	if obj == nil || obj.Pkg() == nil || obj.Pkg().Path() != diPkgPath {
-		return e.extractOptionsFromFuncCall(call, curPkg)
-	}
-	switch obj.Name() {
-	case "Provide":
-		return e.processArgs(call.Args, realPkg, e.handleProvide)
-	case "Invoke":
-		return e.processArgs(call.Args, realPkg, e.handleInvoke)
-	case "Supply":
-		return e.processArgs(call.Args, realPkg, e.handleSupply)
-	case "Module":
-		return e.processArgs(call.Args, curPkg, func(arg ast.Expr, _ *packages.Package) error {
-			return e.extractOptions(arg, curPkg, realPkg)
-		})
-	default:
-		return e.extractOptionsFromFuncCall(call, curPkg)
-	}
+	return e.extractOptionsFromFuncCall(call, curPkg)
 }
 
 // stripGenericIndexes 剥离泛型索引表达式，返回最底层的表达式和最后一个索引节点（如果有）
