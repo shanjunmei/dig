@@ -18,7 +18,7 @@ func (s *Store[T]) GetAll() []T {
 	return s.items
 }
 
-func ProcessStore[T any](s *Store[T], s1 string) error {
-	fmt.Printf("ProcessStore: items count=%d s=%s\n", len(s.items), s1)
+func ProcessStore[T any](s *Store[T], str string) error {
+	fmt.Printf("ProcessStore: items count=%d s=%s\n", len(s.items), str)
 	return nil
 }

@@ -74,6 +74,9 @@ type extractedItem struct {
 	SourceComment string
 
 	Position string
+
+	// ---------- 新增字段 ----------
+	InstanceName string // 实例名称（命名返回值或 Supply 表达式名称）
 }
 
 // findModuleRoot 向上查找 go.mod 所在目录
@@ -160,15 +163,18 @@ func (e *Extractor) addPkgToUsed(typ types.Type, usedPkgs map[string]bool) {
 }
 
 // replaceTypeNames 使用类型别名替换 body 字符串中的类型名（正则匹配标识符边界）
+// 注意：不匹配已经带有包前缀的类型名（如 approval.Adapter 中的 Adapter）
 func replaceTypeNames(bodyStr string, typeNameMap map[string]string) string {
 	for name, replacement := range typeNameMap {
-		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
-		bodyStr = re.ReplaceAllString(bodyStr, replacement)
+		// 匹配独立的标识符：前面是行首、空白、左括号、逗号、等号等，后面是行尾、空白、右括号、逗号、点等
+		re := regexp.MustCompile(`(^|[^\w.])` + regexp.QuoteMeta(name) + `([^\w]|$)`)
+		bodyStr = re.ReplaceAllString(bodyStr, `${1}`+replacement+`${2}`)
 	}
 	return bodyStr
 }
 
-// buildExtractedParams 从签名构建参数列表（统一替代 buildArgInfo + buildParamsFromSignature）
+// buildExtractedParams 从签名构建参数列表（保留参数名）
+// 注意：现在会保留参数名，用于命名依赖匹配
 func (e *Extractor) buildExtractedParams(sig *types.Signature) []ExtractedArg {
 	n := sig.Params().Len()
 	params := make([]ExtractedArg, n)
@@ -177,7 +183,8 @@ func (e *Extractor) buildExtractedParams(sig *types.Signature) []ExtractedArg {
 		typ := param.Type()
 		typeStr := e.getTypeFullName(typ)
 		isCtx := isContextType(typ)
-		params[i] = newExtractedArg("", typ, typeStr, false, "", isCtx)
+		// 保留参数名
+		params[i] = newExtractedArg(param.Name(), typ, typeStr, false, "", isCtx)
 	}
 	return params
 }
@@ -421,6 +428,47 @@ func (e *Extractor) populateUsedPkgs() {
 		it.UsedPkgs = used
 	}
 }
+
+// ---------- 新增辅助函数：提取实例名称 ----------
+
+// extractNamedReturn 提取函数签名的命名返回值名称
+// 例如 func() (mainDB *sql.DB) 返回 "mainDB"
+func (e *Extractor) extractNamedReturn(sig *types.Signature) string {
+	if sig.Results().Len() == 0 {
+		return ""
+	}
+	first := sig.Results().At(0)
+	if first == nil {
+		return ""
+	}
+	return first.Name()
+}
+
+// extractSupplyName 从 Supply 表达式中提取实例名称
+// 例如 dig.Supply(mainDB) 返回 "mainDB"
+func (e *Extractor) extractSupplyName(expr ast.Expr) string {
+	switch v := expr.(type) {
+	case *ast.Ident:
+		return v.Name
+	case *ast.SelectorExpr:
+		if ident, ok := v.X.(*ast.Ident); ok {
+			return ident.Name + "." + v.Sel.Name
+		}
+		return v.Sel.Name
+	default:
+		return ""
+	}
+}
+
+// getRequiredInstanceName 获取依赖方需要的实例名称（从参数名）
+func (e *Extractor) getRequiredInstanceName(arg ExtractedArg) string {
+	if arg.Name != "" && arg.Name != "_" {
+		return arg.Name
+	}
+	return ""
+}
+
+// ---------- handleSupply 修改 ----------
 func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error {
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
 	if obj != nil {
@@ -436,27 +484,50 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 	retType := e.getTypeFullName(typ)
 	usedPkgs := e.collectUsedPkgsFromExpr(expr, curPkg.TypesInfo)
 
+	instanceName := e.extractSupplyName(expr)
+
 	item := e.newExtractedItem("", curPkg, alias, false)
 	item.IsSupply = true
 	item.RetType = retType
 	item.Expr = expr
 	item.UsedPkgs = usedPkgs
+	item.InstanceName = instanceName
 
 	pos := curPkg.Fset.Position(expr.Pos())
 	relPath := e.relPath(pos.Filename)
 	sourceComment := e.ConditionalDebugf(func() bool { return true }, "// supply from %s at %s:%d", curPkg.PkgPath, relPath, pos.Line)
 	item.SourceComment = sourceComment
 	item.Position = fmt.Sprintf("%s:%d", relPath, pos.Line)
-	if oldIdx, exists := e.globalProviderMap[retType]; exists {
+
+	// 构建键：默认键和命名键
+	keyDefault := retType
+	keyNamed := retType
+	if instanceName != "" {
+		keyNamed = retType + ":" + instanceName
+	}
+	// 检查命名键冲突
+	if oldIdx, exists := e.globalProviderMap[keyNamed]; exists {
 		oldDesc := e.describeItem(oldIdx)
-		currentDesc := e.describeItemByIt(item) // 即将添加的item索引
-		return fmt.Errorf("duplicate binding for %s:\n\tprevious: %s\n\tcurrent: %s",
-			retType, oldDesc, currentDesc)
+		currentDesc := e.describeItemByIt(item)
+		return fmt.Errorf("duplicate binding for %s with name %q:\n\tprevious: %s\n\tcurrent: %s",
+			retType, instanceName, oldDesc, currentDesc)
+	}
+	if instanceName == "" {
+		if oldIdx, exists := e.globalProviderMap[keyDefault]; exists {
+			oldDesc := e.describeItem(oldIdx)
+			currentDesc := e.describeItemByIt(item)
+			return fmt.Errorf("duplicate binding for %s (default):\n\tprevious: %s\n\tcurrent: %s",
+				retType, oldDesc, currentDesc)
+		}
 	}
 
 	idx := len(e.items)
 	e.items = append(e.items, item)
-	e.globalProviderMap[retType] = idx
+	if instanceName != "" {
+		e.globalProviderMap[keyNamed] = idx
+	} else {
+		e.globalProviderMap[keyDefault] = idx
+	}
 	return nil
 }
 
@@ -679,7 +750,7 @@ func (e *Extractor) generateFuncName(isInvoke bool) string {
 	return fmt.Sprintf("%s%d", closurePrefixProvide, e.provideIndex)
 }
 
-// ---------- handleFuncLit 使用新模型 ----------
+// ---------- handleFuncLit 修改 ----------
 func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package, isInvoke bool) error {
 	typ := curPkg.TypesInfo.TypeOf(funcLit)
 	sig, ok := typ.(*types.Signature)
@@ -761,6 +832,8 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	if retType != "" {
 		item.RetType = retType
 	}
+	// 提取命名返回值
+	item.InstanceName = e.extractNamedReturn(sig)
 
 	pos := curPkg.Fset.Position(funcLit.Pos())
 	relPath := e.relPath(pos.Filename)
@@ -771,7 +844,18 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	idx := len(e.items)
 	e.items = append(e.items, item)
 	if !isInvoke && retType != "" {
-		e.globalProviderMap[retType] = idx
+		key := retType
+		if item.InstanceName != "" {
+			key = retType + ":" + item.InstanceName
+		}
+		// 检查重复（略，与前面类似）
+		if oldIdx, exists := e.globalProviderMap[key]; exists {
+			oldDesc := e.describeItem(oldIdx)
+			currentDesc := e.describeItemByIt(item)
+			return fmt.Errorf("duplicate binding for %s with name %q:\n\tprevious: %s\n\tcurrent: %s",
+				retType, item.InstanceName, oldDesc, currentDesc)
+		}
+		e.globalProviderMap[key] = idx
 	}
 	return nil
 }
@@ -871,13 +955,13 @@ func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error 
 	hasErr := sigHasError(sig)
 	item := e.newExtractedItem(name, realPkg, alias, hasErr)
 	item.IsInvoke = true
-	item.Params = e.buildExtractedParams(sig)
+	item.Params = e.buildExtractedParams(sig) // 注意这里现在保留了参数名
 	item.GenericArgsStr = genericStr
 	e.items = append(e.items, item)
 	return nil
 }
 
-// ---------- handleProvide 使用新模型 ----------
+// ---------- handleProvide 修改 ----------
 func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error {
 	if funcLit, ok := expr.(*ast.FuncLit); ok {
 		return e.handleFuncLit(funcLit, curPkg, false)
@@ -909,24 +993,45 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 
 	retType := e.getTypeFullName(res.At(0).Type())
 	hasErr := sigHasError(sig)
+	instanceName := e.extractNamedReturn(sig)
+
 	item := e.newExtractedItem(name, realPkg, alias, hasErr)
 	item.RetType = retType
-	item.Params = e.buildExtractedParams(sig)
+	item.Params = e.buildExtractedParams(sig) // 保留参数名
 	item.GenericArgsStr = genericStr
+	item.InstanceName = instanceName
 
 	pos := curPkg.Fset.Position(expr.Pos())
 	relPath := e.relPath(pos.Filename)
 	item.Position = e.ConditionalDebugf(func() bool { return true }, "%s:%d", relPath, pos.Line)
-	if oldIdx, exists := e.globalProviderMap[retType]; exists {
+
+	keyNamed := retType
+	if instanceName != "" {
+		keyNamed = retType + ":" + instanceName
+	}
+	// 检查命名键冲突
+	if oldIdx, exists := e.globalProviderMap[keyNamed]; exists {
 		oldDesc := e.describeItem(oldIdx)
-		currentDesc := e.describeItemByIt(item) // 即将添加的item索引
-		return fmt.Errorf("duplicate binding for %s:\n\tprevious: %s\n\tcurrent: %s",
-			retType, oldDesc, currentDesc)
+		currentDesc := e.describeItemByIt(item)
+		return fmt.Errorf("duplicate binding for %s with name %q:\n\tprevious: %s\n\tcurrent: %s",
+			retType, instanceName, oldDesc, currentDesc)
+	}
+	if instanceName == "" {
+		if oldIdx, exists := e.globalProviderMap[retType]; exists {
+			oldDesc := e.describeItem(oldIdx)
+			currentDesc := e.describeItemByIt(item)
+			return fmt.Errorf("duplicate binding for %s (default):\n\tprevious: %s\n\tcurrent: %s",
+				retType, oldDesc, currentDesc)
+		}
 	}
 
 	idx := len(e.items)
 	e.items = append(e.items, item)
-	e.globalProviderMap[retType] = idx
+	if instanceName != "" {
+		e.globalProviderMap[keyNamed] = idx
+	} else {
+		e.globalProviderMap[retType] = idx
+	}
 	return nil
 }
 
@@ -1040,7 +1145,7 @@ func (e *Extractor) BuildFinalNodes() ([]model.Node, error) {
 	return e.buildFinalNodes()
 }
 
-// ---------- buildDependencyGraph 使用 Params ----------
+// ---------- buildDependencyGraph 修改 ----------
 func (e *Extractor) buildDependencyGraph(items []extractedItem) ([][]int, []int, error) {
 	n := len(items)
 	adj := make([][]int, n)
@@ -1056,15 +1161,24 @@ func (e *Extractor) buildDependencyGraph(items []extractedItem) ([][]int, []int,
 			if it.IsClosure && arg.IsConst {
 				continue
 			}
-			providerIdx, ok := e.globalProviderMap[arg.TypeString]
+			requiredName := e.getRequiredInstanceName(arg)
+			key := arg.TypeString
+			if requiredName != "" {
+				key = arg.TypeString + ":" + requiredName
+			}
+			providerIdx, ok := e.globalProviderMap[key]
+			if !ok && requiredName != "" {
+				// 回退到默认
+				providerIdx, ok = e.globalProviderMap[arg.TypeString]
+			}
 			if !ok {
 				funcName := model.FullFuncName(it.Pkg.PkgPath, it.FuncName)
 				if it.IsClosure {
 					funcName = it.FuncName + " (closure)"
 				}
 				pos := it.Position
-				return nil, nil, fmt.Errorf("no provider for type %s required by %s at %s",
-					arg.TypeString, funcName, pos)
+				return nil, nil, fmt.Errorf("no provider for type %s with name %q required by %s at %s",
+					arg.TypeString, requiredName, funcName, pos)
 			}
 			adj[providerIdx] = append(adj[providerIdx], i)
 			indeg[i]++
@@ -1140,10 +1254,8 @@ func (e *Extractor) describeItemByIt(it extractedItem) string {
 	if it.IsSupply {
 		kind := "Supply"
 		if it.FuncName != "" {
-			// 外部参数或带名字的 Supply
 			kind += fmt.Sprintf(": argument '%s'", it.FuncName)
 		} else if it.Expr != nil {
-			// 如果是 dig.Supply 直接调用，打印表达式
 			var buf strings.Builder
 			_ = printer.Fprint(&buf, it.Pkg.Fset, it.Expr)
 			kind += ": " + buf.String()
@@ -1153,6 +1265,9 @@ func (e *Extractor) describeItemByIt(it extractedItem) string {
 		desc := fmt.Sprintf("%s -> %s", kind, it.RetType)
 		if it.Position != "" {
 			desc += fmt.Sprintf(" at %s", it.Position)
+		}
+		if it.InstanceName != "" {
+			desc += fmt.Sprintf(" (name: %q)", it.InstanceName)
 		}
 		return desc
 	}
@@ -1172,6 +1287,9 @@ func (e *Extractor) describeItemByIt(it extractedItem) string {
 	}
 	if it.Position != "" {
 		desc += fmt.Sprintf(" at %s", it.Position)
+	}
+	if it.InstanceName != "" {
+		desc += fmt.Sprintf(" (name: %q)", it.InstanceName)
 	}
 	return desc
 }
@@ -1221,7 +1339,7 @@ func (e *Extractor) buildFinalNodes() ([]model.Node, error) {
 	return nodes, nil
 }
 
-// ---------- resolveArgNames 使用 Params ----------
+// ---------- resolveArgNames 修改 ----------
 func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) []string {
 	argNames := make([]string, len(it.Params))
 	for j, arg := range it.Params {
@@ -1229,7 +1347,18 @@ func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) []strin
 			argNames[j] = ""
 			continue
 		}
-		provIdx := e.globalProviderMap[arg.TypeString]
+		requiredName := e.getRequiredInstanceName(arg)
+		key := arg.TypeString
+		if requiredName != "" {
+			key = arg.TypeString + ":" + requiredName
+		}
+		provIdx, ok := e.globalProviderMap[key]
+		if !ok && requiredName != "" {
+			provIdx, ok = e.globalProviderMap[arg.TypeString]
+		}
+		if !ok {
+			panic(fmt.Sprintf("no provider for type %s", arg.TypeString))
+		}
 		argNames[j] = varNames[provIdx]
 	}
 	return argNames
@@ -1464,13 +1593,11 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 	bodyStr = regexp.MustCompile(`\{\n{2,}`).ReplaceAllString(bodyStr, "{\n")
 	// 并将多余的空行（连续 3 个以上换行）压缩为两个换行
 	bodyStr = regexp.MustCompile(`\n{3,}`).ReplaceAllString(bodyStr, "\n\n")
-	retType := ""
-	if it.RetType != "" {
-		retType = e.replacePkgPathWithAlias(it.RetType)
-	} else if it.IsInvoke && it.HasError {
-		retType = "error"
-	}
-	def := e.buildClosureDefString(it.FuncName, paramStr, bodyStr, retType)
+
+	retStr := formatResultList(it.ClosureLit.Type.Results, it.Pkg, e)
+
+	// 构建闭包定义
+	def := e.buildClosureDefString(it.FuncName, paramStr, retStr, bodyStr)
 	if it.SourceComment != "" {
 		def = it.SourceComment + "\n" + def
 	}
@@ -1503,9 +1630,37 @@ func (e *Extractor) ensureAlias(pkgPath string) string {
 	e.pkgAliasMap[pkgPath] = alias
 	return alias
 }
-func (e *Extractor) buildClosureDefString(funcName, paramStr, bodyStr, retType string) string {
-	if retType != "" {
-		return fmt.Sprintf("func %s(%s) %s %s", funcName, paramStr, retType, bodyStr)
+
+// formatResultList 从 ast.FieldList 生成返回值字符串
+// 例如：单个无名返回值 -> "string"
+//
+//	多个或有名字的返回值 -> "(str string, err error)"
+func formatResultList(fieldList *ast.FieldList, pkg *packages.Package, e *Extractor) string {
+	if fieldList == nil || len(fieldList.List) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, field := range fieldList.List {
+		typ := pkg.TypesInfo.TypeOf(field.Type)
+		typeStr := e.replacePkgPathWithAlias(e.getTypeFullName(typ))
+		if len(field.Names) == 0 {
+			// 无名返回值
+			parts = append(parts, typeStr)
+		} else {
+			for _, name := range field.Names {
+				parts = append(parts, name.Name+" "+typeStr)
+			}
+		}
+	}
+	// 如果只有一个返回值且没有名字，直接返回类型（不带括号）
+	if len(parts) == 1 && len(fieldList.List) == 1 && len(fieldList.List[0].Names) == 0 {
+		return parts[0]
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+func (e *Extractor) buildClosureDefString(funcName, paramStr, retStr, bodyStr string) string {
+	if retStr != "" {
+		return fmt.Sprintf("func %s(%s) %s %s", funcName, paramStr, retStr, bodyStr)
 	}
 	return fmt.Sprintf("func %s(%s) %s", funcName, paramStr, bodyStr)
 }
@@ -1632,6 +1787,7 @@ func addExternalParams(extractor *Extractor, target *model.GenTarget, pkg *packa
 			}
 			seenTypes[retType] = true
 			sourceComment := extractor.ConditionalDebugf(func() bool { return true }, "// supplied from function '%s' argument '%s' (type %s) at %s:%d", target.Node.Name.Name, name.Name, retType, relPath, pos.Line)
+			// 使用原始标识符保持类型信息
 			expr := ast.NewIdent(name.Name)
 			item := extractedItem{
 				Pkg:           pkg,
@@ -1643,6 +1799,7 @@ func addExternalParams(extractor *Extractor, target *model.GenTarget, pkg *packa
 				UsedPkgs:      extractor.collectUsedPkgsFromType(typ),
 				SourceComment: sourceComment,
 				Position:      fmt.Sprintf("%s:%d", relPath, pos.Line),
+				InstanceName:  "", // 外部参数作为默认提供者，不参与命名匹配
 			}
 			extractor.items = append(extractor.items, item)
 			idx := len(extractor.items) - 1

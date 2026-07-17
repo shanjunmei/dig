@@ -9,7 +9,7 @@ func Module() dig.Option {
 	return dig.Module(
 		dig.Provide(NewStore[int]),
 		repository.Module(),
-		dig.Provide(func() string { return "user-module" }),
+		dig.Provide(func() (str string, err error) { str = "user-module"; return }),
 		dig.Invoke(ProcessStore[int]),
 	)
 }

@@ -17,8 +17,9 @@ import (
 	"github.com/shanjunmei/dig/example/user/repository"
 )
 
-func dig_provider_1() string {
-	return "user-module"
+func dig_provider_1() (str string, err error) {
+	str = "user-module"
+	return
 }
 
 func dig_provider_2() *user.Store[string] {
@@ -54,7 +55,10 @@ func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error
 	v1 := log
 	v2 := user.NewStore[int]()
 	v3 := repository.NewRepository[string]()
-	v4 := dig_provider_1()
+	v4, err := dig_provider_1()
+	if err != nil {
+		panic(err)
+	}
 	v5 := 100
 	v6 := role_repository.NewRepository[int]()
 	v7 := role.Config("production")
