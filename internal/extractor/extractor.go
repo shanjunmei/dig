@@ -33,6 +33,7 @@ type Extractor struct {
 	items             []extractedItem
 	globalProviderMap map[string]int
 	pkgAliasMap       map[string]string
+	pkgNameMap        map[string]string
 	importAliasMap    map[string]string
 	typeStrCache      map[types.Type]string
 	aliasStrategy     alias.AliasStrategy
@@ -115,6 +116,7 @@ func NewExtractor(cfg *config.Config, pkgMap map[string]*packages.Package, mainP
 		items:             []extractedItem{},
 		globalProviderMap: make(map[string]int),
 		pkgAliasMap:       make(map[string]string),
+		pkgNameMap:        make(map[string]string),
 		importAliasMap:    make(map[string]string),
 		typeStrCache:      make(map[types.Type]string),
 		aliasStrategy:     strategy,
@@ -310,8 +312,18 @@ func (e *Extractor) getTypeFullName(typ types.Type) string {
 	e.typeStrCache[typ] = s
 	return s
 }
+func (e *Extractor) PackageNameMap() map[string]string {
+	return e.pkgNameMap
+}
+
+func (e *Extractor) ImportAliasMap() map[string]string {
+	return e.importAliasMap
+}
 
 func (e *Extractor) collectPkgAlias(pkg *packages.Package) string {
+	if pkg != nil {
+		e.pkgNameMap[pkg.PkgPath] = pkg.Name
+	}
 	pp := pkg.PkgPath
 	if pp == "" {
 		return ""

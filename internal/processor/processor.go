@@ -52,7 +52,7 @@ func (p *Processor) Process(pkg *packages.Package, pkgMap map[string]*packages.P
 
 	p.logger.Debugf("generating for package %s -> %s", pkg.PkgPath, outputPath)
 
-	nodes, pkgAliasMap, err := p.extractAndBuildNodes(pkg, target, pkgMap, strategy)
+	nodes, importAliasMap, pkgAliasMap, pkgNameMap, err := p.extractAndBuildNodes(pkg, target, pkgMap, strategy)
 	if err != nil {
 		return fmt.Errorf("extract and build nodes: %w", err)
 	}
@@ -70,7 +70,7 @@ func (p *Processor) Process(pkg *packages.Package, pkgMap map[string]*packages.P
 		}
 	}
 
-	if err := p.generator.WriteGeneratedCode(pkg, target, nodes, refCount, pkgAliasMap, pkg.Fset); err != nil {
+	if err := p.generator.WriteGeneratedCode(pkg, target, nodes, refCount, importAliasMap, pkgAliasMap, pkgNameMap, pkg.Fset); err != nil {
 		return fmt.Errorf("write generated code: %w", err)
 	}
 
@@ -79,30 +79,30 @@ func (p *Processor) Process(pkg *packages.Package, pkgMap map[string]*packages.P
 }
 
 // extractAndBuildNodes 原 extractAndBuildNodes 逻辑
-func (p *Processor) extractAndBuildNodes(pkg *packages.Package, target *model.GenTarget, pkgMap map[string]*packages.Package, strategy alias.AliasStrategy) ([]model.Node, map[string]string, error) {
+func (p *Processor) extractAndBuildNodes(pkg *packages.Package, target *model.GenTarget, pkgMap map[string]*packages.Package, strategy alias.AliasStrategy) ([]model.Node, map[string]string, map[string]string, map[string]string, error) {
 	entryFunc := target.Node
 	buildCall := extractor.FindBuildCall(entryFunc, pkg.TypesInfo)
 	if buildCall == nil {
-		return nil, nil, fmt.Errorf("no dig.Build call found")
+		return nil, nil, nil, nil, fmt.Errorf("no dig.Build call found")
 	}
 
 	startDir := filepath.Dir(target.File)
 	extr := extractor.NewExtractor(p.cfg, pkgMap, pkg.PkgPath, strategy, startDir)
 	if err := extractor.AddExternalParams(extr, target, pkg); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	for _, arg := range buildCall.Args {
 		if err := extr.ExtractOptions(arg, pkg, pkg); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 	}
 
 	nodes, err := extr.BuildFinalNodes()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return nodes, extr.PkgAliasMap(), nil
+	return nodes, extr.ImportAliasMap(), extr.PkgAliasMap(), extr.PackageNameMap(), nil
 }
 
 // checkUnusedProviders 原 checkUnusedProviders

@@ -46,9 +46,9 @@ func NewGenerator(logger *logger.Logger, cfg *config.Config) *Generator {
 }
 
 // WriteGeneratedCode generates code and writes it to the target file.
-func (g *Generator) WriteGeneratedCode(pkg *packages.Package, target *model.GenTarget, nodes []model.Node, refCount map[string]int, pkgAliasMap map[string]string, fset *token.FileSet) error {
+func (g *Generator) WriteGeneratedCode(pkg *packages.Package, target *model.GenTarget, nodes []model.Node, refCount map[string]int, importAliasMap, pkgAliasMap, pkgNameMap map[string]string, fset *token.FileSet) error {
 	outFile := filepath.Base(target.File)
-	code, err := g.GenerateCode(nodes, refCount, pkg.Name, target.FuncName, pkg.PkgPath, pkgAliasMap, fset, target.Node.Type.Params, outFile)
+	code, err := g.GenerateCode(nodes, refCount, pkg.Name, target.FuncName, pkg.PkgPath, importAliasMap, pkgAliasMap, pkgNameMap, fset, target.Node.Type.Params, outFile)
 	if err != nil {
 		return err
 	}
@@ -56,22 +56,29 @@ func (g *Generator) WriteGeneratedCode(pkg *packages.Package, target *model.GenT
 }
 
 // getPkgAlias returns the import alias for a package path.
-func getPkgAlias(pkgPath string, aliasMap map[string]string) string {
+func getPkgAlias(pkgPath string, importAliasMap map[string]string, aliasMap map[string]string, pkgNameMap map[string]string) string {
+	if alias, ok := importAliasMap[pkgPath]; ok {
+		return alias
+	}
 	if alias, ok := aliasMap[pkgPath]; ok {
 		return alias
 	}
+	if name, ok := pkgNameMap[pkgPath]; ok {
+		return name
+	}
+	// 理论上不会走到这里，仅作为兜底
 	parts := strings.Split(pkgPath, "/")
 	return parts[len(parts)-1]
 }
 
 // writeImports writes the import block.
-func writeImports(buf *bytes.Buffer, mainPkgPath string, pkgAliasMap map[string]string, usedPkgs []string) {
+func writeImports(buf *bytes.Buffer, mainPkgPath string, importAliasMap map[string]string, pkgAliasMap map[string]string, pkgNameMap map[string]string, usedPkgs []string) {
 	importMap := make(map[string]string)
 	for _, pkgPath := range usedPkgs {
 		if pkgPath == mainPkgPath || pkgPath == "" {
 			continue
 		}
-		importMap[pkgPath] = getPkgAlias(pkgPath, pkgAliasMap)
+		importMap[pkgPath] = getPkgAlias(pkgPath, importAliasMap, pkgAliasMap, pkgNameMap)
 	}
 	paths := functional.Keys(importMap)
 	sort.Strings(paths)
@@ -79,8 +86,16 @@ func writeImports(buf *bytes.Buffer, mainPkgPath string, pkgAliasMap map[string]
 	buf.WriteString("import (\n")
 	for _, path := range paths {
 		alias := importMap[path]
-		parts := strings.Split(path, "/")
-		defaultName := parts[len(parts)-1]
+		defaultName := pkgNameMap[path]
+		if defaultName == "" {
+			defaultName = alias
+		}
+		// 用户源码显式指定了 alias，必须保留
+		if _, ok := importAliasMap[path]; ok {
+			fmt.Fprintf(buf, "%s %q\n", alias, path)
+			continue
+		}
+
 		if alias == defaultName {
 			fmt.Fprintf(buf, "%q\n", path)
 		} else {
@@ -124,7 +139,7 @@ func (g *Generator) BuildExecParams(outFile string) string {
 }
 
 // GenerateCode generates the complete Go source code as a string.
-func (g *Generator) GenerateCode(nodes []model.Node, refCount map[string]int, pkgName, originFuncName, mainPkgPath string, pkgAliasMap map[string]string, fset *token.FileSet, params *ast.FieldList, outFile string) (string, error) {
+func (g *Generator) GenerateCode(nodes []model.Node, refCount map[string]int, pkgName, originFuncName, mainPkgPath string, importAliasMap, pkgAliasMap, pkgNameMap map[string]string, fset *token.FileSet, params *ast.FieldList, outFile string) (string, error) {
 	mainPkg := pkgName
 	if mainPkg == "" {
 		mainPkg = "main"
@@ -148,7 +163,7 @@ func (g *Generator) GenerateCode(nodes []model.Node, refCount map[string]int, pk
 	}
 	usedPkgs := functional.Keys(usedPkgSet)
 
-	writeImports(buf, mainPkgPath, pkgAliasMap, usedPkgs)
+	writeImports(buf, mainPkgPath, importAliasMap, pkgAliasMap, pkgNameMap, usedPkgs)
 	if g.cfg.Debug {
 		buf.WriteString("var Logf = log.Printf\n\n")
 	}
