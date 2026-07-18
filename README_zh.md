@@ -13,7 +13,13 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **版本**：v1.0.5 – `InitApp()` 返回 `func(context.Context) error`；生成的代码对 `dig` 包 **零运行时依赖**。  
+> **当前版本**：v1.0.11
+>
+> **关键版本变更**：
+> - **v1.0.11**：新增命名多实例注入，修复包别名解析问题（如 `go-redis/v9`）
+> - **v1.0.5**：`InitApp()` 返回 `func(context.Context) error`，生成的代码零运行时依赖
+> - **v1.0.4**：初始稳定版本
+>
 > **从 v1.0.4 升级**：将 `app.Run(ctx)` 替换为 `run := InitApp(); run(ctx)`。
 
 ---
@@ -25,7 +31,7 @@ Go 的依赖注入工具分为两大阵营：
 - **Uber Fx**：API 优雅（`Provide`/`Invoke`/`Supply`/`Module`），但依赖 **运行时反射** – 启动较慢、依赖错误仅在运行时 panic、二进制体积更大。
 - **Google Wire**：编译期安全且零运行时开销，但 **API 冗长且反直觉** – 重复的 `wire.NewSet`、手动接口绑定、`wire.Value` 仅限于编译期常量，以及臭名昭著的 `wire.Build` 必须写 `return nil, nil` 这样的哑占位符。
 
-**dig** 结合了两者优点：**Fx 风格的极简 API** + **Wire 风格代码生成**（无反射、零运行时依赖），外加严格的闭包捕获安全检测、泛型支持、内置 `Invoke`，以及针对未使用提供者的合理策略。
+**dig** 结合了两者优点：**Fx 风格的极简 API** + **Wire 风格代码生成**（无反射、零运行时依赖），外加严格的闭包捕获安全检测、泛型支持、内置 `Invoke`、针对未使用提供者的合理策略，以及**通过参数名原生支持同一类型的多个实例注入**。
 
 ---
 
@@ -39,13 +45,14 @@ Go 的依赖注入工具分为两大阵营：
 - **可观测性** – 支持调试日志，运行时可通过 `Logf` 覆盖。
 - **未使用提供者策略** – `error`（默认）、`ignore` 或 `drop`。
 - **模块嵌套** – 支持层次化组合模块，内置重复检测。
+- **命名实例注入** – 通过参数名区分同一类型的多个实例（详见下文）。
 
 ---
 
 ## 安装
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.10
+go get github.com/shanjunmei/dig@v1.0.11
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 要求 Go 1.21+。
@@ -123,6 +130,70 @@ go run .
 
 ---
 
+## 命名实例注入
+
+dig 支持通过 **参数名** 来区分同一类型的多个实例，适用于以下场景：
+
+- 多个数据库连接（主库、只读库、报表库）
+- 多个 Redis 客户端（不同业务域）
+- 多个 HTTP 客户端（不同配置）
+
+### 工作原理
+
+1. **定义带有命名返回值的提供者** – 返回值名称成为“实例名称”。
+2. **依赖方使用相同的参数名** 来获取特定实例。
+
+### 示例
+
+```go
+// 提供者返回两个不同名称的 *sql.DB 实例
+dig.Provide(func() (mainDB *sql.DB, reportDB *sql.DB, error) {
+    main, err := connectMain()
+    if err != nil { return nil, nil, err }
+    report, err := connectReport()
+    if err != nil { return nil, nil, err }
+    return main, report, nil
+})
+
+// 使用主库
+dig.Invoke(func(mainDB *sql.DB) {
+    // mainDB 自动注入
+})
+
+// 使用报表库
+dig.Invoke(func(reportDB *sql.DB) {
+    // reportDB 自动注入
+})
+```
+
+### 与 `dig.Supply` 配合使用
+
+也可以直接提供命名值：
+
+```go
+dig.Supply(mainDB)   // 变量名成为实例名称
+dig.Supply(reportDB)
+```
+
+生成器使用 **变量名**（而非类型）来区分实例。
+
+### 错误处理
+
+如果同一类型存在多个实例，而消费者未指定参数名，生成器会报错并列出可用名称：
+
+```text
+ambiguous dependency: multiple providers for type *sql.DB available:
+  - mainDB
+  - reportDB
+```
+
+### 兼容性
+
+- 原有使用单实例的代码无需改动。
+- 该功能为增量添加，无破坏性变更。
+
+---
+
 ## 关键约束
 
 ### 1. 闭包捕获限制
@@ -193,6 +264,7 @@ func main() { Logf = myLogger.Printf }
 | 未使用提供者策略 | 3 种模式 | 仅 `drop` | N/A |
 | 调试日志 | ✅（运行时覆盖） | ❌ 手动 | ⚠️ 跟踪（非调试） |
 | API 友好度 | Fx 风格，极简 | Wire 风格，冗长且反直觉 | Fx 风格，极简 |
+| **相同类型的多个实例** | ✅ **命名参数** | ❌ 不支持（需用包装类型） | ✅ **值组 (Value Groups)** |
 | 重构友好度 | 高（静态检查） | 低（晦涩错误） | 中（运行时错误） |
 
 > **Wire 特别说明**：`wire.Build` 需要写一个哑 `return nil, nil`；`wire.Value` 仅支持常量；`wire.NewSet` 的组合是扁平的，非嵌套。
@@ -214,7 +286,7 @@ func main() { Logf = myLogger.Printf }
 
 ## 完整示例
 
-参阅 [`example/`](./example) 目录，包含跨包依赖、泛型、同名模块、嵌套、外部参数、`Supply`、闭包、调试日志、构建标签和别名策略的完整演示。
+参阅 [`example/`](./example) 目录，包含跨包依赖、泛型、同名模块、嵌套、外部参数、`Supply`、闭包、调试日志、构建标签、别名策略，以及**命名多实例注入**的完整演示。
 
 ```bash
 cd example

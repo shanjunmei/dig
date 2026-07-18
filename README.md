@@ -12,7 +12,13 @@ A complete standardized production coding convention skill for business microser
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Version**: v1.0.5 – `InitApp()` returns `func(context.Context) error`; generated code has **zero runtime dependency** on `dig`.  
+> **Current version**: v1.0.11
+>
+> **Key version changes**:
+> - **v1.0.11**: Added named instance injection, fixed package alias resolution (e.g. `go-redis/v9`)
+> - **v1.0.5**: `InitApp()` returns `func(context.Context) error`; generated code has zero runtime dependency
+> - **v1.0.4**: Initial stable release
+>
 > **Upgrade from v1.0.4**: replace `app.Run(ctx)` with `run := InitApp(); run(ctx)`.
 
 ---
@@ -24,7 +30,7 @@ Go DI tools fall into two camps:
 - **Uber Fx**: elegant API (`Provide`/`Invoke`/`Supply`/`Module`) but **runtime reflection** – slower startup, runtime panics on dependency errors, larger binaries.
 - **Google Wire**: compile‑time safety and zero overhead, but **API is verbose and counter‑intuitive** – repetitive `wire.NewSet`, manual interface binding, `wire.Value` limited to compile‑time constants, and the infamous `wire.Build` dummy `return nil, nil` marker.
 
-**dig** combines the best of both: **Fx‑style minimal API** + **Wire‑style code generation** (no reflection, zero runtime dependency), plus strict closure‑capture safety, generic support, built‑in `Invoke`, and sensible policies for unused providers.
+**dig** combines the best of both: **Fx‑style minimal API** + **Wire‑style code generation** (no reflection, zero runtime dependency), plus strict closure‑capture safety, generic support, built‑in `Invoke`, sensible policies for unused providers, and **native support for multiple instances of the same type via parameter names**.
 
 ---
 
@@ -38,13 +44,14 @@ Go DI tools fall into two camps:
 - **Observability** – debug logging with runtime‑overridable `Logf`.
 - **Unused‑provider policies** – `error` (default), `ignore`, or `drop`.
 - **Module nesting** – compose modules hierarchically; duplicate detection built‑in.
+- **Named instance injection** – inject multiple instances of the same type by distinguishing them via **parameter names**.
 
 ---
 
 ## Installation
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.10
+go get github.com/shanjunmei/dig@v1.0.11
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 Requires Go 1.21+.
@@ -122,6 +129,70 @@ go run .
 
 ---
 
+## Named Instance Injection
+
+dig supports injecting multiple instances of the **same type** by differentiating them through **parameter names**. This is useful for scenarios like:
+
+- Multiple database connections (primary, replica, reporting)
+- Multiple Redis clients for different business domains
+- Multiple HTTP clients with different configurations
+
+### How It Works
+
+1. **Define a provider with named return values** – the names become the "instance names".
+2. **Depend on a specific instance** by using the same parameter name in your consumer function.
+
+### Example
+
+```go
+// Provider returns two *sql.DB instances with different names
+dig.Provide(func() (mainDB *sql.DB, reportDB *sql.DB, error) {
+    main, err := connectMain()
+    if err != nil { return nil, nil, err }
+    report, err := connectReport()
+    if err != nil { return nil, nil, err }
+    return main, report, nil
+})
+
+// Consumer uses the main database
+dig.Invoke(func(mainDB *sql.DB) {
+    // mainDB is automatically injected
+})
+
+// Consumer uses the report database
+dig.Invoke(func(reportDB *sql.DB) {
+    // reportDB is automatically injected
+})
+```
+
+### Using `dig.Supply` with Names
+
+You can also supply named values directly:
+
+```go
+dig.Supply(mainDB)   // variable name becomes instance name
+dig.Supply(reportDB)
+```
+
+The generator uses the **variable name** (not the type) to distinguish instances.
+
+### Error Handling
+
+If multiple instances exist for the same type and a consumer does **not** specify a parameter name, the generator will produce an error listing the available names:
+
+```text
+ambiguous dependency: multiple providers for type *sql.DB available:
+  - mainDB
+  - reportDB
+```
+
+### Compatibility
+
+- Existing code that uses a single instance of a type remains unchanged.
+- The feature is additive – no breaking changes.
+
+---
+
 ## Key Constraints
 
 ### 1. Closure Capture Restriction
@@ -192,6 +263,7 @@ func main() { Logf = myLogger.Printf }
 | Unused provider policies | 3 modes | only `drop` | N/A |
 | Debug logging | ✅ (runtime override) | ❌ manual | ⚠️ tracing (not debug) |
 | API ergonomics | Fx‑style, minimal | Wire‑style, verbose & counter‑intuitive | Fx‑style, minimal |
+| **Multiple instances of same type** | ✅ **Named parameters** | ❌ Not supported (must use wrapper types) | ✅ **Value Groups** |
 | Refactoring friendliness | High (static checks) | Low (cryptic errors) | Medium (runtime errors) |
 
 > **Wire specifics**: `wire.Build` requires dummy `return nil, nil`; `wire.Value` only works with constants; `wire.NewSet` composition is flat, not nested.
@@ -213,7 +285,7 @@ func main() { Logf = myLogger.Printf }
 
 ## Complete Example
 
-See [`example/`](./example) for a full demonstration covering cross‑package deps, generics, same‑name modules, nesting, external params, `Supply`, closures, debug logs, build tags, and alias strategies.
+See [`example/`](./example) for a full demonstration covering cross‑package deps, generics, same‑name modules, nesting, external params, `Supply`, closures, debug logs, build tags, alias strategies, and **named instance injection** for multiple databases.
 
 ```bash
 cd example
