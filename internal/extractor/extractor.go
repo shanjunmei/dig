@@ -777,6 +777,9 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 			return err
 		}
 	}
+	if err := e.checkMethodVisibilityInClosure(funcLit.Body, curPkg); err != nil {
+		return err
+	}
 	paramNames, paramTypes, paramTypeStrs := e.extractClosureParams(funcLit, curPkg)
 	freeVars, freeTypes, freeTypeStrs, freeIsConst, freeLitValues, err := e.collectFreeVarsWithConst(funcLit, curPkg)
 	if err != nil {
@@ -1233,6 +1236,34 @@ func (e *Extractor) getAvailableProviders(typeString string) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// checkMethodVisibilityInClosure 检查闭包体中的方法调用是否对目标包可见
+func (e *Extractor) checkMethodVisibilityInClosure(body *ast.BlockStmt, pkg *packages.Package) error {
+	var err error
+	ast.Inspect(body, func(n ast.Node) bool {
+		// 检查是否是方法调用: CallExpr.Fun 是 SelectorExpr
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		// 获取被调用的方法对象
+		obj := pkg.TypesInfo.ObjectOf(sel.Sel)
+		if obj == nil {
+			return true
+		}
+		// 检查可见性
+		if visErr := e.checkGenerationVisibility(obj); visErr != nil {
+			err = visErr
+			return false
+		}
+		return true
+	})
+	return err
 }
 
 // checkGenerationVisibility 检查函数对目标包（dig.Build 所在包）是否可见
