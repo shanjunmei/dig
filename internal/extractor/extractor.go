@@ -766,29 +766,110 @@ func (e *Extractor) generateFuncName(isInvoke bool) string {
 }
 
 // ---------- handleFuncLit 修改 ----------
+// ---------- 重构后的 handleFuncLit ----------
 func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package, isInvoke bool) error {
-	typ := curPkg.TypesInfo.TypeOf(funcLit)
-	sig, ok := typ.(*types.Signature)
-	if !ok {
-		return fmt.Errorf("func literal is not a function type")
-	}
-	if isInvoke {
-		if err := validateInvokeSignature(sig, "anonymous function"); err != nil {
-			return err
-		}
-	}
-	if err := e.checkMethodVisibilityInClosure(funcLit.Body, curPkg); err != nil {
-		return err
-	}
-	paramNames, paramTypes, paramTypeStrs := e.extractClosureParams(funcLit, curPkg)
-	freeVars, freeTypes, freeTypeStrs, freeIsConst, freeLitValues, err := e.collectFreeVarsWithConst(funcLit, curPkg)
+	// 1. 验证签名
+	sig, err := e.validateClosureSignature(funcLit, curPkg, isInvoke)
 	if err != nil {
 		return err
 	}
 
+	// 2. 检查闭包体内的私有方法调用
+	if err := e.checkMethodVisibilityInClosure(funcLit.Body, curPkg); err != nil {
+		return err
+	}
+
+	// 3. 构建参数列表和自由变量
+	params, closureParams, freeVars, freeTypes, freeTypeStrs, err :=
+		e.buildClosureArgumentLists(funcLit, curPkg)
+	if err != nil {
+		return err
+	}
+
+	// 4. 确定返回类型
+	retType, err := e.determineReturnType(funcLit, sig, isInvoke, curPkg)
+	if err != nil {
+		return err
+	}
+	if retType != "" {
+		if _, dup := e.globalProviderMap[retType]; dup {
+			return fmt.Errorf("duplicate provide for type %q", retType)
+		}
+	}
+
+	// 5. 构建 extractedItem
+	funcName := e.generateFuncName(isInvoke)
+	hasErr := sigHasError(sig)
+	item := e.newExtractedItem(funcName, curPkg, e.collectPkgAlias(curPkg), hasErr)
+	item.IsInvoke = isInvoke
+	item.IsClosure = true
+	item.ClosureLit = funcLit
+	item.FreeVars = freeVars
+	item.FreeTypes = freeTypes
+	item.FreeTypeStrings = freeTypeStrs
+	item.Params = params
+	item.ClosureParams = closureParams
+	if retType != "" {
+		item.RetType = retType
+	}
+	item.InstanceName = e.extractNamedReturn(sig)
+
+	// 设置位置信息
+	pos := curPkg.Fset.Position(funcLit.Pos())
+	relPath := e.relPath(pos.Filename)
+	item.SourceComment = e.ConditionalDebugf(func() bool { return true }, "// closure defined at %s:%d", relPath, pos.Line)
+	item.Position = fmt.Sprintf("%s:%d", relPath, pos.Line)
+
+	// 6. 注册
+	idx := len(e.items)
+	e.items = append(e.items, item)
+	if !isInvoke && retType != "" {
+		if err := e.registerClosureProvider(item, idx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ---------- 新增辅助函数 ----------
+
+// validateClosureSignature 验证闭包的签名，返回 *types.Signature
+func (e *Extractor) validateClosureSignature(funcLit *ast.FuncLit, curPkg *packages.Package, isInvoke bool) (*types.Signature, error) {
+	typ := curPkg.TypesInfo.TypeOf(funcLit)
+	sig, ok := typ.(*types.Signature)
+	if !ok {
+		return nil, fmt.Errorf("func literal is not a function type")
+	}
+	if isInvoke {
+		if err := validateInvokeSignature(sig, "anonymous function"); err != nil {
+			return nil, err
+		}
+	}
+	return sig, nil
+}
+
+// buildClosureArgumentLists 构建闭包的参数列表和自由变量
+// 返回：完整参数列表（闭包参数+自由变量）、闭包自身参数列表、自由变量标识符、自由变量类型、自由变量类型字符串
+func (e *Extractor) buildClosureArgumentLists(funcLit *ast.FuncLit, curPkg *packages.Package) (
+	params []ExtractedArg,
+	closureParams []ExtractedArg,
+	freeVars []*ast.Ident,
+	freeTypes []types.Type,
+	freeTypeStrs []string,
+	err error,
+) {
+	// 提取闭包参数
+	paramNames, paramTypes, paramTypeStrs := e.extractClosureParams(funcLit, curPkg)
+
+	// 收集自由变量
+	freeVars, freeTypes, freeTypeStrs, freeIsConst, freeLitValues, err := e.collectFreeVarsWithConst(funcLit, curPkg)
+	if err != nil {
+		return
+	}
+
 	// 构建完整参数列表（闭包参数 + 自由变量）
 	totalParams := len(paramNames) + len(freeVars)
-	params := make([]ExtractedArg, totalParams)
+	params = make([]ExtractedArg, totalParams)
 
 	// 填充闭包参数
 	for i := range paramNames {
@@ -815,7 +896,7 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	}
 
 	// 构建闭包自身参数列表
-	closureParams := make([]ExtractedArg, len(paramNames))
+	closureParams = make([]ExtractedArg, len(paramNames))
 	for i := range paramNames {
 		closureParams[i] = newExtractedArg(
 			paramNames[i],
@@ -826,53 +907,23 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 		)
 	}
 
-	hasErr := sigHasError(sig)
-	retType, err := e.determineReturnType(funcLit, sig, isInvoke, curPkg)
-	if err != nil {
-		return err
-	}
-	if retType != "" {
-		if _, dup := e.globalProviderMap[retType]; dup {
-			return fmt.Errorf("duplicate provide for type %q", retType)
-		}
-	}
+	return
+}
 
-	funcName := e.generateFuncName(isInvoke)
-	item := e.newExtractedItem(funcName, curPkg, e.collectPkgAlias(curPkg), hasErr)
-	item.IsInvoke = isInvoke
-	item.IsClosure = true
-	item.ClosureLit = funcLit
-	item.FreeVars = freeVars
-	item.FreeTypes = freeTypes
-	item.FreeTypeStrings = freeTypeStrs
-	item.Params = params
-	item.ClosureParams = closureParams
-	if retType != "" {
-		item.RetType = retType
+// registerClosureProvider 将闭包提供者注册到 globalProviderMap
+func (e *Extractor) registerClosureProvider(item extractedItem, idx int) error {
+	key := item.RetType
+	if item.InstanceName != "" {
+		key = item.RetType + ":" + item.InstanceName
 	}
-	// 提取命名返回值
-	item.InstanceName = e.extractNamedReturn(sig)
-
-	pos := curPkg.Fset.Position(funcLit.Pos())
-	relPath := e.relPath(pos.Filename)
-	comment := e.ConditionalDebugf(func() bool { return true }, "// closure defined at %s:%d", relPath, pos.Line)
-	item.SourceComment = comment
-	item.Position = fmt.Sprintf("%s:%d", relPath, pos.Line)
-
-	idx := len(e.items)
-	e.items = append(e.items, item)
-	if !isInvoke && retType != "" {
-		key := retType
-		if item.InstanceName != "" {
-			key = retType + ":" + item.InstanceName
-		}
-		// 检查重复（略，与前面类似）
-		if oldIdx, exists := e.globalProviderMap[key]; exists {
+	if oldIdx, exists := e.globalProviderMap[key]; exists {
+		if oldIdx != idx {
 			oldDesc := e.describeItem(oldIdx)
 			currentDesc := e.describeItemByIt(item)
 			return fmt.Errorf("duplicate binding for %s with name %q:\n\tprevious: %s\n\tcurrent: %s",
-				retType, item.InstanceName, oldDesc, currentDesc)
+				item.RetType, item.InstanceName, oldDesc, currentDesc)
 		}
+	} else {
 		e.globalProviderMap[key] = idx
 	}
 	return nil
