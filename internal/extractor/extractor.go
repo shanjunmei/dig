@@ -1157,11 +1157,107 @@ func (e *Extractor) BuildFinalNodes() ([]model.Node, error) {
 	return e.buildFinalNodes()
 }
 
+// resolveProvider 解析参数所需的提供者索引
+func (e *Extractor) resolveProvider(arg ExtractedArg, it extractedItem) (int, error) {
+	requiredName := e.getRequiredInstanceName(arg)
+
+	// 1. 精确匹配
+	key := arg.TypeString
+	if requiredName != "" {
+		key = arg.TypeString + ":" + requiredName
+	}
+	if idx, ok := e.globalProviderMap[key]; ok {
+		return idx, nil
+	}
+
+	// 2. 回退到默认
+	if requiredName != "" {
+		if idx, ok := e.globalProviderMap[arg.TypeString]; ok {
+			return idx, nil
+		}
+	}
+
+	// 3. 都找不到，构造错误（requiredName 下传）
+	return 0, e.buildProviderNotFoundError(arg.TypeString, requiredName, it)
+}
+
+// getAvailableProviders 返回该类型所有可用的提供者名称列表
+func (e *Extractor) getAvailableProviders(typeString string) []string {
+	var names []string
+	for key := range e.globalProviderMap {
+		if strings.HasPrefix(key, typeString+":") {
+			name := strings.TrimPrefix(key, typeString+":")
+			if name != "" {
+				names = append(names, name)
+			}
+		}
+	}
+	// 检查是否有默认提供者
+	if _, ok := e.globalProviderMap[typeString]; ok {
+		names = append(names, "(default)")
+	}
+	sort.Strings(names)
+	return names
+}
+
+// buildProviderNotFoundError 构造友好的错误信息
+func (e *Extractor) buildProviderNotFoundError(typeString, requiredName string, it extractedItem) error {
+	available := e.getAvailableProviders(typeString)
+
+	var hint string
+	var fix string
+
+	if len(available) == 0 {
+		hint = " (no provider for this type at all)"
+		fix = "\n  💡 Fix: add a provider for " + typeString + " via dig.Provide or dig.Supply"
+	} else {
+		hint = " (available: " + strings.Join(available, ", ") + ")"
+
+		// 检查是否有默认提供者
+		var namedOnly []string
+		for _, name := range available {
+			if name == "(default)" {
+
+			} else {
+				namedOnly = append(namedOnly, name)
+			}
+		}
+
+		if requiredName == "" {
+			// 请求默认但只有命名提供者
+			if len(namedOnly) == 1 {
+				fix = "\n  💡 Fix: rename parameter to '" + namedOnly[0] + "' (matches the only named provider), or remove the name from the provider's return value to make it default"
+			} else {
+				fix = "\n  💡 Fix: add a default provider via dig.Provide(func() " + typeString + " { ... }), or rename parameter to one of the available names"
+			}
+		} else if len(namedOnly) == 1 && namedOnly[0] == requiredName {
+			// 这个情况实际上不会发生，因为精确匹配已经成功了
+			// 保留，但实际不会用到
+			fix = "\n  💡 Fix: check if the provider is accessible from the current package"
+		} else if len(namedOnly) == 1 {
+			// 只有一个命名提供者，用户请求了不同的名字
+			fix = "\n  💡 Fix: rename parameter to '" + namedOnly[0] + "' (matches the only named provider), or remove the name from the provider's return value to make it default"
+		} else {
+			// 多个命名提供者
+			fix = "\n  💡 Fix: rename parameter to one of the available names, or add a default provider"
+		}
+	}
+
+	funcName := model.FullFuncName(it.Pkg.PkgPath, it.FuncName)
+	if it.IsClosure {
+		funcName = it.FuncName + " (closure)"
+	}
+
+	return fmt.Errorf("no provider for type %s with name %q required by %s at %s%s%s",
+		typeString, requiredName, funcName, it.Position, hint, fix)
+}
+
 // ---------- buildDependencyGraph 修改 ----------
 func (e *Extractor) buildDependencyGraph(items []extractedItem) ([][]int, []int, error) {
 	n := len(items)
 	adj := make([][]int, n)
 	indeg := make([]int, n)
+
 	for i, it := range items {
 		if it.IsSupply {
 			continue
@@ -1173,25 +1269,12 @@ func (e *Extractor) buildDependencyGraph(items []extractedItem) ([][]int, []int,
 			if it.IsClosure && arg.IsConst {
 				continue
 			}
-			requiredName := e.getRequiredInstanceName(arg)
-			key := arg.TypeString
-			if requiredName != "" {
-				key = arg.TypeString + ":" + requiredName
+
+			providerIdx, err := e.resolveProvider(arg, it)
+			if err != nil {
+				return nil, nil, err
 			}
-			providerIdx, ok := e.globalProviderMap[key]
-			if !ok && requiredName != "" {
-				// 回退到默认
-				providerIdx, ok = e.globalProviderMap[arg.TypeString]
-			}
-			if !ok {
-				funcName := model.FullFuncName(it.Pkg.PkgPath, it.FuncName)
-				if it.IsClosure {
-					funcName = it.FuncName + " (closure)"
-				}
-				pos := it.Position
-				return nil, nil, fmt.Errorf("no provider for type %s with name %q required by %s at %s",
-					arg.TypeString, requiredName, funcName, pos)
-			}
+
 			adj[providerIdx] = append(adj[providerIdx], i)
 			indeg[i]++
 		}
