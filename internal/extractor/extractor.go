@@ -1175,29 +1175,45 @@ func (e *Extractor) BuildFinalNodes() ([]model.Node, error) {
 	e.populateUsedPkgs()
 	return e.buildFinalNodes()
 }
-
-// resolveProvider 解析参数所需的提供者索引
 func (e *Extractor) resolveProvider(arg ExtractedArg, it extractedItem) (int, error) {
-	requiredName := e.getRequiredInstanceName(arg)
+	if idx, ok := e.resolveProviderIndex(arg); ok {
+		return idx, nil
+	}
+	return 0, e.buildProviderNotFoundError(arg.TypeString, e.getRequiredInstanceName(arg), it)
+}
 
-	// 1. 精确匹配
+func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) []string {
+	argNames := make([]string, len(it.Params))
+	for j, arg := range it.Params {
+		if arg.IsContext {
+			argNames[j] = ""
+			continue
+		}
+		idx, ok := e.resolveProviderIndex(arg)
+		if !ok {
+			panic(fmt.Sprintf("no provider for type %s", arg.TypeString))
+		}
+		argNames[j] = varNames[idx]
+	}
+	return argNames
+}
+
+// resolveProviderIndex 根据参数查找对应的 provider 索引（核心查找逻辑）
+func (e *Extractor) resolveProviderIndex(arg ExtractedArg) (int, bool) {
+	requiredName := e.getRequiredInstanceName(arg)
 	key := arg.TypeString
 	if requiredName != "" {
 		key = arg.TypeString + ":" + requiredName
 	}
 	if idx, ok := e.globalProviderMap[key]; ok {
-		return idx, nil
+		return idx, true
 	}
-
-	// 2. 回退到默认
 	if requiredName != "" {
 		if idx, ok := e.globalProviderMap[arg.TypeString]; ok {
-			return idx, nil
+			return idx, true
 		}
 	}
-
-	// 3. 都找不到，构造错误（requiredName 下传）
-	return 0, e.buildProviderNotFoundError(arg.TypeString, requiredName, it)
+	return 0, false
 }
 
 // getAvailableProviders 返回该类型所有可用的提供者名称列表
@@ -1492,31 +1508,6 @@ func (e *Extractor) buildFinalNodes() ([]model.Node, error) {
 	varNames := e.assignVarNames(order, items)
 	nodes := e.buildNodes(order, items, varNames)
 	return nodes, nil
-}
-
-// ---------- resolveArgNames 修改 ----------
-func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) []string {
-	argNames := make([]string, len(it.Params))
-	for j, arg := range it.Params {
-		if arg.IsContext {
-			argNames[j] = ""
-			continue
-		}
-		requiredName := e.getRequiredInstanceName(arg)
-		key := arg.TypeString
-		if requiredName != "" {
-			key = arg.TypeString + ":" + requiredName
-		}
-		provIdx, ok := e.globalProviderMap[key]
-		if !ok && requiredName != "" {
-			provIdx, ok = e.globalProviderMap[arg.TypeString]
-		}
-		if !ok {
-			panic(fmt.Sprintf("no provider for type %s", arg.TypeString))
-		}
-		argNames[j] = varNames[provIdx]
-	}
-	return argNames
 }
 
 // ---------- baseNode 构建 []model.Arg ----------
