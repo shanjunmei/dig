@@ -487,6 +487,9 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 		if err := checkExportedVisibility(obj, curPkg.Types); err != nil {
 			return err
 		}
+		if err := e.checkGenerationVisibility(obj); err != nil {
+			return err
+		}
 	}
 	alias := e.collectPkgAlias(curPkg)
 	typ := curPkg.TypesInfo.TypeOf(expr)
@@ -956,6 +959,12 @@ func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error 
 	if err != nil {
 		return err
 	}
+	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
+	if obj != nil {
+		if err := e.checkGenerationVisibility(obj); err != nil {
+			return err
+		}
+	}
 	if err := validateInvokeSignature(sig, name); err != nil {
 		return err
 	}
@@ -981,6 +990,12 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	name, sig, realPkg, err := getFuncMeta(expr, curPkg, e.pkgMap)
 	if err != nil {
 		return err
+	}
+	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
+	if obj != nil {
+		if err := e.checkGenerationVisibility(obj); err != nil {
+			return err
+		}
 	}
 	genericStr, err := e.extractGenericArgStr(expr, curPkg)
 	if err != nil {
@@ -1125,6 +1140,10 @@ func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packa
 	if fnPkg == nil {
 		return fmt.Errorf("function has no package")
 	}
+	// ✅ 检查生成时可见性（对目标包）
+	if err := e.checkGenerationVisibility(obj); err != nil {
+		return err
+	}
 	subPkg, ok := e.pkgMap[fnPkg.Path()]
 	if !ok {
 		return fmt.Errorf("package %s not loaded", fnPkg.Path())
@@ -1185,8 +1204,8 @@ func (e *Extractor) resolveProvider(arg ExtractedArg, it extractedItem) (int, er
 func (e *Extractor) getAvailableProviders(typeString string) []string {
 	var names []string
 	for key := range e.globalProviderMap {
-		if strings.HasPrefix(key, typeString+":") {
-			name := strings.TrimPrefix(key, typeString+":")
+		if after, ok := strings.CutPrefix(key, typeString+":"); ok {
+			name := after
 			if name != "" {
 				names = append(names, name)
 			}
@@ -1198,6 +1217,47 @@ func (e *Extractor) getAvailableProviders(typeString string) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// checkGenerationVisibility 检查函数对目标包（dig.Build 所在包）是否可见
+// 如果函数定义包与目标包相同，或函数是导出的，则可见
+// 否则返回错误，提示用户该函数无法在目标包中使用
+func (e *Extractor) checkGenerationVisibility(obj types.Object) error {
+	if obj == nil {
+		return nil
+	}
+
+	// 获取定义包
+	var pkg *types.Package
+	var name string
+
+	switch o := obj.(type) {
+	case *types.Func:
+		pkg = o.Pkg()
+		name = o.Name()
+	case *types.Var:
+		pkg = o.Pkg()
+		name = o.Name()
+	case *types.Const:
+		pkg = o.Pkg()
+		name = o.Name()
+	default:
+		return nil
+	}
+
+	if pkg == nil {
+		return nil
+	}
+	if pkg.Path() == e.mainPkgPath {
+		return nil
+	}
+	if isExported(name) {
+		return nil
+	}
+
+	return fmt.Errorf("%s %q is private in package %s and cannot be used from package %s (generation target)",
+		strings.ToLower(strings.TrimPrefix(fmt.Sprintf("%T", obj), "*types.")),
+		name, pkg.Path(), e.mainPkgPath)
 }
 
 // buildProviderNotFoundError 构造友好的错误信息
