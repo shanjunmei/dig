@@ -283,7 +283,14 @@ func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool
 	g.emitLog(buf, "[PROVIDE] before: %s", strconv.Quote(logName))
 
 	if blank {
-		fmt.Fprintf(buf, "_ = %s(%s)\n", fullCall, argsStr)
+		if node.HasError {
+			// 有error返回，即使结果不用，依然校验错误并panic，保持行为统一
+			fmt.Fprintf(buf, "if _, err := %s(%s); err != nil {\n", fullCall, argsStr)
+			g.emitLog(buf, "[PROVIDE] failed (unused): %s: %v", strconv.Quote(logName), "err")
+			fmt.Fprintf(buf, "panic(err)\n}\n")
+		} else {
+			fmt.Fprintf(buf, "_ = %s(%s)\n", fullCall, argsStr)
+		}
 	} else {
 		if node.HasError {
 			fmt.Fprintf(buf, "%s, err := %s(%s)\n", node.Name, fullCall, argsStr)
