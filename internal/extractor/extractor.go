@@ -303,7 +303,28 @@ func checkExportedVisibility(obj types.Object, curPkg *types.Package) error {
 func (e *Extractor) typeQualifier(p *types.Package) string {
 	return p.Path()
 }
-
+func (e *Extractor) isDigOptionCall(expr ast.Expr, info *types.Info) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	obj := info.ObjectOf(sel.Sel)
+	if obj == nil || obj.Pkg() == nil {
+		return false
+	}
+	if obj.Pkg().Path() != diPkgPath {
+		return false
+	}
+	switch obj.Name() {
+	case "Provide", "Invoke", "Supply", "Module":
+		return true
+	}
+	return false
+}
 func (e *Extractor) getTypeFullName(typ types.Type) string {
 	if s, ok := e.typeStrCache[typ]; ok {
 		return s
@@ -482,6 +503,10 @@ func (e *Extractor) getRequiredInstanceName(arg ExtractedArg) string {
 
 // ---------- handleSupply 修改 ----------
 func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error {
+	if e.isDigOptionCall(expr, curPkg.TypesInfo) {
+		pos := curPkg.Fset.Position(expr.Pos())
+		return fmt.Errorf("at %s: dig.Supply cannot accept another Option as argument; only dig.Module can nest Options", pos)
+	}
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
 	if obj != nil {
 		if err := checkExportedVisibility(obj, curPkg.Types); err != nil {
@@ -1006,6 +1031,10 @@ func validateInvokeSignature(sig *types.Signature, funcName string) error {
 
 // ---------- handleInvoke 使用新模型 ----------
 func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error {
+	if e.isDigOptionCall(expr, curPkg.TypesInfo) {
+		pos := curPkg.Fset.Position(expr.Pos())
+		return fmt.Errorf("at %s: dig.Invoke cannot accept another Option as argument; only dig.Module can nest Options", pos)
+	}
 	if funcLit, ok := expr.(*ast.FuncLit); ok {
 		return e.handleFuncLit(funcLit, curPkg, true)
 	}
@@ -1038,6 +1067,10 @@ func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error 
 
 // ---------- handleProvide 修改 ----------
 func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error {
+	if e.isDigOptionCall(expr, curPkg.TypesInfo) {
+		pos := curPkg.Fset.Position(expr.Pos())
+		return fmt.Errorf("at %s: dig.Provide cannot accept another Option as argument; only dig.Module can nest Options", pos)
+	}
 	if funcLit, ok := expr.(*ast.FuncLit); ok {
 		return e.handleFuncLit(funcLit, curPkg, false)
 	}
