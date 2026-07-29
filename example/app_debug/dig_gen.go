@@ -4,7 +4,7 @@
 //go:build !digen
 // +build !digen
 
-package app
+package app_debug
 
 import (
 	"context"
@@ -99,16 +99,16 @@ func dig_invoke_9(s *user.Store[string], cfg *common.Config) {
 }
 
 func dig_invoke_10(s *user.Store[string], cfg *common.Config, log *logger.Logger) error {
-	log.Println("App Invoke: store len =", len(s.GetAll()))
+	log.Println("Debug App Invoke: store len =", len(s.GetAll()))
 	return nil
 }
 
 func dig_invoke_11(stringCache *cache.Cache[string]) {
-	stringCache.Set("from-app", "cross-package")
+	stringCache.Set("from-debug", "cross-package")
 	stringCache.Print()
 }
 
-func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error {
+func InitAppDebug(cfg *common.Config, log *logger.Logger) func(context.Context) error {
 	v0 := cfg
 	v1 := log
 	v2 := user.NewStore[int]()
