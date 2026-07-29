@@ -103,10 +103,10 @@ func FindInjectorFunctions(pkg *packages.Package) (*model.GenTarget, error) {
 		}
 	}
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("no function containing dig.Build call found")
+		return nil, fmt.Errorf("no function containing dig.Build call found\n  💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error")
 	}
 	if len(targets) > 1 {
-		return nil, fmt.Errorf("multiple functions containing dig.Build call found (only one allowed)")
+		return nil, fmt.Errorf("multiple functions containing dig.Build call found (only one allowed)\n  💡 Fix: keep exactly one function with dig.Build per package")
 	}
 	return &targets[0], nil
 }

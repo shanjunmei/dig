@@ -4,7 +4,7 @@
 //go:build !digen
 // +build !digen
 
-package app
+package app_edge
 
 import (
 	"context"
@@ -57,6 +57,10 @@ func dig_provider_7() *user.Store[string] {
 	return s
 }
 
+func dig_provider_8() *db.DB {
+	return &db.DB{Name: "default", DSN: "postgres://default:5432/app"}
+}
+
 func dig_invoke_1(r *repository.Repository[string]) {
 	r.Print()
 }
@@ -104,17 +108,21 @@ func dig_invoke_9(s *user.Store[string], cfg *common.Config) {
 	}
 }
 
-func dig_invoke_10(s *user.Store[string], cfg *common.Config, log *logger.Logger) error {
-	log.Println("App Invoke: store len =", len(s.GetAll()))
-	return nil
+func dig_invoke_10(defaultDB *db.DB, primaryDB *db.DB, log *logger.Logger) {
+	log.Println("Edge: default DB =", defaultDB.Name, ", primary DB =", primaryDB.Name)
 }
 
-func dig_invoke_11(stringCache *cache.Cache[string]) {
-	stringCache.Set("from-app", "cross-package")
+func dig_invoke_11(stringCache *cache.Cache[string], log *logger.Logger) {
+	stringCache.Set("edge", "boundary-test")
 	stringCache.Print()
 }
 
-func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error {
+func dig_invoke_12(cfg *common.Config, log *logger.Logger) error {
+	log.Println("Edge: port =", cfg.Port)
+	return nil
+}
+
+func InitAppEdge(cfg *common.Config, log *logger.Logger) func(context.Context) error {
 	v0 := cfg
 	v1 := log
 	v2 := user.NewStore[int]()
@@ -140,7 +148,7 @@ func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error
 	v13 := dig_provider_5()
 	v14 := dig_provider_6()
 	v15 := dig_provider_7()
-	_ = "app-v2"
+	v16 := dig_provider_8()
 	v17 := role.NewServer(v5)
 	return func(ctx context.Context) error {
 		dig_invoke_1(v3)
@@ -155,10 +163,11 @@ func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error
 		dig_invoke_7(v12, v14)
 		dig_invoke_8(v11, v13)
 		dig_invoke_9(v15, v0)
-		if err := dig_invoke_10(v15, v0, v1); err != nil {
+		dig_invoke_10(v16, v11, v1)
+		dig_invoke_11(v8, v1)
+		if err := dig_invoke_12(v0, v1); err != nil {
 			return err
 		}
-		dig_invoke_11(v8)
 		return nil
 	}
 }

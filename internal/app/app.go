@@ -35,8 +35,6 @@ func NewApp(processor *processor.Processor, loader *loader.PackageLoader, logger
 func (a *App) Run() error {
 	start := time.Now()
 
-	// 创建别名策略
-
 	a.logger.Debugf("alias strategy: %s", a.cfg.AliasType)
 
 	pkgs, pkgMap, err := a.loader.Load(a.cfg.Paths)
@@ -45,12 +43,14 @@ func (a *App) Run() error {
 	}
 
 	var generatedCount, failedCount int
+	var failedErrors []string
 	for _, pkg := range pkgs {
 		if err := a.processor.Process(pkg, pkgMap, a.aliasStrategy); err != nil {
 			if strings.Contains(err.Error(), "no function containing dig.Build call found") {
 				continue
 			}
 			a.logger.Debugf("failed to process package %s: %v", pkg.PkgPath, err)
+			failedErrors = append(failedErrors, fmt.Sprintf("  Package %s:\n    %s", pkg.PkgPath, err.Error()))
 			failedCount++
 		} else {
 			generatedCount++
@@ -59,13 +59,13 @@ func (a *App) Run() error {
 
 	if generatedCount == 0 {
 		if failedCount > 0 {
-			msg := fmt.Sprintf("%d package(s) with dig.Build found but failed to generate", failedCount)
-			if !a.cfg.Debug {
-				msg += "\n💡 Run with -debug flag for more detailed error information"
-			}
+			msg := fmt.Sprintf("%d package(s) with dig.Build found but failed to generate:\n%s", failedCount, strings.Join(failedErrors, "\n"))
 			return errors.New(msg)
 		}
-		return fmt.Errorf("no packages with dig.Build found")
+		return fmt.Errorf("no packages with dig.Build found\n  💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error")
+	}
+	if failedCount > 0 {
+		fmt.Printf("[digen] failed packages:\n%s\n", strings.Join(failedErrors, "\n"))
 	}
 	fmt.Printf("[digen] generated %d/%d packages (%d failed), cost: %s\n", generatedCount, generatedCount+failedCount, failedCount, time.Since(start))
 	return nil

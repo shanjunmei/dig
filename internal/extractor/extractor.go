@@ -818,6 +818,25 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 
 // ---------- 新增辅助函数 ----------
 
+// validateProvideSignature 验证 Provide 函数的返回签名
+func validateProvideSignature(sig *types.Signature, funcName string) error {
+	res := sig.Results()
+	switch res.Len() {
+	case 0:
+		return fmt.Errorf("func %s has no return", funcName)
+	case 1:
+		return nil
+	case 2:
+		if !isErrorType(res.At(1).Type()) {
+			return fmt.Errorf("func %s: second return value must be error, got %s", funcName, res.At(1).Type().String())
+		}
+		return nil
+	default:
+		return fmt.Errorf("func %s: too many return values (%d), only (T) or (T, error) are allowed "+
+			"(if you need to provide multiple types, define a plain struct that bundles them and return that struct)", funcName, res.Len())
+	}
+}
+
 // validateClosureSignature 验证闭包的签名，返回 *types.Signature
 func (e *Extractor) validateClosureSignature(funcLit *ast.FuncLit, curPkg *packages.Package, isInvoke bool) (*types.Signature, error) {
 	typ := curPkg.TypesInfo.TypeOf(funcLit)
@@ -827,6 +846,10 @@ func (e *Extractor) validateClosureSignature(funcLit *ast.FuncLit, curPkg *packa
 	}
 	if isInvoke {
 		if err := validateInvokeSignature(sig, "anonymous function"); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := validateProvideSignature(sig, "anonymous provide function"); err != nil {
 			return nil, err
 		}
 	}
@@ -1233,21 +1256,21 @@ func (e *Extractor) findSingleModuleCall(body *ast.BlockStmt, info *types.Info, 
 
 	switch len(moduleCalls) {
 	case 0:
-		return nil, fmt.Errorf("function %s does not contain dig.Module", funcName)
+		return nil, fmt.Errorf("function %s does not contain dig.Module\n  💡 Fix: add a single dig.Module(...) call that wraps all dig.Provide/dig.Invoke/dig.Supply calls", funcName)
 	case 1:
 		if moduleInControl[0] {
-			return nil, fmt.Errorf("function %s contains dig.Module inside control flow (if/switch/for/select), which is not supported; pass it as a parameter to the function (preferred) or move it to package level", funcName)
+			return nil, fmt.Errorf("function %s contains dig.Module inside control flow (if/switch/for/select), which is not supported\n  💡 Fix: pass it as a parameter to the function (preferred) or move it to package level", funcName)
 		}
 		return moduleCalls[0], nil
 	default:
-		return nil, fmt.Errorf("function %s contains multiple dig.Module calls; only one is allowed", funcName)
+		return nil, fmt.Errorf("function %s contains multiple dig.Module calls; only one is allowed\n  💡 Fix: merge all providers/invokes into a single dig.Module call", funcName)
 	}
 }
 
 func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packages.Package) error {
 	obj := resolveFunctionObject(call, curPkg)
 	if obj == nil {
-		return fmt.Errorf("cannot resolve function call; ensure it is a named function or method, not a literal or variable")
+		return fmt.Errorf("cannot resolve function call; ensure it is a named function or method, not a literal or variable\n  💡 Fix: define a named function with dig.Module(...) and call it")
 	}
 	fn, ok := obj.(*types.Func)
 	if !ok {
@@ -1299,7 +1322,7 @@ func (e *Extractor) resolveProvider(arg ExtractedArg, it extractedItem) (int, er
 	return 0, e.buildProviderNotFoundError(arg.TypeString, e.getRequiredInstanceName(arg), it)
 }
 
-func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) []string {
+func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) ([]string, error) {
 	argNames := make([]string, len(it.Params))
 	for j, arg := range it.Params {
 		if arg.IsContext {
@@ -1308,11 +1331,11 @@ func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) []strin
 		}
 		idx, ok := e.resolveProviderIndex(arg)
 		if !ok {
-			panic(fmt.Sprintf("no provider for type %s", arg.TypeString))
+			return nil, e.buildProviderNotFoundError(arg.TypeString, e.getRequiredInstanceName(arg), it)
 		}
 		argNames[j] = varNames[idx]
 	}
-	return argNames
+	return argNames, nil
 }
 
 // resolveProviderIndex 根据参数查找对应的 provider 索引（核心查找逻辑）
@@ -1434,33 +1457,41 @@ func (e *Extractor) buildProviderNotFoundError(typeString, requiredName string, 
 	} else {
 		hint = " (available: " + strings.Join(available, ", ") + ")"
 
-		// 检查是否有默认提供者
 		var namedOnly []string
+		hasDefault := false
 		for _, name := range available {
 			if name == "(default)" {
-
+				hasDefault = true
 			} else {
 				namedOnly = append(namedOnly, name)
 			}
 		}
 
 		if requiredName == "" {
-			// 请求默认但只有命名提供者
-			if len(namedOnly) == 1 {
-				fix = "\n  💡 Fix: rename parameter to '" + namedOnly[0] + "' (matches the only named provider), or remove the name from the provider's return value to make it default"
+			if len(namedOnly) == 0 {
+				// Only default exists
+				fix = "\n  💡 Fix: ensure the default provider is in scope"
+			} else if len(namedOnly) == 1 && !hasDefault {
+				fix = "\n  💡 Fix: rename parameter to '" + namedOnly[0] + "' to match the only named provider, " +
+					"or add a default provider via dig.Provide"
+			} else if len(namedOnly) == 1 && hasDefault {
+				fix = "\n  💡 Fix: rename parameter to '" + namedOnly[0] + "' to use the named provider, " +
+					"or use a default provider (no name match)"
 			} else {
-				fix = "\n  💡 Fix: add a default provider via dig.Provide(func() " + typeString + " { ... }), or rename parameter to one of the available names"
+				fix = "\n  💡 Fix: rename parameter to one of [" + strings.Join(namedOnly, ", ") + "], " +
+					"or add a default provider via dig.Provide"
 			}
-		} else if len(namedOnly) == 1 && namedOnly[0] == requiredName {
-			// 这个情况实际上不会发生，因为精确匹配已经成功了
-			// 保留，但实际不会用到
-			fix = "\n  💡 Fix: check if the provider is accessible from the current package"
-		} else if len(namedOnly) == 1 {
-			// 只有一个命名提供者，用户请求了不同的名字
-			fix = "\n  💡 Fix: rename parameter to '" + namedOnly[0] + "' (matches the only named provider), or remove the name from the provider's return value to make it default"
 		} else {
-			// 多个命名提供者
-			fix = "\n  💡 Fix: rename parameter to one of the available names, or add a default provider"
+			// User requested a specific named provider
+			if hasDefault {
+				fix = "\n  💡 Fix: check that the provider with name '" + requiredName + "' exists, " +
+					"or remove the name from the parameter to use the default provider"
+			} else if len(namedOnly) == 1 {
+				fix = "\n  💡 Fix: rename parameter to '" + namedOnly[0] + "' (matches the only named provider), " +
+					"or remove the name from the provider's return value to make it default"
+			} else {
+				fix = "\n  💡 Fix: rename parameter to one of [" + strings.Join(namedOnly, ", ") + "]"
+			}
 		}
 	}
 
@@ -1469,8 +1500,13 @@ func (e *Extractor) buildProviderNotFoundError(typeString, requiredName string, 
 		funcName = it.FuncName + " (closure)"
 	}
 
-	return fmt.Errorf("no provider for type %s with name %q required by %s at %s%s%s",
-		typeString, requiredName, funcName, it.Position, hint, fix)
+	nameSuffix := ""
+	if requiredName != "" {
+		nameSuffix = fmt.Sprintf(" with name %q", requiredName)
+	}
+
+	return fmt.Errorf("no provider for type %s%s required by %s at %s%s%s",
+		typeString, nameSuffix, funcName, it.Position, hint, fix)
 }
 
 // ---------- buildDependencyGraph 修改 ----------
@@ -1523,7 +1559,13 @@ func topologicalSort(n int, adj [][]int, indeg []int) ([]int, error) {
 		}
 	}
 	if len(order) != n {
-		return nil, fmt.Errorf("circular dependency")
+		var remaining []int
+		for i := range n {
+			if indeg[i] > 0 {
+				remaining = append(remaining, i)
+			}
+		}
+		return nil, fmt.Errorf("circular dependency detected involving %d node(s)", len(remaining))
 	}
 	return order, nil
 }
@@ -1619,8 +1661,8 @@ func (e *Extractor) describeItem(idx int) string {
 }
 func (e *Extractor) formatCycleError(cycle []int) error {
 	cycleDesc := functional.Map(cycle, e.describeItem)
-	cycleInfo := strings.Join(cycleDesc, " -> ")
-	return fmt.Errorf("circular dependency detected: %s", cycleInfo)
+	cycleInfo := strings.Join(cycleDesc, "\n    -> ")
+	return fmt.Errorf("circular dependency detected:\n    %s\n  💡 Fix: break the cycle by removing or restructuring one of the dependencies", cycleInfo)
 }
 
 func (e *Extractor) computeOrder(adj [][]int, indeg []int) ([]int, error) {
@@ -1651,7 +1693,10 @@ func (e *Extractor) buildFinalNodes() ([]model.Node, error) {
 	}
 	order = e.reorderInvokes(order, items)
 	varNames := e.assignVarNames(order, items)
-	nodes := e.buildNodes(order, items, varNames)
+	nodes, err := e.buildNodes(order, items, varNames)
+	if err != nil {
+		return nil, err
+	}
 	return nodes, nil
 }
 
@@ -1676,7 +1721,7 @@ func (e *Extractor) baseNode(it extractedItem, name string, argNames []string) m
 }
 
 // ---------- buildInvokeNode 使用 baseNode ----------
-func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) model.Node {
+func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) (model.Node, error) {
 	node := e.baseNode(it, "", argNames)
 	node.IsInvoke = true
 	node.HasError = it.HasError
@@ -1687,12 +1732,12 @@ func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) model.N
 		node.PkgPath = e.mainPkgPath
 		closureDef, usedPkgs, err := e.generateClosureDef(&it)
 		if err != nil {
-			panic(err)
+			return model.Node{}, fmt.Errorf("generate closure definition: %w", err)
 		}
 		node.ClosureDef = closureDef
 		node.UsedPkgs = usedPkgs
 	}
-	return node
+	return node, nil
 }
 
 type pair struct {
@@ -1939,25 +1984,40 @@ func (e *Extractor) buildClosureDefString(funcName, paramStr, retStr, bodyStr st
 	return fmt.Sprintf("func %s(%s) %s", funcName, paramStr, bodyStr)
 }
 
-func (e *Extractor) buildNodes(order []int, items []extractedItem, varNames []string) []model.Node {
+func (e *Extractor) buildNodes(order []int, items []extractedItem, varNames []string) ([]model.Node, error) {
 	var final []model.Node
 	for _, i := range order {
 		it := items[i]
-		argNames := e.resolveArgNames(it, varNames)
+		argNames, err := e.resolveArgNames(it, varNames)
+		if err != nil {
+			return nil, err
+		}
 		switch {
 		case it.IsInvoke:
-			final = append(final, e.buildInvokeNode(it, argNames))
+			node, err := e.buildInvokeNode(it, argNames)
+			if err != nil {
+				return nil, err
+			}
+			final = append(final, node)
 		case it.IsSupply:
-			final = append(final, e.buildSupplyNode(it, varNames[i]))
+			node, err := e.buildSupplyNode(it, varNames[i])
+			if err != nil {
+				return nil, err
+			}
+			final = append(final, node)
 		default:
-			final = append(final, e.buildProviderNode(it, argNames, varNames[i]))
+			node, err := e.buildProviderNode(it, argNames, varNames[i])
+			if err != nil {
+				return nil, err
+			}
+			final = append(final, node)
 		}
 	}
-	return final
+	return final, nil
 }
 
 // ---------- buildProviderNode 使用 baseNode ----------
-func (e *Extractor) buildProviderNode(it extractedItem, argNames []string, name string) model.Node {
+func (e *Extractor) buildProviderNode(it extractedItem, argNames []string, name string) (model.Node, error) {
 	node := e.baseNode(it, name, argNames)
 	node.RetType = it.RetType
 	node.HasError = it.HasError
@@ -1968,17 +2028,19 @@ func (e *Extractor) buildProviderNode(it extractedItem, argNames []string, name 
 		node.PkgPath = e.mainPkgPath
 		closureDef, usedPkgs, err := e.generateClosureDef(&it)
 		if err != nil {
-			panic(err)
+			return model.Node{}, fmt.Errorf("generate closure definition: %w", err)
 		}
 		node.ClosureDef = closureDef
 		node.UsedPkgs = usedPkgs
 	}
-	return node
+	return node, nil
 }
 
-func (e *Extractor) buildSupplyNode(it extractedItem, name string) model.Node {
+func (e *Extractor) buildSupplyNode(it extractedItem, name string) (model.Node, error) {
 	var buf strings.Builder
-	_ = printer.Fprint(&buf, it.Pkg.Fset, it.Expr)
+	if err := printer.Fprint(&buf, it.Pkg.Fset, it.Expr); err != nil {
+		return model.Node{}, fmt.Errorf("print supply expression: %w", err)
+	}
 	return model.Node{
 		Name:     name,
 		IsSupply: true,
@@ -1988,7 +2050,7 @@ func (e *Extractor) buildSupplyNode(it extractedItem, name string) model.Node {
 		RetType:  it.RetType,
 		UsedPkgs: it.UsedPkgs,
 		Comment:  it.SourceComment,
-	}
+	}, nil
 }
 
 func (e *Extractor) assignVarNames(order []int, items []extractedItem) []string {

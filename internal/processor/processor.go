@@ -116,7 +116,8 @@ func (p *Processor) checkUnusedProviders(nodes []model.Node, refCount map[string
 		}
 		if refCount[node.Name] == 0 {
 			funcDesc := node.LongName()
-			return fmt.Errorf("unused provider: %s (returns %s)", funcDesc, node.RetType)
+			return fmt.Errorf("unused provider: %s (returns %s)\n  💡 Fix: either add an Invoke that consumes %s, or remove this provider; use -unused=ignore to suppress",
+				funcDesc, node.RetType, node.RetType)
 		}
 	}
 	return nil
