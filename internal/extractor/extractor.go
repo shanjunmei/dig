@@ -259,9 +259,11 @@ func stripGenericIndexes(expr ast.Expr) (base ast.Expr, indexNode ast.Node) {
 	}
 }
 
+var errorType = types.Universe.Lookup("error").Type()
+
 // isErrorType reports whether typ is the built-in error type.
 func isErrorType(typ types.Type) bool {
-	return types.Identical(typ, types.Universe.Lookup("error").Type())
+	return types.Identical(typ, errorType)
 }
 
 // ---------- resolveFunctionObject 保持原样 ----------
