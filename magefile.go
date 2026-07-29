@@ -18,19 +18,21 @@ var (
 )
 
 // getVersionInfo 从 git 获取版本信息
+// version: git describe --tags --dirty（包含 tag、commit 数量、dirty）
+// commit:  git rev-parse HEAD（完整 commit hash）
 func getVersionInfo() (version, commit, buildDate string) {
 	version = "dev"
 	commit = "none"
 	buildDate = time.Now().UTC().Format(time.RFC3339)
 
-	if out, err := exec.Command("git", "describe", "--tags", "--abbrev=0").Output(); err == nil {
+	if out, err := exec.Command("git", "describe", "--tags", "--dirty").Output(); err == nil {
 		v := strings.TrimSpace(string(out))
 		if v != "" {
 			version = v
 		}
 	}
 
-	if out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output(); err == nil {
+	if out, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
 		c := strings.TrimSpace(string(out))
 		if c != "" {
 			commit = c
