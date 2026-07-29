@@ -32,11 +32,8 @@ type Extractor struct {
 	mainPkgPath       string
 	items             []extractedItem
 	globalProviderMap map[string]int
-	pkgAliasMap       map[string]string
-	pkgNameMap        map[string]string
-	importAliasMap    map[string]string
+	aliasManager      *AliasManager
 	typeStrCache      map[types.Type]string
-	aliasStrategy     alias.AliasStrategy
 	invokeIndex       int
 	provideIndex      int
 	moduleRoot        string
@@ -115,14 +112,13 @@ func NewExtractor(cfg *config.Config, pkgMap map[string]*packages.Package, mainP
 		mainPkgPath:       mainPkgPath,
 		items:             []extractedItem{},
 		globalProviderMap: make(map[string]int),
-		pkgAliasMap:       make(map[string]string),
-		pkgNameMap:        make(map[string]string),
-		importAliasMap:    make(map[string]string),
-		typeStrCache:      make(map[types.Type]string),
-		aliasStrategy:     strategy,
-		moduleRoot:        rootDir,
+
+		typeStrCache: make(map[types.Type]string),
+
+		moduleRoot: rootDir,
 	}
-	e.loadImportAliases()
+	e.aliasManager = NewAliasManager(mainPkgPath, strategy, pkgMap)
+	e.aliasManager.LoadImportAliases()
 	return e
 }
 func (e *Extractor) ConditionalDebugf(pred func() bool, tpl string, args ...any) string {
@@ -334,49 +330,11 @@ func (e *Extractor) getTypeFullName(typ types.Type) string {
 	return s
 }
 func (e *Extractor) PackageNameMap() map[string]string {
-	return e.pkgNameMap
+	return e.aliasManager.GetPkgNameMap()
 }
 
 func (e *Extractor) ImportAliasMap() map[string]string {
-	return e.importAliasMap
-}
-
-func (e *Extractor) collectPkgAlias(pkg *packages.Package) string {
-	if pkg != nil {
-		e.pkgNameMap[pkg.PkgPath] = pkg.Name
-	}
-	pp := pkg.PkgPath
-	if pp == "" {
-		return ""
-	}
-	if alias, ok := e.importAliasMap[pp]; ok {
-		if pp != e.mainPkgPath {
-			e.pkgAliasMap[pp] = alias
-			return alias
-		}
-		return ""
-	}
-	if alias, ok := e.pkgAliasMap[pp]; ok {
-		if pp == e.mainPkgPath {
-			return ""
-		}
-		return alias
-	}
-	existing := make(map[string]bool)
-	for _, a := range e.pkgAliasMap {
-		existing[a] = true
-	}
-	for _, a := range e.importAliasMap {
-		existing[a] = true
-	}
-	alias := e.aliasStrategy.GenerateAlias(pp, existing)
-	if pp != e.mainPkgPath {
-		e.pkgAliasMap[pp] = alias
-	}
-	if pp == e.mainPkgPath {
-		return ""
-	}
-	return alias
+	return e.aliasManager.GetImportAliasMap()
 }
 
 // collectUsedPkgsFromType 递归提取类型中引用的非主包路径
@@ -516,7 +474,7 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 			return err
 		}
 	}
-	alias := e.collectPkgAlias(curPkg)
+	alias := e.aliasManager.CollectPkgAlias(curPkg)
 	typ := curPkg.TypesInfo.TypeOf(expr)
 	if typ == nil {
 		return fmt.Errorf("resolve supply type failed")
@@ -825,7 +783,7 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	// 5. 构建 extractedItem
 	funcName := e.generateFuncName(isInvoke)
 	hasErr := sigHasError(sig)
-	item := e.newExtractedItem(funcName, curPkg, e.collectPkgAlias(curPkg), hasErr)
+	item := e.newExtractedItem(funcName, curPkg, e.aliasManager.CollectPkgAlias(curPkg), hasErr)
 	item.IsInvoke = isInvoke
 	item.IsClosure = true
 	item.ClosureLit = funcLit
@@ -1055,7 +1013,7 @@ func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error 
 	if err != nil {
 		return err
 	}
-	alias := e.collectPkgAlias(realPkg)
+	alias := e.aliasManager.CollectPkgAlias(realPkg)
 	hasErr := sigHasError(sig)
 	item := e.newExtractedItem(name, realPkg, alias, hasErr)
 	item.IsInvoke = true
@@ -1088,7 +1046,7 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	if err != nil {
 		return err
 	}
-	alias := e.collectPkgAlias(realPkg)
+	alias := e.aliasManager.CollectPkgAlias(realPkg)
 
 	res := sig.Results()
 	switch res.Len() {
@@ -1182,7 +1140,7 @@ func (e *Extractor) rewriteBareFunctionCallsInClosure(body *ast.BlockStmt, curPk
 				return true
 			}
 
-			alias := e.ensureAlias(fnPkg.Path())
+			alias := e.aliasManager.EnsureAlias(fnPkg.Path())
 			if alias == "" {
 				return true
 			}
@@ -1755,10 +1713,10 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 	}
 
 	// 主包路径前缀替换（一次 ReplaceAll 等价于原循环）
-	mainPrefix := e.mainPkgPath + "."
+	mainPrefix := e.aliasManager.GetMainPkgPath() + "."
 	typeStr = strings.ReplaceAll(typeStr, mainPrefix, "")
 
-	pairs := functional.MapEntries(e.pkgAliasMap, func(path, alias string) pair {
+	pairs := functional.MapEntries(e.aliasManager.GetPkgAliasMap(), func(path, alias string) pair {
 		return pair{path, alias}
 	})
 	sort.Slice(pairs, func(i, j int) bool {
@@ -1856,7 +1814,8 @@ func (e *Extractor) collectTypeNameAndUsedPkgs(body *ast.BlockStmt, pkg *package
 		if typeName, ok := obj.(*types.TypeName); ok {
 			pkgObj := typeName.Pkg()
 			if pkgObj != nil && pkgObj.Path() != e.mainPkgPath {
-				alias := e.ensureAlias(pkgObj.Path())
+				alias := e.aliasManager.EnsureAlias(pkgObj.Path())
+
 				if alias != "" {
 					typeNameMap[ident.Name] = alias + "." + ident.Name
 					usedPkgs[pkgObj.Path()] = true
@@ -1902,7 +1861,7 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 	for _, t := range allTypes {
 		if pkg := e.typePkg(t); pkg != nil && pkg.Path() != e.mainPkgPath {
 			usedPkgs[pkg.Path()] = true
-			e.ensureAlias(pkg.Path())
+			e.aliasManager.EnsureAlias(pkg.Path())
 		}
 	}
 
@@ -1943,25 +1902,6 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 // 若包在 pkgMap 中，则调用 collectPkgAlias（会基于策略和冲突处理生成）；
 // 否则使用路径最后一段作为别名并缓存。
 // 返回别名（若包路径为主包或空，返回空字符串）。
-func (e *Extractor) ensureAlias(pkgPath string) string {
-	if pkgPath == "" || pkgPath == e.mainPkgPath {
-		return ""
-	}
-	if alias, ok := e.pkgAliasMap[pkgPath]; ok {
-		return alias
-	}
-	if pkg, ok := e.pkgMap[pkgPath]; ok {
-		return e.collectPkgAlias(pkg)
-	}
-	// 不在 pkgMap 中，使用策略生成唯一别名
-	existing := make(map[string]bool)
-	for _, a := range e.pkgAliasMap {
-		existing[a] = true
-	}
-	alias := e.aliasStrategy.GenerateAlias(pkgPath, existing)
-	e.pkgAliasMap[pkgPath] = alias
-	return alias
-}
 
 // formatResultList 从 ast.FieldList 生成返回值字符串
 // 例如：单个无名返回值 -> "string"
@@ -2202,56 +2142,5 @@ func FindBuildCall(fn *ast.FuncDecl, info *types.Info) *ast.CallExpr {
 }
 
 func (e *Extractor) PkgAliasMap() map[string]string {
-	return e.pkgAliasMap
-}
-
-type importInfo struct {
-	filePath string
-	pkgPath  string
-	alias    string
-	isMain   bool
-}
-
-func (e *Extractor) collectAllImportInfos() []importInfo {
-	var infos []importInfo
-	for _, p := range e.pkgMap {
-		isMain := p.PkgPath == e.mainPkgPath
-		for _, f := range p.Syntax {
-			filePos := p.Fset.Position(f.Pos())
-			filePath := filePos.Filename
-			for _, imp := range f.Imports {
-				path := strings.Trim(imp.Path.Value, `"`)
-				if imp.Name != nil {
-					alias := imp.Name.Name
-					if alias != "." && alias != "_" {
-						infos = append(infos, importInfo{
-							filePath: filePath,
-							pkgPath:  path,
-							alias:    alias,
-							isMain:   isMain,
-						})
-					}
-				}
-			}
-		}
-	}
-	return infos
-}
-
-func (e *Extractor) loadImportAliases() {
-	infos := e.collectAllImportInfos()
-	sort.Slice(infos, func(i, j int) bool {
-		if infos[i].filePath != infos[j].filePath {
-			return infos[i].filePath < infos[j].filePath
-		}
-		return infos[i].pkgPath < infos[j].pkgPath
-	})
-	for _, info := range infos {
-		if info.alias == "." || info.alias == "_" {
-			continue
-		}
-		if _, exists := e.importAliasMap[info.pkgPath]; !exists {
-			e.importAliasMap[info.pkgPath] = info.alias
-		}
-	}
+	return e.aliasManager.GetPkgAliasMap()
 }
