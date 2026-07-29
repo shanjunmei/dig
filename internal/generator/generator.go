@@ -165,7 +165,10 @@ func (g *Generator) GenerateCode(nodes []model.Node, refCount map[string]int, pk
 
 	writeImports(buf, mainPkgPath, importAliasMap, pkgAliasMap, pkgNameMap, usedPkgs)
 	if g.cfg.Debug {
-		buf.WriteString("var Logf = log.Printf\n\n")
+		logPkgPath := "log"
+		alias := getPkgAlias(logPkgPath, importAliasMap, pkgAliasMap, pkgNameMap)
+		usedPkgSet[logPkgPath] = true
+		fmt.Fprintf(buf, "var Logf = %s.Printf\n\n", alias)
 	}
 
 	writeClosureDefs(buf, nodes, refCount, g.cfg.UnusedMode)
