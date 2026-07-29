@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 
 	"github.com/shanjunmei/dig/internal/config"
@@ -15,7 +16,13 @@ func main() {
 	unusedModeStr := flag.String("unused", "error", "behavior for unused providers: error, ignore, drop")
 	debug := flag.Bool("debug", false, "enable debug logging")
 	aliasStr := flag.String("alias", "full", "alias generation style: short, full, obfuscated, numeric")
+	showVersion := flag.Bool("version", false, "print version information and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(versionString())
+		return
+	}
 
 	cfg := &config.Config{
 		OutputFile: *outputFile,
