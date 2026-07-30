@@ -13,14 +13,17 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **当前版本**：v1.0.11
+> **当前版本**：v1.0.13
 >
 > **关键版本变更**：
+> - **v1.0.13**：版本信息系统（`-version`）、Mage 构建支持、Provide 闭包签名校验、结构化错误替换 panic、带 `💡 Fix:` 的可操作错误消息
 > - **v1.0.11**：新增命名多实例注入，修复包别名解析问题（如 `go-redis/v9`）
 > - **v1.0.5**：`InitApp()` 返回 `func(context.Context) error`，生成的代码零运行时依赖
 > - **v1.0.4**：初始稳定版本
 >
 > **从 v1.0.4 升级**：将 `app.Run(ctx)` 替换为 `run := InitApp(); run(ctx)`。
+>
+> 完整发版说明请参阅 [CHANGELOG.md](./CHANGELOG.md)（中文） / [CHANGELOG_en.md](./CHANGELOG_en.md)（English）。
 
 ---
 
@@ -52,10 +55,17 @@ Go 的依赖注入工具分为两大阵营：
 ## 安装
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.11
+go get github.com/shanjunmei/dig@v1.0.13
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 要求 Go 1.21+。
+
+使用 [Mage](https://magefile.org) 构建（可选，自动注入版本信息）：
+```bash
+mage build    # 构建二进制并从 git 注入版本号
+mage install  # 安装到 $GOPATH/bin
+mage test     # 运行测试（含竞态检测）
+```
 
 ---
 
@@ -242,8 +252,9 @@ func main() { Logf = myLogger.Printf }
 |------|--------|------|
 | `-out` | `di_gen.go` | 输出文件名（在 `./...` 模式下忽略） |
 | `-unused` | `error` | 未使用提供者的处理策略 |
-| `-debug` | `false` | 启用调试日志 |
+| `-debug` | `false` | 启用调试日志（v1.0.13 起详细错误始终显示） |
 | `-alias` | `full` | 导入别名策略 |
+| `-version` | `false` | 打印版本信息并退出（v1.0.13+） |
 
 ---
 

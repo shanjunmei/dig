@@ -12,14 +12,17 @@ A complete standardized production coding convention skill for business microser
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Current version**: v1.0.11
+> **Current version**: v1.0.13
 >
 > **Key version changes**:
+> - **v1.0.13**: Version info system (`-version`), Mage build support, Provide closure signature validation, structured errors replacing panics, actionable error messages with `💡 Fix:` suggestions
 > - **v1.0.11**: Added named instance injection, fixed package alias resolution (e.g. `go-redis/v9`)
 > - **v1.0.5**: `InitApp()` returns `func(context.Context) error`; generated code has zero runtime dependency
 > - **v1.0.4**: Initial stable release
 >
 > **Upgrade from v1.0.4**: replace `app.Run(ctx)` with `run := InitApp(); run(ctx)`.
+>
+> See [CHANGELOG.md](./CHANGELOG.md) (中文) / [CHANGELOG_en.md](./CHANGELOG_en.md) (English) for full release notes.
 
 ---
 
@@ -51,10 +54,17 @@ Go DI tools fall into two camps:
 ## Installation
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.11
+go get github.com/shanjunmei/dig@v1.0.13
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 Requires Go 1.21+.
+
+Build with [Mage](https://magefile.org) (optional, auto-injects version info):
+```bash
+mage build    # build binary with version info from git
+mage install  # install to $GOPATH/bin
+mage test     # run tests with race detector
+```
 
 ---
 
@@ -241,8 +251,9 @@ func main() { Logf = myLogger.Printf }
 |------|---------|-------------|
 | `-out` | `di_gen.go` | Output filename (ignored in `./...` mode) |
 | `-unused` | `error` | Policy for unused providers |
-| `-debug` | `false` | Enable debug logging |
+| `-debug` | `false` | Enable debug logging (detailed errors are always shown since v1.0.13) |
 | `-alias` | `full` | Import alias strategy |
+| `-version` | `false` | Print version information and exit (v1.0.13+) |
 
 ---
 

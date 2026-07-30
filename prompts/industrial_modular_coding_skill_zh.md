@@ -107,7 +107,7 @@ dig 内核不会强制目录结构、文件命名、Viper 配置、垂直领域�
 3. 最低 Go 版本：Go 1.21+
 4. 安装脚本
 ```bash
-go get github.com/shanjunmei/dig@v1.0.10
+go get github.com/shanjunmei/dig@v1.0.13
 go install github.com/shanjunmei/dig/cmd/digen@latest
 # 工业栈依赖
 go get github.com/spf13/viper
