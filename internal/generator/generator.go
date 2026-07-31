@@ -125,6 +125,14 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []model.Node, refCount map[string
 		if !node.IsClosure || node.ClosureDef == "" {
 			continue
 		}
+		// Phase 3: Skip closures that will be inlined as IIFE
+		if node.ShouldInline {
+			continue
+		}
+		// Phase 4: Skip identity closures (will use direct type conversion)
+		if node.IsIdentityClosure {
+			continue
+		}
 		if node.IsInvoke || shouldGenerateProvider(node, refCount, unusedMode) {
 			fmt.Fprintf(buf, "%s\n\n", node.ClosureDef)
 		}
@@ -135,7 +143,7 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []model.Node, refCount map[string
 }
 
 func (g *Generator) BuildExecParams(outFile string) string {
-	return fmt.Sprintf(" -debug=%v -unused=%s -alias=%s -out=%s", g.cfg.Debug, g.cfg.UnusedMode, g.cfg.AliasType, outFile)
+	return fmt.Sprintf(" -debug=%v -unused=%s -alias=%s -inline=%v -out=%s", g.cfg.Debug, g.cfg.UnusedMode, g.cfg.AliasType, g.cfg.InlineClosures, outFile)
 }
 
 // GenerateCode generates the complete Go source code as a string.
@@ -238,14 +246,59 @@ func (g *Generator) emitLog(buf *bytes.Buffer, format string, args ...string) {
 	buf.WriteString(")\n")
 }
 
+// buildIIFECall converts a ClosureDef to an IIFE form.
+// ClosureDef: "func name(params) returns body"
+// Returns:    "func(params) returns body(args)"
+func buildIIFECall(node model.Node) string {
+	if !node.ShouldInline || node.ClosureDef == "" {
+		return ""
+	}
+	// Strip the function name: "func name(params)..." -> "func(params)..."
+	def := node.ClosureDef
+	// Find the opening paren ( after the function name
+	idx := strings.Index(def, "(")
+	if idx < 0 {
+		return def
+	}
+	// Find "func " prefix to skip the name
+	funcPrefix := strings.Index(def, "func ")
+	if funcPrefix < 0 {
+		return def
+	}
+	// "func name" length is the distance from "func " to the opening paren
+	// Replace "func name" with "func"
+	paramsStart := idx
+	// Skip everything from "func " to "("
+	return "func" + def[paramsStart:]
+}
+
+// buildIdentityConversion generates a type conversion expression for identity closures.
+// Identity closure: func(param T1) T2 { return param }
+// Converts to: T2(param)
+func buildIdentityConversion(node model.Node) string {
+	if !node.IsIdentityClosure {
+		return ""
+	}
+	// Get the first (and only) arg - it's the param being converted
+	args := buildCallArgs(node)
+	if len(args) != 1 {
+		return ""
+	}
+	return fmt.Sprintf("%s(%s)", node.IdentityTargetType, args[0])
+}
+
 // buildCallArgs builds the argument list for a function call from node.Args.
+// Const args are skipped since they're inlined as literals in the closure body.
 func buildCallArgs(node model.Node) []string {
-	args := make([]string, len(node.Args))
-	for i, arg := range node.Args {
+	var args []string
+	for _, arg := range node.Args {
 		if arg.IsContext {
-			args[i] = "ctx"
+			args = append(args, "ctx")
+		} else if arg.IsConst {
+			// Phase 1: Const values are inlined in the body, skip in call
+			continue
 		} else {
-			args[i] = arg.Name
+			args = append(args, arg.Name)
 		}
 	}
 	return args
@@ -273,12 +326,30 @@ func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool
 	}
 
 	logName := node.LongName()
+
+	// Phase 4: Identity closure - use direct type conversion
+	if node.IsIdentityClosure {
+		conversion := buildIdentityConversion(node)
+		g.emitLog(buf, "[PROVIDE] identity conversion: %s -> %s", strconv.Quote(logName), node.IdentityTargetType)
+		if blank {
+			fmt.Fprintf(buf, "_ = %s\n", conversion)
+		} else {
+			fmt.Fprintf(buf, "%s := %s\n", node.Name, conversion)
+		}
+		g.emitLog(buf, "[PROVIDE] after: %s", strconv.Quote(logName))
+		return
+	}
+
 	args := buildCallArgs(node)
 	argsStr := strings.Join(args, ", ")
 
 	var fullCall string
 	if node.IsClosure {
-		fullCall = node.Func
+		if node.ShouldInline {
+			fullCall = buildIIFECall(node)
+		} else {
+			fullCall = node.Func
+		}
 	} else {
 		fullCall = model.FullFuncName(node.FuncPkg, node.Func) + node.GenericArgs
 	}
@@ -331,13 +402,33 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node) {
 		if !node.IsInvoke {
 			continue
 		}
+		logName := node.LongName()
+
+		// Phase 4: Identity closure - use direct type conversion
+		if node.IsIdentityClosure {
+			conversion := buildIdentityConversion(node)
+			g.emitLog(buf, "[INVOKE] identity conversion: %s -> %s", strconv.Quote(logName), node.IdentityTargetType)
+			if node.HasError {
+				fmt.Fprintf(buf, "if err := %s; err != nil {\n", conversion)
+				g.emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), "err")
+				fmt.Fprintf(buf, "return err\n}\n")
+			} else {
+				fmt.Fprintf(buf, "%s\n", conversion)
+			}
+			g.emitLog(buf, "[INVOKE] after: %s", strconv.Quote(logName))
+			continue
+		}
+
 		args := buildCallArgs(node)
 		argsStr := strings.Join(args, ", ")
-		logName := node.LongName()
 
 		var fullCall string
 		if node.IsClosure {
-			fullCall = node.Func
+			if node.ShouldInline {
+				fullCall = buildIIFECall(node)
+			} else {
+				fullCall = node.Func
+			}
 		} else {
 			fullCall = model.FullFuncName(node.FuncPkg, node.Func) + node.GenericArgs
 		}

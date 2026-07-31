@@ -55,6 +55,10 @@ type Node struct {
 	GenericArgs string
 
 	Comment string
+
+	ShouldInline       bool   // Phase 3: inline closure as IIFE instead of named function
+	IsIdentityClosure  bool   // Phase 4: identity closure (func(param) T { return param })
+	IdentityTargetType string // Phase 4: target type for identity conversion
 }
 
 // fullFuncName 返回 包别名.函数名

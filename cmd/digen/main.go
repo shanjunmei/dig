@@ -17,6 +17,7 @@ func main() {
 	debug := flag.Bool("debug", false, "enable debug logging")
 	aliasStr := flag.String("alias", "full", "alias generation style: short, full, obfuscated, numeric")
 	showVersion := flag.Bool("version", false, "print version information and exit")
+	inlineClosures := flag.Bool("inline", false, "inline simple closures as IIFE (Phase 3)")
 	flag.Parse()
 
 	if *showVersion {
@@ -25,11 +26,12 @@ func main() {
 	}
 
 	cfg := &config.Config{
-		OutputFile: *outputFile,
-		UnusedMode: parseUnusedMode(unusedModeStr),
-		Debug:      *debug,
-		AliasType:  *aliasStr,
-		Paths:      flag.Args(),
+		OutputFile:    *outputFile,
+		UnusedMode:    parseUnusedMode(unusedModeStr),
+		Debug:         *debug,
+		AliasType:     *aliasStr,
+		Paths:         flag.Args(),
+		InlineClosures: *inlineClosures,
 	}
 	if len(cfg.Paths) == 0 {
 		cfg.Paths = []string{"."}

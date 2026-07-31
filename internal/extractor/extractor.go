@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
+	"go/constant"
+	"go/parser"
 	"go/printer"
 	"go/types"
 	"os"
@@ -73,8 +75,13 @@ type extractedItem struct {
 
 	Position string
 
+	ShouldInline bool // Phase 3: inlining candidate
+
 	// ---------- 新增字段 ----------
 	InstanceName string // 实例名称（命名返回值或 Supply 表达式名称）
+
+	IsIdentityClosure  bool   // Phase 4: identity closure (func(param) T { return param })
+	IdentityTargetType string // Phase 4: target type for identity conversion
 }
 
 // findModuleRoot 向上查找 go.mod 所在目录
@@ -139,6 +146,17 @@ func newExtractedArg(name string, typ types.Type, typeStr string, isConst bool, 
 		},
 		Type:       typ,
 		TypeString: typeStr,
+	}
+}
+
+// extractConstLiteral converts a *types.Const to its Go literal string representation.
+func (e *Extractor) extractConstLiteral(c *types.Const) string {
+	val := c.Val()
+	switch val.Kind() {
+	case constant.String:
+		return strconv.Quote(val.String())
+	default:
+		return val.String()
 	}
 }
 
@@ -293,6 +311,9 @@ func checkExportedVisibility(obj types.Object, curPkg *types.Package) error {
 		return nil
 	}
 	if !isExported(obj.Name()) {
+		// 此错误路径理论上不可达：Go 编译器会在 loader 阶段（loader.go:55-57）
+		// 捕获跨包引用未导出成员的编译错误，阻止 digen 继续处理
+		// 此处保留作为安全网
 		return fmt.Errorf("cross-package unexported: %s (pkg: %s)", obj.Name(), defPkg.Path())
 	}
 	return nil
@@ -673,6 +694,16 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 				err = fmt.Errorf("cannot capture local constant %q defined in InitApp scope; pass it as a parameter to the function (preferred) or move it to package level", ident.Name)
 				return false
 			}
+			constVal := e.extractConstLiteral(o)
+			if seen[ident.Name] {
+				return true
+			}
+			seen[ident.Name] = true
+			freeVars = append(freeVars, ident)
+			freeTypes = append(freeTypes, obj.Type())
+			freeTypeStrs = append(freeTypeStrs, e.getTypeFullName(obj.Type()))
+			isConst = append(isConst, true)
+			litValues = append(litValues, constVal)
 			return true
 
 		default:
@@ -794,6 +825,28 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	item.FreeTypeStrings = freeTypeStrs
 	item.Params = params
 	item.ClosureParams = closureParams
+
+	// Phase 3: Analyze inlinability
+	if e.cfg.InlineClosures {
+		// Build isConst slice from params (after closure params, these are free vars)
+		// Invariant: len(params) == len(closureParams) + len(freeVars) (guaranteed by buildClosureArgumentLists)
+		freeVarIsConst := make([]bool, len(freeVars))
+		startIdx := len(closureParams)
+		for i := range freeVars {
+			freeVarIsConst[i] = params[startIdx+i].IsConst
+		}
+		item.ShouldInline = analyzeClosureInlinability(funcLit, freeVars, freeVarIsConst)
+
+		// Phase 4: Analyze identity closure (takes priority over regular inlining)
+		if retTypeExpr := analyzeIdentityClosure(funcLit, freeVars); retTypeExpr != nil {
+			typeObj := curPkg.TypesInfo.TypeOf(retTypeExpr)
+			targetType := e.replacePkgPathWithAlias(e.getTypeFullName(typeObj))
+			item.IsIdentityClosure = true
+			item.IdentityTargetType = targetType
+			item.ShouldInline = false // Will use direct type conversion instead of IIFE
+		}
+	}
+
 	if retType != "" {
 		item.RetType = retType
 	}
@@ -935,6 +988,108 @@ func (e *Extractor) registerClosureProvider(item extractedItem, idx int) error {
 		e.globalProviderMap[key] = idx
 	}
 	return nil
+}
+
+// analyzeClosureInlinability determines if a closure can be safely inlined as an IIFE.
+// A closure is inlinable if:
+//  1. It has no non-const free variables (const captures are OK, they're inlined as literals)
+//  2. No named return values (those are hard to replicate in IIFE form)
+//  3. Its body consists of a single statement
+//
+// The body statement can be anything: return, expression statement, etc.
+// Control flow (if/for/switch/select) is allowed because IIFE preserves full Go semantics.
+func analyzeClosureInlinability(funcLit *ast.FuncLit, freeVars []*ast.Ident, isConst []bool) bool {
+	// Condition 1: No non-const free variables
+	for i := range freeVars {
+		if i < len(isConst) && !isConst[i] {
+			return false
+		}
+	}
+
+	// Condition 2: No named return values
+	if funcLit.Type.Results != nil {
+		for _, field := range funcLit.Type.Results.List {
+			if len(field.Names) > 0 {
+				return false
+			}
+		}
+	}
+
+	// Condition 3: Single statement body
+	// This is a heuristic to avoid overly complex IIFEs.
+	// Multi-statement closures are kept as named functions for readability.
+	if len(funcLit.Body.List) != 1 {
+		return false
+	}
+
+	return true
+}
+
+// analyzeIdentityClosure detects if a closure is an identity conversion:
+//
+//	func(param T1) T2 { return param }
+//
+// This is a common DI pattern where a provider returns a concrete type
+// (e.g., *SQLiteStore) but the consumer needs an interface type (e.g., Store).
+// We can replace this with a direct type conversion: T2(param).
+// Returns the return type AST expr if it's an identity closure, nil otherwise.
+// The caller must use the types.Info to resolve the AST expr to a proper type string.
+func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident) ast.Expr {
+	// Must have exactly one parameter (the one being converted)
+	if funcLit.Type.Params == nil || len(funcLit.Type.Params.List) != 1 {
+		return nil
+	}
+
+	// Must have exactly one return value (no error return)
+	if funcLit.Type.Results == nil || len(funcLit.Type.Results.List) != 1 {
+		return nil
+	}
+
+	// Must have exactly one statement in body
+	if len(funcLit.Body.List) != 1 {
+		return nil
+	}
+
+	// That statement must be a return statement
+	retStmt, ok := funcLit.Body.List[0].(*ast.ReturnStmt)
+	if !ok {
+		return nil
+	}
+
+	// Must return exactly one expression
+	if len(retStmt.Results) != 1 {
+		return nil
+	}
+
+	// That expression must be a simple identifier referencing the parameter
+	ident, ok := retStmt.Results[0].(*ast.Ident)
+	if !ok {
+		return nil
+	}
+
+	// Get the parameter name
+	param := funcLit.Type.Params.List[0]
+	if len(param.Names) != 1 {
+		return nil
+	}
+
+	// The returned ident must be the same as the parameter name
+	if ident.Name != param.Names[0].Name {
+		return nil
+	}
+
+	// No free variables allowed (pure identity, no captures)
+	if len(freeVars) > 0 {
+		return nil
+	}
+
+	// Return the AST expression for the return type
+	retTypeField := funcLit.Type.Results.List[0]
+	if retTypeField == nil {
+		return nil
+	}
+
+	return retTypeField.Type
 }
 
 func (e *Extractor) collectUsedPkgsFromExpr(expr ast.Expr, info *types.Info) []string {
@@ -1329,6 +1484,10 @@ func (e *Extractor) resolveArgNames(it extractedItem, varNames []string) ([]stri
 			argNames[j] = ""
 			continue
 		}
+		if arg.IsConst {
+			argNames[j] = arg.ConstValue
+			continue
+		}
 		idx, ok := e.resolveProviderIndex(arg)
 		if !ok {
 			return nil, e.buildProviderNotFoundError(arg.TypeString, e.getRequiredInstanceName(arg), it)
@@ -1439,6 +1598,9 @@ func (e *Extractor) checkGenerationVisibility(obj types.Object) error {
 		return nil
 	}
 
+	// 此错误路径理论上不可达：Go 编译器会在 loader 阶段（loader.go:55-57）
+	// 捕获跨包引用未导出成员的编译错误，阻止 digen 继续处理
+	// 此处保留作为安全网
 	return fmt.Errorf("%s %q is private in package %s and cannot be used from package %s (generation target)",
 		strings.ToLower(strings.TrimPrefix(fmt.Sprintf("%T", obj), "*types.")),
 		name, pkg.Path(), e.mainPkgPath)
@@ -1604,7 +1766,7 @@ func (e *Extractor) findCycle(adj [][]int) ([]int, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("no cycle found")
+	return nil, fmt.Errorf("no cycle found") // 理论不可达：与 topologicalSort 的一致性检查安全网
 }
 
 // describeItemByIt 直接根据 extractedItem 生成描述，不依赖索引
@@ -1726,6 +1888,9 @@ func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) (model.
 	node.IsInvoke = true
 	node.HasError = it.HasError
 	node.IsClosure = it.IsClosure
+	node.ShouldInline = it.ShouldInline
+	node.IsIdentityClosure = it.IsIdentityClosure
+	node.IdentityTargetType = it.IdentityTargetType
 	node.Func = it.FuncName
 	node.FuncPkg = it.PkgAlias
 	if it.IsClosure {
@@ -1779,9 +1944,10 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 }
 
 // ---------- buildParamListAndFreeVarMap 使用新字段 ----------
-func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[string]bool) ([]string, map[string]string) {
+func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[string]bool) ([]string, map[string]string, map[string]string) {
 	var paramList []string
 	freeVarMap := make(map[string]string)
+	constMap := make(map[string]string)
 
 	// 闭包参数
 	for _, arg := range it.ClosureParams {
@@ -1790,21 +1956,34 @@ func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[
 		e.addPkgToUsed(arg.Type, usedPkgs)
 	}
 
+	// Track used names to avoid conflicts
+	usedNames := make(map[string]bool)
+	for _, arg := range it.ClosureParams {
+		usedNames[arg.Name] = true
+	}
+
 	// 自由变量（从 Params 中取闭包参数之后的部分）
 	startIdx := len(it.ClosureParams)
 	for i := startIdx; i < len(it.Params); i++ {
 		arg := it.Params[i]
 		if arg.IsConst {
+			constMap[arg.Name] = arg.ConstValue
 			continue
 		}
-		paramName := "p" + strconv.Itoa(i-startIdx)
+		// Phase 2: Use original variable name, with fallback suffix if needed
+		paramName := arg.Name
+		if usedNames[paramName] {
+			paramName = arg.Name + "_fv"
+		}
+		usedNames[paramName] = true
+
 		typStr := e.replacePkgPathWithAlias(arg.TypeString)
 		paramList = append(paramList, paramName+" "+typStr)
 		freeVarMap[arg.Name] = paramName
 		e.addPkgToUsed(arg.Type, usedPkgs)
 	}
 
-	return paramList, freeVarMap
+	return paramList, freeVarMap, constMap
 }
 
 func (e *Extractor) typePkg(typ types.Type) *types.Package {
@@ -1826,10 +2005,19 @@ func (e *Extractor) typePkg(typ types.Type) *types.Package {
 	}
 }
 
-func (e *Extractor) replaceFreeVarsInBody(body *ast.BlockStmt, freeVarMap map[string]string) *ast.BlockStmt {
+func (e *Extractor) replaceFreeVarsInBody(body *ast.BlockStmt, freeVarMap map[string]string, constMap map[string]string) *ast.BlockStmt {
 	newNode := astutil.Apply(body,
 		func(c *astutil.Cursor) bool {
 			if ident, ok := c.Node().(*ast.Ident); ok {
+				// Phase 1: Replace constant references with literal values
+				if constVal, ok := constMap[ident.Name]; ok {
+					expr, err := strToExpr(constVal)
+					if err == nil {
+						c.Replace(expr)
+						return false
+					}
+				}
+				// Phase 2: Replace free variable references with parameter names
 				if newName, ok := freeVarMap[ident.Name]; ok {
 					c.Replace(ast.NewIdent(newName))
 					return false
@@ -1843,6 +2031,15 @@ func (e *Extractor) replaceFreeVarsInBody(body *ast.BlockStmt, freeVarMap map[st
 		return blk
 	}
 	return body
+}
+
+// strToExpr converts a Go literal string to an ast.Expr using go/parser.
+func strToExpr(s string) (ast.Expr, error) {
+	expr, err := parser.ParseExpr(s)
+	if err != nil {
+		return nil, err
+	}
+	return expr, nil
 }
 
 func (e *Extractor) collectTypeNameAndUsedPkgs(body *ast.BlockStmt, pkg *packages.Package, usedPkgs map[string]bool) map[string]string {
@@ -1912,11 +2109,11 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 		}
 	}
 
-	paramList, freeVarMap := e.buildParamListAndFreeVarMap(it, usedPkgs)
+	paramList, freeVarMap, constMap := e.buildParamListAndFreeVarMap(it, usedPkgs)
 
 	paramStr := strings.Join(paramList, ", ")
 
-	rewrittenBody := e.replaceFreeVarsInBody(it.ClosureLit.Body, freeVarMap)
+	rewrittenBody := e.replaceFreeVarsInBody(it.ClosureLit.Body, freeVarMap, constMap)
 
 	typeNameMap := e.collectTypeNameAndUsedPkgs(rewrittenBody, it.Pkg, usedPkgs)
 	rewrittenBody = e.rewriteBareFunctionCallsInClosure(rewrittenBody, it.Pkg)
@@ -2022,6 +2219,9 @@ func (e *Extractor) buildProviderNode(it extractedItem, argNames []string, name 
 	node.RetType = it.RetType
 	node.HasError = it.HasError
 	node.IsClosure = it.IsClosure
+	node.ShouldInline = it.ShouldInline
+	node.IsIdentityClosure = it.IsIdentityClosure
+	node.IdentityTargetType = it.IdentityTargetType
 	node.Func = it.FuncName
 	node.FuncPkg = it.PkgAlias
 	if it.IsClosure {
