@@ -7,7 +7,7 @@
 package app_debug
 
 import (
-	ctx "context"
+	"context"
 	"fmt"
 	"github.com/shanjunmei/dig/example/cache"
 	"github.com/shanjunmei/dig/example/common"
@@ -114,7 +114,7 @@ func dig_invoke_11(stringCache *cache.Cache[string]) {
 	stringCache.Print()
 }
 
-func InitAppDebug(cfg *common.Config, log *logger.Logger) func(ctx.Context) error {
+func InitAppDebug(cfg *common.Config, log *logger.Logger) func(context.Context) error {
 	v0 := cfg
 	v1 := log
 	v2 := user.NewStore[int]()
@@ -142,7 +142,7 @@ func InitAppDebug(cfg *common.Config, log *logger.Logger) func(ctx.Context) erro
 	v15 := dig_provider_7()
 	_ = "app-debug"
 	v17 := role.NewServer(v5)
-	return func(ctx ctx.Context) error {
+	return func(ctx context.Context) error {
 		dig_invoke_1(v3)
 		if err := user.ProcessStore[int](v2, v4); err != nil {
 			return err

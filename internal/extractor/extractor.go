@@ -124,7 +124,7 @@ func NewExtractor(cfg *config.Config, pkgMap map[string]*packages.Package, mainP
 
 		moduleRoot: rootDir,
 	}
-	e.aliasManager = NewAliasManager(mainPkgPath, strategy, pkgMap)
+	e.aliasManager = NewAliasManager(mainPkgPath, strategy, pkgMap, cfg.DebugAliases)
 	e.aliasManager.LoadImportAliases()
 	return e
 }
@@ -305,20 +305,6 @@ func isExported(name string) bool {
 	return r >= 'A' && r <= 'Z'
 }
 
-func checkExportedVisibility(obj types.Object, curPkg *types.Package) error {
-	defPkg := obj.Pkg()
-	if defPkg == nil || curPkg == defPkg {
-		return nil
-	}
-	if !isExported(obj.Name()) {
-		// 此错误路径理论上不可达：Go 编译器会在 loader 阶段（loader.go:55-57）
-		// 捕获跨包引用未导出成员的编译错误，阻止 digen 继续处理
-		// 此处保留作为安全网
-		return fmt.Errorf("cross-package unexported: %s (pkg: %s)", obj.Name(), defPkg.Path())
-	}
-	return nil
-}
-
 func (e *Extractor) typeQualifier(p *types.Package) string {
 	return p.Path()
 }
@@ -490,9 +476,6 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 	}
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
 	if obj != nil {
-		if err := checkExportedVisibility(obj, curPkg.Types); err != nil {
-			return err
-		}
 		if err := e.checkGenerationVisibility(obj); err != nil {
 			return err
 		}
@@ -717,18 +700,6 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 	return freeVars, freeTypes, freeTypeStrs, isConst, litValues, nil
 }
 
-func (e *Extractor) checkFreeVarVisibility(vars []*ast.Ident, curPkg *packages.Package) error {
-	for _, ident := range vars {
-		obj := curPkg.TypesInfo.ObjectOf(ident)
-		if obj != nil {
-			if err := checkExportedVisibility(obj, curPkg.Types); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 // ---------- isContextType 保持原样 ----------
 func isContextType(typ types.Type) bool {
 	named, ok := typ.(*types.Named)
@@ -743,9 +714,6 @@ func (e *Extractor) collectFreeVarsWithConst(funcLit *ast.FuncLit, curPkg *packa
 	declSet := e.collectDeclarations(funcLit)
 	freeVars, freeTypes, freeTypeStrs, isConst, litValues, err := e.collectFreeVarsFromBody(funcLit.Body, curPkg, declSet)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-	if err := e.checkFreeVarVisibility(freeVars, curPkg); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 	for _, ident := range freeVars {
@@ -790,7 +758,7 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 		return err
 	}
 
-	// 2. 检查闭包体内的私有方法调用
+	// 2. 检查闭包体内的方法调用对生成目标包的可见性
 	if err := e.checkMethodVisibilityInClosure(funcLit.Body, curPkg); err != nil {
 		return err
 	}
@@ -1435,7 +1403,6 @@ func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packa
 	if fnPkg == nil {
 		return fmt.Errorf("function has no package")
 	}
-	// ✅ 检查生成时可见性（对目标包）
 	if err := e.checkGenerationVisibility(obj); err != nil {
 		return err
 	}
@@ -1534,43 +1501,14 @@ func (e *Extractor) getAvailableProviders(typeString string) []string {
 	return names
 }
 
-// checkMethodVisibilityInClosure 检查闭包体中的方法调用是否对目标包可见
-func (e *Extractor) checkMethodVisibilityInClosure(body *ast.BlockStmt, pkg *packages.Package) error {
-	var err error
-	ast.Inspect(body, func(n ast.Node) bool {
-		// 检查是否是方法调用: CallExpr.Fun 是 SelectorExpr
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		// 获取被调用的方法对象
-		obj := pkg.TypesInfo.ObjectOf(sel.Sel)
-		if obj == nil {
-			return true
-		}
-		// 检查可见性
-		if visErr := e.checkGenerationVisibility(obj); visErr != nil {
-			err = visErr
-			return false
-		}
-		return true
-	})
-	return err
-}
-
 // checkGenerationVisibility 检查函数对目标包（dig.Build 所在包）是否可见
-// 如果函数定义包与目标包相同，或函数是导出的，则可见
-// 否则返回错误，提示用户该函数无法在目标包中使用
+// 源码中的引用在 curPkg 视角下合法（Go 编译器已验证），但生成代码在 mainPkgPath 中，
+// 需要确保跨包引用的成员对 mainPkgPath 可见
 func (e *Extractor) checkGenerationVisibility(obj types.Object) error {
 	if obj == nil {
 		return nil
 	}
 
-	// 获取定义包
 	var pkg *types.Package
 	var name string
 
@@ -1598,12 +1536,35 @@ func (e *Extractor) checkGenerationVisibility(obj types.Object) error {
 		return nil
 	}
 
-	// 此错误路径理论上不可达：Go 编译器会在 loader 阶段（loader.go:55-57）
-	// 捕获跨包引用未导出成员的编译错误，阻止 digen 继续处理
-	// 此处保留作为安全网
 	return fmt.Errorf("%s %q is private in package %s and cannot be used from package %s (generation target)",
 		strings.ToLower(strings.TrimPrefix(fmt.Sprintf("%T", obj), "*types.")),
 		name, pkg.Path(), e.mainPkgPath)
+}
+
+// checkMethodVisibilityInClosure 检查闭包体中的方法调用是否对目标包可见
+// 闭包定义在 curPkg 中，方法调用在 curPkg 视角下合法，但生成代码在 mainPkgPath 中
+func (e *Extractor) checkMethodVisibilityInClosure(body *ast.BlockStmt, pkg *packages.Package) error {
+	var err error
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		obj := pkg.TypesInfo.ObjectOf(sel.Sel)
+		if obj == nil {
+			return true
+		}
+		if visErr := e.checkGenerationVisibility(obj); visErr != nil {
+			err = visErr
+			return false
+		}
+		return true
+	})
+	return err
 }
 
 // buildProviderNotFoundError 构造友好的错误信息
@@ -1732,7 +1693,7 @@ func topologicalSort(n int, adj [][]int, indeg []int) ([]int, error) {
 	return order, nil
 }
 
-func (e *Extractor) findCycle(adj [][]int) ([]int, error) {
+func (e *Extractor) findCycle(adj [][]int) []int {
 	n := len(adj)
 	state := make([]int, n) // 0=未访问, 1=访问中, 2=已处理
 	parent := make([]int, n)
@@ -1756,7 +1717,7 @@ func (e *Extractor) findCycle(adj [][]int) ([]int, error) {
 						for cur := u; cur != v; cur = parent[cur] {
 							cycle = append(cycle, cur)
 						}
-						return cycle, nil
+						return cycle
 					}
 				}
 				if !found {
@@ -1766,7 +1727,7 @@ func (e *Extractor) findCycle(adj [][]int) ([]int, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("no cycle found") // 理论不可达：与 topologicalSort 的一致性检查安全网
+	return nil
 }
 
 // describeItemByIt 直接根据 extractedItem 生成描述，不依赖索引
@@ -1834,10 +1795,7 @@ func (e *Extractor) computeOrder(adj [][]int, indeg []int) ([]int, error) {
 
 	order, err := topologicalSort(n, adj, indegCopy)
 	if err != nil {
-		cycle, cycleErr := e.findCycle(adj)
-		if cycleErr != nil {
-			return nil, fmt.Errorf("circular dependency (failed to locate cycle): %w", err)
-		}
+		cycle := e.findCycle(adj)
 		return nil, e.formatCycleError(cycle)
 	}
 	return order, nil

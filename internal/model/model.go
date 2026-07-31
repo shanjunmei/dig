@@ -69,11 +69,6 @@ func FullFuncName(pkgAlias, funcName string) string {
 	return pkgAlias + "." + funcName
 }
 
-// ShortName 返回用于调用的简短名称（包别名.函数名）
-func (node Node) ShortName() string {
-	return FullFuncName(node.FuncPkg, node.Func)
-}
-
 // LongName 返回用于日志的完整路径（包路径.函数名）
 func (node Node) LongName() string {
 	if node.PkgPath == "" {

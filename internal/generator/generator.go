@@ -71,6 +71,24 @@ func getPkgAlias(pkgPath string, importAliasMap map[string]string, aliasMap map[
 	return parts[len(parts)-1]
 }
 
+// pickCtxParamName selects a context parameter name that does not conflict with
+// the context package alias or any other package alias/name used in the generated code.
+func pickCtxParamName(ctxAlias string, usedAliases map[string]bool) string {
+	candidates := []string{"ctx", "c", "ctxVal", "diCtx", "ctxParam"}
+	for _, name := range candidates {
+		if name != ctxAlias && !usedAliases[name] {
+			return name
+		}
+	}
+	// All common names taken — generate a unique fallback
+	for i := 1; ; i++ {
+		name := fmt.Sprintf("ctx%d", i)
+		if name != ctxAlias && !usedAliases[name] {
+			return name
+		}
+	}
+}
+
 // writeImports writes the import block.
 func writeImports(buf *bytes.Buffer, mainPkgPath string, importAliasMap map[string]string, pkgAliasMap map[string]string, pkgNameMap map[string]string, usedPkgs []string) {
 	importMap := make(map[string]string)
@@ -107,7 +125,7 @@ func writeImports(buf *bytes.Buffer, mainPkgPath string, importAliasMap map[stri
 
 // writeHeader writes the file header using the template.
 func (g *Generator) writeHeader(buf *bytes.Buffer, pkgName string, outFile string) {
-	params := g.BuildExecParams(outFile)
+	params := g.buildExecParams(outFile)
 	fmt.Fprintf(buf, headerTemplate, tagBuild, diPkgPath, tagBuild, params, tagBuild, tagBuild, pkgName)
 }
 
@@ -142,7 +160,7 @@ func writeClosureDefs(buf *bytes.Buffer, nodes []model.Node, refCount map[string
 	}
 }
 
-func (g *Generator) BuildExecParams(outFile string) string {
+func (g *Generator) buildExecParams(outFile string) string {
 	return fmt.Sprintf(" -debug=%v -unused=%s -alias=%s -inline=%v -out=%s", g.cfg.Debug, g.cfg.UnusedMode, g.cfg.AliasType, g.cfg.InlineClosures, outFile)
 }
 
@@ -275,12 +293,12 @@ func buildIIFECall(node model.Node) string {
 // buildIdentityConversion generates a type conversion expression for identity closures.
 // Identity closure: func(param T1) T2 { return param }
 // Converts to: T2(param)
-func buildIdentityConversion(node model.Node) string {
+func buildIdentityConversion(node model.Node, ctxParamName string) string {
 	if !node.IsIdentityClosure {
 		return ""
 	}
 	// Get the first (and only) arg - it's the param being converted
-	args := buildCallArgs(node)
+	args := buildCallArgs(node, ctxParamName)
 	if len(args) != 1 {
 		return ""
 	}
@@ -289,11 +307,11 @@ func buildIdentityConversion(node model.Node) string {
 
 // buildCallArgs builds the argument list for a function call from node.Args.
 // Const args are skipped since they're inlined as literals in the closure body.
-func buildCallArgs(node model.Node) []string {
+func buildCallArgs(node model.Node, ctxParamName string) []string {
 	var args []string
 	for _, arg := range node.Args {
 		if arg.IsContext {
-			args = append(args, "ctx")
+			args = append(args, ctxParamName)
 		} else if arg.IsConst {
 			// Phase 1: Const values are inlined in the body, skip in call
 			continue
@@ -306,7 +324,7 @@ func buildCallArgs(node model.Node) []string {
 
 // writeProvider writes a single provider statement.
 // If blank is true, the result is assigned to '_' (unused provider).
-func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool) {
+func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool, ctxParamName string) {
 	if node.IsSupply {
 		expr := node.Value
 		if node.FuncPkg != "" && !isLiteral(expr) && !strings.HasPrefix(expr, node.FuncPkg+".") {
@@ -329,7 +347,7 @@ func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool
 
 	// Phase 4: Identity closure - use direct type conversion
 	if node.IsIdentityClosure {
-		conversion := buildIdentityConversion(node)
+		conversion := buildIdentityConversion(node, ctxParamName)
 		g.emitLog(buf, "[PROVIDE] identity conversion: %s -> %s", strconv.Quote(logName), node.IdentityTargetType)
 		if blank {
 			fmt.Fprintf(buf, "_ = %s\n", conversion)
@@ -340,7 +358,7 @@ func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool
 		return
 	}
 
-	args := buildCallArgs(node)
+	args := buildCallArgs(node, ctxParamName)
 	argsStr := strings.Join(args, ", ")
 
 	var fullCall string
@@ -380,7 +398,7 @@ func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool
 }
 
 // writeProviders writes all provider statements.
-func (g *Generator) writeProviders(buf *bytes.Buffer, nodes []model.Node, refCount map[string]int, unusedMode model.UnusedMode) {
+func (g *Generator) writeProviders(buf *bytes.Buffer, nodes []model.Node, refCount map[string]int, unusedMode model.UnusedMode, ctxParamName string) {
 	for _, node := range nodes {
 		if node.IsInvoke {
 			continue
@@ -392,12 +410,12 @@ func (g *Generator) writeProviders(buf *bytes.Buffer, nodes []model.Node, refCou
 		if !node.HasError && refCount[node.Name] == 0 && unusedMode == model.UnusedModeIgnore {
 			blank = true
 		}
-		g.writeProvider(buf, node, blank)
+		g.writeProvider(buf, node, blank, ctxParamName)
 	}
 }
 
 // writeInvokes writes all invoke statements.
-func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node) {
+func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node, ctxParamName string) {
 	for _, node := range nodes {
 		if !node.IsInvoke {
 			continue
@@ -406,7 +424,7 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node) {
 
 		// Phase 4: Identity closure - use direct type conversion
 		if node.IsIdentityClosure {
-			conversion := buildIdentityConversion(node)
+			conversion := buildIdentityConversion(node, ctxParamName)
 			g.emitLog(buf, "[INVOKE] identity conversion: %s -> %s", strconv.Quote(logName), node.IdentityTargetType)
 			if node.HasError {
 				fmt.Fprintf(buf, "if err := %s; err != nil {\n", conversion)
@@ -419,7 +437,7 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node) {
 			continue
 		}
 
-		args := buildCallArgs(node)
+		args := buildCallArgs(node, ctxParamName)
 		argsStr := strings.Join(args, ", ")
 
 		var fullCall string
@@ -454,9 +472,22 @@ func (g *Generator) writeMainFunc(buf *bytes.Buffer, nodes []model.Node, originF
 		paramStr = " " + paramStr
 	}
 	ctxAlias := getPkgAlias("context", importAliasMap, pkgAliasMap, pkgNameMap)
+	// Pick a parameter name that does not shadow any package alias used in the generated code.
+	// Try conventional names first, fall back to less common ones.
+	usedAliases := make(map[string]bool, len(importAliasMap)+len(pkgAliasMap)+len(pkgNameMap))
+	for _, a := range importAliasMap {
+		usedAliases[a] = true
+	}
+	for _, a := range pkgAliasMap {
+		usedAliases[a] = true
+	}
+	for _, a := range pkgNameMap {
+		usedAliases[a] = true
+	}
+	ctxParam := pickCtxParamName(ctxAlias, usedAliases)
 	fmt.Fprintf(buf, "func %s(%s) func(%s.Context) error {\n", originFuncName, paramStr, ctxAlias)
-	g.writeProviders(buf, nodes, refCount, unusedMode)
-	fmt.Fprintf(buf, "\treturn func(ctx %s.Context) error {\n", ctxAlias)
-	g.writeInvokes(buf, nodes)
+	g.writeProviders(buf, nodes, refCount, unusedMode, ctxParam)
+	fmt.Fprintf(buf, "\treturn func(%s %s.Context) error {\n", ctxParam, ctxAlias)
+	g.writeInvokes(buf, nodes, ctxParam)
 	buf.WriteString("\t\treturn nil\n\t}\n}\n\n")
 }
