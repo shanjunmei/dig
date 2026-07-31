@@ -7,7 +7,7 @@
 package app_edge
 
 import (
-	"context"
+	ctx "context"
 	"fmt"
 	"github.com/shanjunmei/dig/example/cache"
 	"github.com/shanjunmei/dig/example/common"
@@ -122,7 +122,7 @@ func dig_invoke_12(cfg *common.Config, log *logger.Logger) error {
 	return nil
 }
 
-func InitAppEdge(cfg *common.Config, log *logger.Logger) func(context.Context) error {
+func InitAppEdge(cfg *common.Config, log *logger.Logger) func(ctx.Context) error {
 	v0 := cfg
 	v1 := log
 	v2 := user.NewStore[int]()
@@ -150,7 +150,7 @@ func InitAppEdge(cfg *common.Config, log *logger.Logger) func(context.Context) e
 	v15 := dig_provider_7()
 	v16 := dig_provider_8()
 	v17 := role.NewServer(v5)
-	return func(ctx context.Context) error {
+	return func(ctx ctx.Context) error {
 		dig_invoke_1(v3)
 		if err := user.ProcessStore[int](v2, v4); err != nil {
 			return err

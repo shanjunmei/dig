@@ -180,7 +180,7 @@ func (g *Generator) GenerateCode(nodes []model.Node, refCount map[string]int, pk
 	}
 
 	writeClosureDefs(buf, nodes, refCount, g.cfg.UnusedMode)
-	g.writeMainFunc(buf, nodes, originFuncName, g.cfg.UnusedMode, refCount, params, fset)
+	g.writeMainFunc(buf, nodes, originFuncName, g.cfg.UnusedMode, refCount, params, fset, importAliasMap, pkgAliasMap, pkgNameMap)
 
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
@@ -448,14 +448,15 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node) {
 }
 
 // writeMainFunc writes the main generated function.
-func (g *Generator) writeMainFunc(buf *bytes.Buffer, nodes []model.Node, originFuncName string, unusedMode model.UnusedMode, refCount map[string]int, params *ast.FieldList, fset *token.FileSet) {
+func (g *Generator) writeMainFunc(buf *bytes.Buffer, nodes []model.Node, originFuncName string, unusedMode model.UnusedMode, refCount map[string]int, params *ast.FieldList, fset *token.FileSet, importAliasMap, pkgAliasMap, pkgNameMap map[string]string) {
 	paramStr := formatParams(params, fset)
 	if paramStr != "" {
 		paramStr = " " + paramStr
 	}
-	fmt.Fprintf(buf, "func %s(%s) func(context.Context) error {\n", originFuncName, paramStr)
+	ctxAlias := getPkgAlias("context", importAliasMap, pkgAliasMap, pkgNameMap)
+	fmt.Fprintf(buf, "func %s(%s) func(%s.Context) error {\n", originFuncName, paramStr, ctxAlias)
 	g.writeProviders(buf, nodes, refCount, unusedMode)
-	fmt.Fprintf(buf, "\treturn func(ctx context.Context) error {\n")
+	fmt.Fprintf(buf, "\treturn func(ctx %s.Context) error {\n", ctxAlias)
 	g.writeInvokes(buf, nodes)
 	buf.WriteString("\t\treturn nil\n\t}\n}\n\n")
 }
