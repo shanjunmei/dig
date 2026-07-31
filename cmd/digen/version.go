@@ -147,14 +147,6 @@ func parseGitDescribe(v *resolvedVersion) {
 	v.tag = s
 }
 
-// shortCommit 将 commit hash 截短到 8 个字符
-func shortCommit(hash string) string {
-	if len(hash) > 8 {
-		return hash[:8]
-	}
-	return hash
-}
-
 // cleanVersion 提取干净的版本标签
 func cleanVersion(v *resolvedVersion) string {
 	if v.tag != "" {
@@ -204,7 +196,7 @@ func versionString() string {
 	fmt.Fprintln(&b)
 
 	if v.commit != "" {
-		fmt.Fprintf(&b, "  commit: %s\n", shortCommit(v.commit))
+		fmt.Fprintf(&b, "  commit: %s\n", v.commit)
 	}
 	if date := formatDate(v.buildDate); date != "" {
 		fmt.Fprintf(&b, "  built:  %s", date)
