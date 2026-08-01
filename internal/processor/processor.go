@@ -83,7 +83,8 @@ func (p *Processor) extractAndBuildNodes(pkg *packages.Package, target *model.Ge
 	entryFunc := target.Node
 	buildCall := extractor.FindBuildCall(entryFunc, pkg.TypesInfo)
 	if buildCall == nil {
-		return nil, nil, nil, nil, fmt.Errorf("no dig.Build call found")
+		pos := pkg.Fset.Position(entryFunc.Pos())
+		return nil, nil, nil, nil, fmt.Errorf("at %s: no dig.Build call found in function %s", pos, entryFunc.Name.Name)
 	}
 
 	startDir := filepath.Dir(target.File)
@@ -116,8 +117,12 @@ func (p *Processor) checkUnusedProviders(nodes []model.Node, refCount map[string
 		}
 		if refCount[node.Name] == 0 {
 			funcDesc := node.LongName()
-			return fmt.Errorf("unused provider: %s (returns %s)\n  💡 Fix: either add an Invoke that consumes %s, or remove this provider; use -unused=ignore to suppress",
-				funcDesc, node.RetType, node.RetType)
+			posHint := ""
+			if node.Position != "" {
+				posHint = fmt.Sprintf(" at %s", node.Position)
+			}
+			return fmt.Errorf("unused provider%s: %s (returns %s)\n  💡 Fix: either add an Invoke that consumes %s, or remove this provider; use -unused=ignore to suppress",
+				posHint, funcDesc, node.RetType, node.RetType)
 		}
 	}
 	return nil

@@ -479,7 +479,7 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 	}
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
 	if obj != nil {
-		if err := e.checkGenerationVisibility(obj); err != nil {
+		if err := e.checkGenerationVisibility(obj, curPkg); err != nil {
 			return err
 		}
 	}
@@ -515,15 +515,15 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 	if oldIdx, exists := e.globalProviderMap[keyNamed]; exists {
 		oldDesc := e.describeItem(oldIdx)
 		currentDesc := e.describeItemByIt(item)
-		return fmt.Errorf("duplicate binding for %s with name %q:\n\tprevious: %s\n\tcurrent: %s",
-			retType, instanceName, oldDesc, currentDesc)
+		return fmt.Errorf("at %s: duplicate binding for %s with name %q:\n\tprevious: %s\n\tcurrent: %s",
+			pos, retType, instanceName, oldDesc, currentDesc)
 	}
 	if instanceName == "" {
 		if oldIdx, exists := e.globalProviderMap[keyDefault]; exists {
 			oldDesc := e.describeItem(oldIdx)
 			currentDesc := e.describeItemByIt(item)
-			return fmt.Errorf("duplicate binding for %s (default):\n\tprevious: %s\n\tcurrent: %s",
-				retType, oldDesc, currentDesc)
+			return fmt.Errorf("at %s: duplicate binding for %s (default):\n\tprevious: %s\n\tcurrent: %s",
+				pos, retType, oldDesc, currentDesc)
 		}
 	}
 
@@ -657,7 +657,7 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 				if o.Pkg() == nil || o.Parent() == nil {
 					return true
 				}
-				err = fmt.Errorf("cannot capture local variable %q defined in InitApp scope; pass it as a parameter to the function (preferred) or move it to package level", ident.Name)
+				err = fmt.Errorf("at %s: cannot capture local variable %q defined in InitApp scope; pass it as a parameter to the function (preferred) or move it to package level", curPkg.Fset.Position(ident.Pos()), ident.Name)
 				return false
 			}
 			if seen[ident.Name] {
@@ -676,7 +676,7 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 				if o.Pkg() == nil || o.Parent() == nil {
 					return true
 				}
-				err = fmt.Errorf("cannot capture local constant %q defined in InitApp scope; pass it as a parameter to the function (preferred) or move it to package level", ident.Name)
+				err = fmt.Errorf("at %s: cannot capture local constant %q defined in InitApp scope; pass it as a parameter to the function (preferred) or move it to package level", curPkg.Fset.Position(ident.Pos()), ident.Name)
 				return false
 			}
 			constVal := e.extractConstLiteral(o)
@@ -721,7 +721,7 @@ func (e *Extractor) collectFreeVarsWithConst(funcLit *ast.FuncLit, curPkg *packa
 	for _, ident := range freeVars {
 		obj := curPkg.TypesInfo.ObjectOf(ident)
 		if obj != nil && isContextType(obj.Type()) {
-			return nil, nil, nil, nil, nil, fmt.Errorf("cannot capture context variable %q as free variable; please pass context as a function parameter", ident.Name)
+			return nil, nil, nil, nil, nil, fmt.Errorf("at %s: cannot capture context variable %q as free variable; please pass context as a function parameter", curPkg.Fset.Position(ident.Pos()), ident.Name)
 		}
 	}
 	return freeVars, freeTypes, freeTypeStrs, isConst, litValues, nil
@@ -733,7 +733,7 @@ func (e *Extractor) determineReturnType(funcLit *ast.FuncLit, sig *types.Signatu
 	}
 	res := sig.Results()
 	if res.Len() == 0 {
-		return "", fmt.Errorf("anonymous provide function has no return")
+		return "", fmt.Errorf("at %s: anonymous provide function has no return", curPkg.Fset.Position(funcLit.Pos()))
 	}
 	if funcLit.Type.Results != nil && len(funcLit.Type.Results.List) > 0 {
 		retExpr := funcLit.Type.Results.List[0].Type
@@ -786,10 +786,11 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 			key = retType + ":" + instanceName
 		}
 		if _, dup := e.globalProviderMap[key]; dup {
+			pos := curPkg.Fset.Position(funcLit.Pos())
 			if instanceName != "" {
-				return fmt.Errorf("duplicate binding for %s with name %q", retType, instanceName)
+				return fmt.Errorf("at %s: duplicate binding for %s with name %q", pos, retType, instanceName)
 			}
-			return fmt.Errorf("duplicate provide for type %q", retType)
+			return fmt.Errorf("at %s: duplicate provide for type %q", pos, retType)
 		}
 	}
 
@@ -882,18 +883,19 @@ func validateProvideSignature(sig *types.Signature, funcName string) error {
 
 // validateClosureSignature 验证闭包的签名，返回 *types.Signature
 func (e *Extractor) validateClosureSignature(funcLit *ast.FuncLit, curPkg *packages.Package, isInvoke bool) (*types.Signature, error) {
+	pos := curPkg.Fset.Position(funcLit.Pos())
 	typ := curPkg.TypesInfo.TypeOf(funcLit)
 	sig, ok := typ.(*types.Signature)
 	if !ok {
-		return nil, fmt.Errorf("func literal is not a function type")
+		return nil, fmt.Errorf("at %s: func literal is not a function type", pos)
 	}
 	if isInvoke {
 		if err := validateInvokeSignature(sig, "anonymous function"); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("at %s: %w", pos, err)
 		}
 	} else {
 		if err := validateProvideSignature(sig, "anonymous provide function"); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("at %s: %w", pos, err)
 		}
 	}
 	return sig, nil
@@ -971,8 +973,8 @@ func (e *Extractor) registerClosureProvider(item extractedItem, idx int) error {
 		if oldIdx != idx {
 			oldDesc := e.describeItem(oldIdx)
 			currentDesc := e.describeItemByIt(item)
-			return fmt.Errorf("duplicate binding for %s with name %q:\n\tprevious: %s\n\tcurrent: %s",
-				item.RetType, item.InstanceName, oldDesc, currentDesc)
+			return fmt.Errorf("at %s: duplicate binding for %s with name %q:\n\tprevious: %s\n\tcurrent: %s",
+				item.Position, item.RetType, item.InstanceName, oldDesc, currentDesc)
 		}
 	} else {
 		e.globalProviderMap[key] = idx
@@ -1129,28 +1131,29 @@ func (e *Extractor) collectUsedPkgsFromExpr(expr ast.Expr, info *types.Info) []s
 }
 
 func getFuncMeta(expr ast.Expr, curPkg *packages.Package, pkgMap map[string]*packages.Package) (name string, sig *types.Signature, realPkg *packages.Package, err error) {
+	pos := curPkg.Fset.Position(expr.Pos())
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
 	if obj == nil {
 		var buf strings.Builder
 		_ = printer.Fprint(&buf, curPkg.Fset, expr)
-		return "", nil, nil, fmt.Errorf("resolve object failed for expression: %s", buf.String())
+		return "", nil, nil, fmt.Errorf("at %s: resolve object failed for expression: %s", pos, buf.String())
 	}
 	fn, ok := obj.(*types.Func)
 	if !ok {
-		return "", nil, nil, fmt.Errorf("%s is not a function", obj.Name())
+		return "", nil, nil, fmt.Errorf("at %s: %s is not a function", pos, obj.Name())
 	}
 	fnPkg := fn.Pkg()
 	if fnPkg == nil {
-		return "", nil, nil, fmt.Errorf("function %s has no package", fn.Name())
+		return "", nil, nil, fmt.Errorf("at %s: function %s has no package", pos, fn.Name())
 	}
 	realPkg, ok = pkgMap[fnPkg.Path()]
 	if !ok {
-		return "", nil, nil, fmt.Errorf("package %s not found in pkgMap", fnPkg.Path())
+		return "", nil, nil, fmt.Errorf("at %s: package %s not found in pkgMap", pos, fnPkg.Path())
 	}
 	instFuncType := curPkg.TypesInfo.TypeOf(expr)
 	instSig, ok := instFuncType.(*types.Signature)
 	if !ok {
-		return "", nil, nil, fmt.Errorf("failed to get instantiated signature for %s", fn.Name())
+		return "", nil, nil, fmt.Errorf("at %s: failed to get instantiated signature for %s", pos, fn.Name())
 	}
 
 	return fn.Name(), instSig, realPkg, nil
@@ -1185,12 +1188,13 @@ func (e *Extractor) handleInvoke(expr ast.Expr, curPkg *packages.Package) error 
 	}
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
 	if obj != nil {
-		if err := e.checkGenerationVisibility(obj); err != nil {
+		if err := e.checkGenerationVisibility(obj, curPkg); err != nil {
 			return err
 		}
 	}
 	if err := validateInvokeSignature(sig, name); err != nil {
-		return err
+		pos := curPkg.Fset.Position(expr.Pos())
+		return fmt.Errorf("at %s: %w", pos, err)
 	}
 	genericStr, err := e.extractGenericArgStr(expr, curPkg)
 	if err != nil {
@@ -1221,7 +1225,7 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	}
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
 	if obj != nil {
-		if err := e.checkGenerationVisibility(obj); err != nil {
+		if err := e.checkGenerationVisibility(obj, curPkg); err != nil {
 			return err
 		}
 	}
@@ -1231,19 +1235,20 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	}
 	alias := e.aliasManager.CollectPkgAlias(realPkg)
 
+	pos := curPkg.Fset.Position(expr.Pos())
 	res := sig.Results()
 	switch res.Len() {
 	case 0:
-		return fmt.Errorf("func %s has no return", name)
+		return fmt.Errorf("at %s: func %s has no return", pos, name)
 	case 1:
 		// ok
 	case 2:
 		if !isErrorType(res.At(1).Type()) {
-			return fmt.Errorf("func %s: second return value must be error, got %s", name, res.At(1).Type().String())
+			return fmt.Errorf("at %s: func %s: second return value must be error, got %s", pos, name, res.At(1).Type().String())
 		}
 	default:
-		return fmt.Errorf("func %s: too many return values (%d), only (T) or (T, error) are allowed "+
-			"(if you need to provide multiple types, define a plain struct that bundles them and return that struct)", name, res.Len())
+		return fmt.Errorf("at %s: func %s: too many return values (%d), only (T) or (T, error) are allowed "+
+			"(if you need to provide multiple types, define a plain struct that bundles them and return that struct)", pos, name, res.Len())
 	}
 
 	retType := e.getTypeFullName(res.At(0).Type())
@@ -1256,9 +1261,8 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	item.GenericArgsStr = genericStr
 	item.InstanceName = instanceName
 
-	pos := curPkg.Fset.Position(expr.Pos())
 	relPath := e.relPath(pos.Filename)
-	item.Position = e.ConditionalDebugf(func() bool { return true }, "%s:%d", relPath, pos.Line)
+	item.Position = fmt.Sprintf("%s:%d", relPath, pos.Line)
 
 	keyNamed := retType
 	if instanceName != "" {
@@ -1268,15 +1272,15 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	if oldIdx, exists := e.globalProviderMap[keyNamed]; exists {
 		oldDesc := e.describeItem(oldIdx)
 		currentDesc := e.describeItemByIt(item)
-		return fmt.Errorf("duplicate binding for %s with name %q:\n\tprevious: %s\n\tcurrent: %s",
-			retType, instanceName, oldDesc, currentDesc)
+		return fmt.Errorf("at %s: duplicate binding for %s with name %q:\n\tprevious: %s\n\tcurrent: %s",
+			pos, retType, instanceName, oldDesc, currentDesc)
 	}
 	if instanceName == "" {
 		if oldIdx, exists := e.globalProviderMap[retType]; exists {
 			oldDesc := e.describeItem(oldIdx)
 			currentDesc := e.describeItemByIt(item)
-			return fmt.Errorf("duplicate binding for %s (default):\n\tprevious: %s\n\tcurrent: %s",
-				retType, oldDesc, currentDesc)
+			return fmt.Errorf("at %s: duplicate binding for %s (default):\n\tprevious: %s\n\tcurrent: %s",
+				pos, retType, oldDesc, currentDesc)
 		}
 	}
 
@@ -1381,7 +1385,7 @@ func findFuncDecl(pkg *packages.Package, name string) *ast.FuncDecl {
 	return nil
 }
 
-func (e *Extractor) findSingleModuleCall(body *ast.BlockStmt, info *types.Info, funcName string) (*ast.CallExpr, error) {
+func (e *Extractor) findSingleModuleCall(body *ast.BlockStmt, info *types.Info, funcName string, fset *token.FileSet) (*ast.CallExpr, error) {
 	var moduleCalls []*ast.CallExpr
 	var moduleInControl []bool
 	var controlDepth int
@@ -1412,45 +1416,47 @@ func (e *Extractor) findSingleModuleCall(body *ast.BlockStmt, info *types.Info, 
 		},
 	)
 
+	pos := fset.Position(body.Pos())
 	switch len(moduleCalls) {
 	case 0:
-		return nil, fmt.Errorf("function %s does not contain dig.Module\n  💡 Fix: add a single dig.Module(...) call that wraps all dig.Provide/dig.Invoke/dig.Supply calls", funcName)
+		return nil, fmt.Errorf("at %s: function %s does not contain dig.Module\n  💡 Fix: add a single dig.Module(...) call that wraps all dig.Provide/dig.Invoke/dig.Supply calls", pos, funcName)
 	case 1:
 		if moduleInControl[0] {
-			return nil, fmt.Errorf("function %s contains dig.Module inside control flow (if/switch/for/select), which is not supported\n  💡 Fix: pass it as a parameter to the function (preferred) or move it to package level", funcName)
+			return nil, fmt.Errorf("at %s: function %s contains dig.Module inside control flow (if/switch/for/select), which is not supported\n  💡 Fix: pass it as a parameter to the function (preferred) or move it to package level", pos, funcName)
 		}
 		return moduleCalls[0], nil
 	default:
-		return nil, fmt.Errorf("function %s contains multiple dig.Module calls; only one is allowed\n  💡 Fix: merge all providers/invokes into a single dig.Module call", funcName)
+		return nil, fmt.Errorf("at %s: function %s contains multiple dig.Module calls; only one is allowed\n  💡 Fix: merge all providers/invokes into a single dig.Module call", pos, funcName)
 	}
 }
 
 func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packages.Package) error {
+	pos := curPkg.Fset.Position(call.Pos())
 	obj := resolveFunctionObject(call, curPkg)
 	if obj == nil {
-		return fmt.Errorf("cannot resolve function call; ensure it is a named function or method, not a literal or variable\n  💡 Fix: define a named function with dig.Module(...) and call it")
+		return fmt.Errorf("at %s: cannot resolve function call; ensure it is a named function or method, not a literal or variable\n  💡 Fix: define a named function with dig.Module(...) and call it", pos)
 	}
 	fn, ok := obj.(*types.Func)
 	if !ok {
-		return fmt.Errorf("resolved object is not a function")
+		return fmt.Errorf("at %s: resolved object is not a function", pos)
 	}
 	fnPkg := fn.Pkg()
 	if fnPkg == nil {
-		return fmt.Errorf("function has no package")
+		return fmt.Errorf("at %s: function has no package", pos)
 	}
-	if err := e.checkGenerationVisibility(obj); err != nil {
+	if err := e.checkGenerationVisibility(obj, curPkg); err != nil {
 		return err
 	}
 	subPkg, ok := e.pkgMap[fnPkg.Path()]
 	if !ok {
-		return fmt.Errorf("package %s not loaded", fnPkg.Path())
+		return fmt.Errorf("at %s: package %s not loaded", pos, fnPkg.Path())
 	}
 	funcDecl := findFuncDecl(subPkg, fn.Name())
 	if funcDecl == nil || funcDecl.Body == nil {
-		return fmt.Errorf("function %s has no body", fn.Name())
+		return fmt.Errorf("at %s: function %s has no body", pos, fn.Name())
 	}
 
-	modCall, err := e.findSingleModuleCall(funcDecl.Body, subPkg.TypesInfo, fn.Name())
+	modCall, err := e.findSingleModuleCall(funcDecl.Body, subPkg.TypesInfo, fn.Name(), subPkg.Fset)
 	if err != nil {
 		return err
 	}
@@ -1539,7 +1545,7 @@ func (e *Extractor) getAvailableProviders(typeString string) []string {
 // checkGenerationVisibility 检查函数对目标包（dig.Build 所在包）是否可见
 // 源码中的引用在 curPkg 视角下合法（Go 编译器已验证），但生成代码在 mainPkgPath 中，
 // 需要确保跨包引用的成员对 mainPkgPath 可见
-func (e *Extractor) checkGenerationVisibility(obj types.Object) error {
+func (e *Extractor) checkGenerationVisibility(obj types.Object, curPkg *packages.Package) error {
 	if obj == nil {
 		return nil
 	}
@@ -1571,7 +1577,9 @@ func (e *Extractor) checkGenerationVisibility(obj types.Object) error {
 		return nil
 	}
 
-	return fmt.Errorf("%s %q is private in package %s and cannot be used from package %s (generation target)",
+	pos := curPkg.Fset.Position(obj.Pos())
+	return fmt.Errorf("at %s: %s %q is private in package %s and cannot be used from package %s (generation target)",
+		pos,
 		strings.ToLower(strings.TrimPrefix(fmt.Sprintf("%T", obj), "*types.")),
 		name, pkg.Path(), e.mainPkgPath)
 }
@@ -1593,7 +1601,7 @@ func (e *Extractor) checkMethodVisibilityInClosure(body *ast.BlockStmt, pkg *pac
 		if obj == nil {
 			return true
 		}
-		if visErr := e.checkGenerationVisibility(obj); visErr != nil {
+		if visErr := e.checkGenerationVisibility(obj, pkg); visErr != nil {
 			err = visErr
 			return false
 		}
@@ -1872,6 +1880,7 @@ func (e *Extractor) baseNode(it extractedItem, name string, argNames []string) m
 		FuncPkg:     it.PkgAlias,
 		Args:        args,
 		GenericArgs: it.GenericArgsStr,
+		Position:    it.Position,
 	}
 }
 
@@ -2337,11 +2346,11 @@ func addExternalParams(extractor *Extractor, target *model.GenTarget, pkg *packa
 		for _, name := range field.Names {
 			typ := pkg.TypesInfo.TypeOf(field.Type)
 			if typ == nil {
-				return fmt.Errorf("cannot resolve type of parameter %s", name.Name)
+				return fmt.Errorf("at %s: cannot resolve type of parameter %s", pos, name.Name)
 			}
 			retType := extractor.getTypeFullName(typ)
 			if seenTypes[retType] {
-				return fmt.Errorf("duplicate parameter type %q (parameter %s)", retType, name.Name)
+				return fmt.Errorf("at %s: duplicate parameter type %q (parameter %s)", pos, retType, name.Name)
 			}
 			seenTypes[retType] = true
 			sourceComment := extractor.ConditionalDebugf(func() bool { return true }, "// supplied from function '%s' argument '%s' (type %s) at %s:%d", target.Node.Name.Name, name.Name, retType, relPath, pos.Line)
@@ -2386,23 +2395,24 @@ func isContextFunc(typ types.Type) bool {
 	return isErrorType(results.At(0).Type())
 }
 
-func validateReturnType(fnDecl *ast.FuncDecl, info *types.Info) error {
+func validateReturnType(fnDecl *ast.FuncDecl, info *types.Info, fset *token.FileSet) error {
+	pos := fset.Position(fnDecl.Pos())
 	if fnDecl.Type.Results == nil || len(fnDecl.Type.Results.List) == 0 {
-		return fmt.Errorf("function %q: must have a return value of type func(context.Context) error", fnDecl.Name.Name)
+		return fmt.Errorf("at %s: function %q: must have a return value of type func(context.Context) error", pos, fnDecl.Name.Name)
 	}
 	if len(fnDecl.Type.Results.List) > 1 {
-		return fmt.Errorf("function %q: only a single return value allowed, expected func(context.Context) error", fnDecl.Name.Name)
+		return fmt.Errorf("at %s: function %q: only a single return value allowed, expected func(context.Context) error", pos, fnDecl.Name.Name)
 	}
 	resField := fnDecl.Type.Results.List[0]
 	if len(resField.Names) > 0 {
-		return fmt.Errorf("function %q: named return value is not allowed, expected func(context.Context) error", fnDecl.Name.Name)
+		return fmt.Errorf("at %s: function %q: named return value is not allowed, expected func(context.Context) error", pos, fnDecl.Name.Name)
 	}
 	retType := info.TypeOf(resField.Type)
 	if retType == nil {
-		return fmt.Errorf("function %q: failed to resolve return type", fnDecl.Name.Name)
+		return fmt.Errorf("at %s: function %q: failed to resolve return type", pos, fnDecl.Name.Name)
 	}
 	if !isContextFunc(retType) {
-		return fmt.Errorf("function %q: invalid return type %q, expected func(context.Context) error", fnDecl.Name.Name, retType.String())
+		return fmt.Errorf("at %s: function %q: invalid return type %q, expected func(context.Context) error", pos, fnDecl.Name.Name, retType.String())
 	}
 	return nil
 }
@@ -2416,8 +2426,8 @@ func FindDigCallInBlock(block *ast.BlockStmt, info *types.Info, methodName strin
 	return findDigCallInBlock(block, info, methodName)
 }
 
-func ValidateReturnType(fnDecl *ast.FuncDecl, info *types.Info) error {
-	return validateReturnType(fnDecl, info)
+func ValidateReturnType(fnDecl *ast.FuncDecl, info *types.Info, fset *token.FileSet) error {
+	return validateReturnType(fnDecl, info, fset)
 }
 
 func FindBuildCall(fn *ast.FuncDecl, info *types.Info) *ast.CallExpr {

@@ -92,8 +92,8 @@ func FindInjectorFunctions(pkg *packages.Package) (*model.GenTarget, error) {
 			if extractor.FindDigCallInBlock(fnDecl.Body, pkg.TypesInfo, "Build") == nil {
 				continue
 			}
-			if err := extractor.ValidateReturnType(fnDecl, pkg.TypesInfo); err != nil {
-				return nil, fmt.Errorf("function %q: %w", fnDecl.Name.Name, err)
+			if err := extractor.ValidateReturnType(fnDecl, pkg.TypesInfo, pkg.Fset); err != nil {
+				return nil, err
 			}
 			targets = append(targets, model.GenTarget{
 				FuncName: fnDecl.Name.Name,
@@ -103,10 +103,15 @@ func FindInjectorFunctions(pkg *packages.Package) (*model.GenTarget, error) {
 		}
 	}
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("no function containing dig.Build call found\n  💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error")
+		return nil, fmt.Errorf("no function containing dig.Build call found in package %s\n  💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error", pkg.PkgPath)
 	}
 	if len(targets) > 1 {
-		return nil, fmt.Errorf("multiple functions containing dig.Build call found (only one allowed)\n  💡 Fix: keep exactly one function with dig.Build per package")
+		var locations []string
+		for _, t := range targets {
+			pos := pkg.Fset.Position(t.Node.Pos())
+			locations = append(locations, fmt.Sprintf("  %s at %s", t.FuncName, pos))
+		}
+		return nil, fmt.Errorf("multiple functions containing dig.Build call found (only one allowed):\n%s\n  💡 Fix: keep exactly one function with dig.Build per package", strings.Join(locations, "\n"))
 	}
 	return &targets[0], nil
 }

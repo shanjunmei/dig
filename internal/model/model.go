@@ -66,6 +66,8 @@ type Node struct {
 
 	Comment string
 
+	Position string // 源码位置 (file:line)，用于错误报告
+
 	ShouldInline       bool // Phase 3: inline closure as IIFE instead of named function
 	IsIdentityClosure  bool // Phase 4: identity closure (func(param) T { return param })
 	IdentityOp         OpKind
