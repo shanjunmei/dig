@@ -107,7 +107,7 @@ Built-in integration of Viper config manager + GORM+PostgreSQL + standard librar
 3. Minimum Go Version: Go 1.21+
 4. Install Script
 ```bash
-go get github.com/shanjunmei/dig@v1.0.13
+go get github.com/shanjunmei/dig@v1.0.14
 go install github.com/shanjunmei/dig/cmd/digen@latest
 # Industrial stack dependencies
 go get github.com/spf13/viper
@@ -542,10 +542,13 @@ func Module() dig.Option {
 ### 2.4 digen CLI Flag Reference
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-out` | di_gen.go | Generated DI filename, invalid under `digen ./...` |
+| `-out` | dig_gen.go | Generated DI filename, invalid under `digen ./...` |
 | `-unused` | error | Unused provider policy: error / ignore / drop |
-| `-debug` | false | Inject overridable global Logf debug log in generated code |
-| `-alias` | full | Import alias mode: full / short / obfuscated |
+| `-debug` | false | Inject overridable global Logf debug log in generated code (detailed errors always shown since v1.0.13) |
+| `-debug-aliases` | false | Print the resolved per-package import alias mapping during generation (v1.0.14+) |
+| `-alias` | full | Import alias mode: full / short / obfuscated / numeric |
+| `-inline` | false | Inline simple closures as IIFEs; identity closures collapse to a type conversion (v1.0.14+) |
+| `-version` | false | Print version information and exit (v1.0.13+) |
 
 ### 2.5 Three Go DI Framework Comparison (Updated Config Injection Part)
 1. Uber Fx: Runtime reflection, slow boot, runtime panic on missing dependency, extra runtime framework cost; easy to misuse global config singletons, requires manual wire config between layers

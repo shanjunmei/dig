@@ -12,9 +12,10 @@ A complete standardized production coding convention skill for business microser
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Current version**: v1.0.13
+> **Current version**: v1.0.14
 >
 > **Key version changes**:
+> - **v1.0.14**: Closure inlining (`-inline`), identity-closure optimization (direct type conversion instead of wrapper), cross-package alias isolation (deterministic `digen ./...` vs `digen ./<pkg>`), context alias respected in generated code, source location (`file:line:col`) in all error messages, `-debug-aliases` diagnostics flag
 > - **v1.0.13**: Version info system (`-version`), Mage build support, Provide closure signature validation, structured errors replacing panics, actionable error messages with `💡 Fix:` suggestions
 > - **v1.0.11**: Added named instance injection, fixed package alias resolution (e.g. `go-redis/v9`)
 > - **v1.0.5**: `InitApp()` returns `func(context.Context) error`; generated code has zero runtime dependency
@@ -43,8 +44,10 @@ Go DI tools fall into two camps:
 - **Zero runtime reflection & zero runtime dependency** – generated code is plain Go, imports nothing.
 - **Minimal API** – just `Build`, `Provide`, `Supply`, `Invoke`, `Module`.
 - **Closure capture safety** – inline closures cannot capture locals from `InitApp`; enforced by generator.
+- **Closure inlining** (`-inline`) – inline simple closures as immediately-invoked function expressions (IIFE), reducing generated function count; identity closures (`func(p T) T { return p }`) collapse to a direct type conversion.
 - **Generic‑aware** – supports generic functions and types natively.
 - **Observability** – debug logging with runtime‑overridable `Logf`.
+- **Actionable errors** – all error messages include source location (`file:line:col`) and `💡 Fix:` suggestions (since v1.0.13; expanded in v1.0.14).
 - **Unused‑provider policies** – `error` (default), `ignore`, or `drop`.
 - **Module nesting** – compose modules hierarchically; duplicate detection built‑in.
 - **Named instance injection** – inject multiple instances of the same type by distinguishing them via **parameter names**.
@@ -54,7 +57,7 @@ Go DI tools fall into two camps:
 ## Installation
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.13
+go get github.com/shanjunmei/dig@v1.0.14
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 Requires Go 1.21+.
@@ -80,7 +83,7 @@ import (
     "github.com/shanjunmei/dig"
 )
 
-//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go
+//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out dig_gen.go
 
 func InitApp() func(context.Context) error {
     return dig.Build(
@@ -233,7 +236,7 @@ Branching works **inside** closures (runtime). For compile‑time selection, use
 ### 6. Observability
 Run `digen -debug` to inject `Logf` calls. Override at runtime:
 ```go
-var Logf = log.Printf   // defined in di_gen.go
+var Logf = log.Printf   // defined in dig_gen.go
 func main() { Logf = myLogger.Printf }
 ```
 
@@ -241,7 +244,10 @@ func main() { Logf = myLogger.Printf }
 `-unused=error|ignore|drop` (default `error`).
 
 ### 8. Package Aliases
-`-alias=full|short|obfuscated` controls generated import aliases.
+`-alias=full|short|obfuscated|numeric` controls generated import aliases. Use `-debug-aliases` to print the resolved per-package alias mapping during generation.
+
+### 9. Closure Inlining
+`-inline` inlines simple provider/invoke closures as IIFEs instead of generating named package-level functions. Identity closures (`func(p T) T { return p }`, `func(p *T) T { return *p }`, `func(p T) *T { return &p }`, and direct type-conversion closures) collapse to a single inline expression.
 
 ---
 
@@ -249,10 +255,12 @@ func main() { Logf = myLogger.Printf }
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-out` | `di_gen.go` | Output filename (ignored in `./...` mode) |
+| `-out` | `dig_gen.go` | Output filename (ignored in `./...` mode) |
 | `-unused` | `error` | Policy for unused providers |
 | `-debug` | `false` | Enable debug logging (detailed errors are always shown since v1.0.13) |
-| `-alias` | `full` | Import alias strategy |
+| `-debug-aliases` | `false` | Print the resolved per-package import alias mapping (v1.0.14+) |
+| `-alias` | `full` | Import alias strategy: `full` / `short` / `obfuscated` / `numeric` |
+| `-inline` | `false` | Inline simple closures as IIFEs; identity closures collapse to a type conversion (v1.0.14+) |
 | `-version` | `false` | Print version information and exit (v1.0.13+) |
 
 ---

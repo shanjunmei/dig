@@ -107,7 +107,7 @@ dig 内核不会强制目录结构、文件命名、Viper 配置、垂直领域�
 3. 最低 Go 版本：Go 1.21+
 4. 安装脚本
 ```bash
-go get github.com/shanjunmei/dig@v1.0.13
+go get github.com/shanjunmei/dig@v1.0.14
 go install github.com/shanjunmei/dig/cmd/digen@latest
 # 工业栈依赖
 go get github.com/spf13/viper
@@ -542,10 +542,13 @@ func Module() dig.Option {
 ### 2.4 digen 命令行参数说明
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `-out` | di_gen.go | 生成DI代码文件名，执行 `digen ./...` 时不生效 |
+| `-out` | dig_gen.go | 生成DI代码文件名，执行 `digen ./...` 时不生效 |
 | `-unused` | error | 未使用提供器策略：error / ignore / drop |
-| `-debug` | false | 在生成代码中注入可覆写的全局调试日志 Logf |
-| `-alias` | full | 导入别名模式：完整路径 / 短别名 / 混淆 |
+| `-debug` | false | 在生成代码中注入可覆写的全局调试日志 Logf（v1.0.13 起详细错误始终显示） |
+| `-debug-aliases` | false | 生成时打印每个包解析后的导入别名映射（v1.0.14+） |
+| `-alias` | full | 导入别名模式：完整路径 / 短别名 / 混淆 / 数字别名 |
+| `-inline` | false | 将简单闭包内联为 IIFE；身份闭包塌缩为类型转换（v1.0.14+） |
+| `-version` | false | 打印版本信息并退出（v1.0.13+） |
 
 ### 2.5 三款Go DI框架对比（更新配置注入部分）
 1. Uber Fx：运行时反射，启动慢，缺失依赖运行时报错，额外运行时框架开销；极易滥用全局配置单例，需要手动层层传递配置

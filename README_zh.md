@@ -13,9 +13,10 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **当前版本**：v1.0.13
+> **当前版本**：v1.0.14
 >
 > **关键版本变更**：
+> - **v1.0.14**：闭包内联（`-inline`）、身份闭包优化（直接类型转换替代包装函数）、跨包别名隔离（`digen ./...` 与 `digen ./<pkg>` 输出一致）、生成代码正确使用 context 别名、所有错误消息含源码位置（`file:line:col`）、新增 `-debug-aliases` 诊断参数
 > - **v1.0.13**：版本信息系统（`-version`）、Mage 构建支持、Provide 闭包签名校验、结构化错误替换 panic、带 `💡 Fix:` 的可操作错误消息
 > - **v1.0.11**：新增命名多实例注入，修复包别名解析问题（如 `go-redis/v9`）
 > - **v1.0.5**：`InitApp()` 返回 `func(context.Context) error`，生成的代码零运行时依赖
@@ -44,8 +45,10 @@ Go 的依赖注入工具分为两大阵营：
 - **零运行时反射与零运行时依赖** – 生成的代码是纯 Go，不导入任何额外包。
 - **极简 API** – 仅需 `Build`、`Provide`、`Supply`、`Invoke`、`Module`。
 - **闭包捕获安全** – 内联闭包不能捕获 `InitApp` 中的局部变量，由生成器强制检查。
+- **闭包内联**（`-inline`）– 将简单闭包内联为立即调用函数表达式（IIFE），减少生成的函数数量；身份闭包（`func(p T) T { return p }`）塌缩为一次直接类型转换。
 - **泛型支持** – 原生支持泛型函数和类型。
 - **可观测性** – 支持调试日志，运行时可通过 `Logf` 覆盖。
+- **可操作错误** – 所有错误消息包含源码位置（`file:line:col`）与 `💡 Fix:` 修复建议（v1.0.13 引入，v1.0.14 扩展）。
 - **未使用提供者策略** – `error`（默认）、`ignore` 或 `drop`。
 - **模块嵌套** – 支持层次化组合模块，内置重复检测。
 - **命名实例注入** – 通过参数名区分同一类型的多个实例（详见下文）。
@@ -55,7 +58,7 @@ Go 的依赖注入工具分为两大阵营：
 ## 安装
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.13
+go get github.com/shanjunmei/dig@v1.0.14
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 要求 Go 1.21+。
@@ -81,7 +84,7 @@ import (
     "github.com/shanjunmei/dig"
 )
 
-//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out di_gen.go
+//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out dig_gen.go
 
 func InitApp() func(context.Context) error {
     return dig.Build(
@@ -234,7 +237,7 @@ dig.Invoke(Process[string])
 ### 6. 可观测性
 运行 `digen -debug` 以注入 `Logf` 调用。运行时覆盖：
 ```go
-var Logf = log.Printf   // 定义在 di_gen.go 中
+var Logf = log.Printf   // 定义在 dig_gen.go 中
 func main() { Logf = myLogger.Printf }
 ```
 
@@ -242,7 +245,10 @@ func main() { Logf = myLogger.Printf }
 `-unused=error|ignore|drop`（默认为 `error`）。
 
 ### 8. 包别名策略
-`-alias=full|short|obfuscated` 控制生成的导入别名。
+`-alias=full|short|obfuscated|numeric` 控制生成的导入别名。使用 `-debug-aliases` 可在生成时打印每个包解析后的别名映射。
+
+### 9. 闭包内联
+`-inline` 将简单的 Provide/Invoke 闭包内联为 IIFE，而不是生成包级命名函数。身份闭包（`func(p T) T { return p }`、`func(p *T) T { return *p }`、`func(p T) *T { return &p }` 以及直接类型转换闭包）会塌缩为单行内联表达式。
 
 ---
 
@@ -250,10 +256,12 @@ func main() { Logf = myLogger.Printf }
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `-out` | `di_gen.go` | 输出文件名（在 `./...` 模式下忽略） |
+| `-out` | `dig_gen.go` | 输出文件名（在 `./...` 模式下忽略） |
 | `-unused` | `error` | 未使用提供者的处理策略 |
 | `-debug` | `false` | 启用调试日志（v1.0.13 起详细错误始终显示） |
-| `-alias` | `full` | 导入别名策略 |
+| `-debug-aliases` | `false` | 打印每个包解析后的导入别名映射（v1.0.14+） |
+| `-alias` | `full` | 导入别名策略：`full` / `short` / `obfuscated` / `numeric` |
+| `-inline` | `false` | 将简单闭包内联为 IIFE；身份闭包塌缩为类型转换（v1.0.14+） |
 | `-version` | `false` | 打印版本信息并退出（v1.0.13+） |
 
 ---
