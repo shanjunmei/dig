@@ -57,8 +57,32 @@ func dig_provider_7() *user.Store[string] {
 	return s
 }
 
-func dig_provider_8() *db.DB {
+func dig_provider_10() common.Config {
+	return common.Config{Addr: "127.0.0.1", Port: 9000}
+}
+
+func dig_provider_12() (closureDB *db.DB) {
+	return &db.DB{Name: "inmem", DSN: "mem://"}
+}
+
+func dig_provider_14() *db.DB {
 	return &db.DB{Name: "default", DSN: "postgres://default:5432/app"}
+}
+
+func dig_provider_8(primaryDB *db.DB) db.Pinger {
+	return primaryDB
+}
+
+func dig_provider_9(primaryDB *db.DB) any {
+	return any(primaryDB)
+}
+
+func dig_provider_11(cfg common.Config) (setupCfg *common.Config) {
+	return &cfg
+}
+
+func dig_provider_13(closureDB *db.DB) db.DB {
+	return *closureDB
 }
 
 func dig_invoke_1(r *repository.Repository[string]) {
@@ -100,7 +124,17 @@ func dig_invoke_8(primaryDB *db.DB, userRedis *db.RedisClient) {
 	userRedis.Ping()
 }
 
-func dig_invoke_9(s *user.Store[string], cfg *common.Config) {
+func dig_invoke_9(pinger db.Pinger, raw any, setupCfg *common.Config, dbVal db.DB, closureDB *db.DB) {
+	pinger.Ping()
+	if d, ok := raw.(*db.DB); ok {
+		d.Ping()
+	}
+	_ = setupCfg.Port
+	_ = dbVal.Name
+	closureDB.Ping()
+}
+
+func dig_invoke_10(s *user.Store[string], cfg *common.Config) {
 	if cfg.Port > 8000 {
 		s.Add("high-port")
 	} else {
@@ -108,16 +142,16 @@ func dig_invoke_9(s *user.Store[string], cfg *common.Config) {
 	}
 }
 
-func dig_invoke_10(defaultDB *db.DB, primaryDB *db.DB, log *logger.Logger) {
+func dig_invoke_11(defaultDB *db.DB, primaryDB *db.DB, log *logger.Logger) {
 	log.Println("Edge: default DB =", defaultDB.Name, ", primary DB =", primaryDB.Name)
 }
 
-func dig_invoke_11(stringCache *cache.Cache[string], log *logger.Logger) {
+func dig_invoke_12(stringCache *cache.Cache[string], log *logger.Logger) {
 	stringCache.Set("edge", "boundary-test")
 	stringCache.Print()
 }
 
-func dig_invoke_12(cfg *common.Config, log *logger.Logger) error {
+func dig_invoke_13(cfg *common.Config, log *logger.Logger) error {
 	log.Println("Edge: port =", cfg.Port)
 	return nil
 }
@@ -148,8 +182,14 @@ func InitAppEdge(cfg *common.Config, log *logger.Logger) func(context.Context) e
 	v13 := dig_provider_5()
 	v14 := dig_provider_6()
 	v15 := dig_provider_7()
-	v16 := dig_provider_8()
-	v17 := role.NewServer(v5)
+	v16 := dig_provider_10()
+	v17 := dig_provider_12()
+	v18 := dig_provider_14()
+	v19 := role.NewServer(v5)
+	v20 := dig_provider_8(v11)
+	v21 := dig_provider_9(v11)
+	v22 := dig_provider_11(v16)
+	v23 := dig_provider_13(v17)
 	return func(ctx context.Context) error {
 		dig_invoke_1(v3)
 		if err := user.ProcessStore[int](v2, v4); err != nil {
@@ -157,15 +197,16 @@ func InitAppEdge(cfg *common.Config, log *logger.Logger) func(context.Context) e
 		}
 		dig_invoke_2(v6)
 		dig_invoke_3(v7)
-		dig_invoke_4(v17)
+		dig_invoke_4(v19)
 		dig_invoke_5(v8, v9)
 		dig_invoke_6(v11, v13)
 		dig_invoke_7(v12, v14)
 		dig_invoke_8(v11, v13)
-		dig_invoke_9(v15, v0)
-		dig_invoke_10(v16, v11, v1)
-		dig_invoke_11(v8, v1)
-		if err := dig_invoke_12(v0, v1); err != nil {
+		dig_invoke_9(v20, v21, v22, v23, v17)
+		dig_invoke_10(v15, v0)
+		dig_invoke_11(v18, v11, v1)
+		dig_invoke_12(v8, v1)
+		if err := dig_invoke_13(v0, v1); err != nil {
 			return err
 		}
 		return nil

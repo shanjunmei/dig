@@ -9,5 +9,5 @@ type Config struct {
 	DebugAliases   bool   // 打印每个包的 import alias 映射
 	AliasType      string // 例如 "full", "short", "obfuscated", "numeric"
 	Paths          []string
-	InlineClosures bool   // Phase 3: inline simple closures as IIFE
+	InlineClosures bool // Phase 3: inline simple closures as IIFE
 }

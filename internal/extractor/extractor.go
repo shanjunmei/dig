@@ -7,6 +7,7 @@ import (
 	"go/constant"
 	"go/parser"
 	"go/printer"
+	"go/token"
 	"go/types"
 	"os"
 	"path/filepath"
@@ -80,8 +81,10 @@ type extractedItem struct {
 	// ---------- 新增字段 ----------
 	InstanceName string // 实例名称（命名返回值或 Supply 表达式名称）
 
-	IsIdentityClosure  bool   // Phase 4: identity closure (func(param) T { return param })
+	IsIdentityClosure  bool // Phase 4: identity closure (func(param) T { return param })
+	IdentityOp         model.OpKind
 	IdentityTargetType string // Phase 4: target type for identity conversion
+	IdentityTargetPkg  string // Phase 4: 返回类型所在包路径，用于合并到 UsedPkgs
 }
 
 // findModuleRoot 向上查找 go.mod 所在目录
@@ -470,8 +473,8 @@ func (e *Extractor) getRequiredInstanceName(arg ExtractedArg) string {
 
 // ---------- handleSupply 修改 ----------
 func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error {
+	pos := curPkg.Fset.Position(expr.Pos())
 	if e.isDigOptionCall(expr, curPkg.TypesInfo) {
-		pos := curPkg.Fset.Position(expr.Pos())
 		return fmt.Errorf("at %s: dig.Supply cannot accept another Option as argument; only dig.Module can nest Options", pos)
 	}
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
@@ -483,7 +486,7 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 	alias := e.aliasManager.CollectPkgAlias(curPkg)
 	typ := curPkg.TypesInfo.TypeOf(expr)
 	if typ == nil {
-		return fmt.Errorf("resolve supply type failed")
+		return fmt.Errorf("at %s: resolve supply type failed", pos)
 	}
 	retType := e.getTypeFullName(typ)
 	usedPkgs := e.collectUsedPkgsFromExpr(expr, curPkg.TypesInfo)
@@ -497,7 +500,6 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 	item.UsedPkgs = usedPkgs
 	item.InstanceName = instanceName
 
-	pos := curPkg.Fset.Position(expr.Pos())
 	relPath := e.relPath(pos.Filename)
 	sourceComment := e.ConditionalDebugf(func() bool { return true }, "// supply from %s at %s:%d", curPkg.PkgPath, relPath, pos.Line)
 	item.SourceComment = sourceComment
@@ -775,8 +777,18 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	if err != nil {
 		return err
 	}
+	// 4a. 提取命名返回值（必须在重复检查之前完成，以构建正确的键）
+	instanceName := e.extractNamedReturn(sig)
 	if retType != "" {
-		if _, dup := e.globalProviderMap[retType]; dup {
+		// 构建与 registerClosureProvider 一致的键格式：默认实例用 retType，命名实例用 retType:instanceName
+		key := retType
+		if instanceName != "" {
+			key = retType + ":" + instanceName
+		}
+		if _, dup := e.globalProviderMap[key]; dup {
+			if instanceName != "" {
+				return fmt.Errorf("duplicate binding for %s with name %q", retType, instanceName)
+			}
 			return fmt.Errorf("duplicate provide for type %q", retType)
 		}
 	}
@@ -806,11 +818,21 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 		item.ShouldInline = analyzeClosureInlinability(funcLit, freeVars, freeVarIsConst)
 
 		// Phase 4: Analyze identity closure (takes priority over regular inlining)
-		if retTypeExpr := analyzeIdentityClosure(funcLit, freeVars); retTypeExpr != nil {
+		if retTypeExpr, opType := analyzeIdentityClosure(funcLit, freeVars); retTypeExpr != nil {
 			typeObj := curPkg.TypesInfo.TypeOf(retTypeExpr)
+			// 先确保返回类型所在包的别名已生成（buildClosureDef 中的 EnsureAlias 此时未执行），
+			// 否则 replacePkgPathWithAlias 找不到匹配项，会把包路径原样保留，
+			// 生成代码时 "hermes/internal/types.Agent" 会被解析为除法运算符序列
+			var retPkgPath string
+			if retPkg := e.typePkg(typeObj); retPkg != nil && retPkg.Path() != e.mainPkgPath {
+				retPkgPath = retPkg.Path()
+				e.aliasManager.EnsureAlias(retPkgPath)
+			}
 			targetType := e.replacePkgPathWithAlias(e.getTypeFullName(typeObj))
 			item.IsIdentityClosure = true
 			item.IdentityTargetType = targetType
+			item.IdentityTargetPkg = retPkgPath
+			item.IdentityOp = opType
 			item.ShouldInline = false // Will use direct type conversion instead of IIFE
 		}
 	}
@@ -818,7 +840,7 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	if retType != "" {
 		item.RetType = retType
 	}
-	item.InstanceName = e.extractNamedReturn(sig)
+	item.InstanceName = instanceName // 已在 4a 步骤提取
 
 	// 设置位置信息
 	pos := curPkg.Fset.Position(funcLit.Pos())
@@ -993,71 +1015,84 @@ func analyzeClosureInlinability(funcLit *ast.FuncLit, freeVars []*ast.Ident, isC
 	return true
 }
 
-// analyzeIdentityClosure detects if a closure is an identity conversion:
-//
-//	func(param T1) T2 { return param }
-//
-// This is a common DI pattern where a provider returns a concrete type
-// (e.g., *SQLiteStore) but the consumer needs an interface type (e.g., Store).
-// We can replace this with a direct type conversion: T2(param).
-// Returns the return type AST expr if it's an identity closure, nil otherwise.
-// The caller must use the types.Info to resolve the AST expr to a proper type string.
-func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident) ast.Expr {
-	// Must have exactly one parameter (the one being converted)
+// analyzeIdentityClosure 分析函数字面量是否为身份闭包。
+// 返回值：(返回值类型 ast.Expr, 操作类型 OpKind)
+// 如果不匹配，返回 (nil, "")
+// 注意：此函数不修改任何外部状态，仅分析并返回信息。
+func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident) (ast.Expr, model.OpKind) {
+	// 1. 参数检查：必须恰好一个参数
 	if funcLit.Type.Params == nil || len(funcLit.Type.Params.List) != 1 {
-		return nil
+		return nil, ""
 	}
-
-	// Must have exactly one return value (no error return)
+	// 2. 返回值检查：必须恰好一个返回值
 	if funcLit.Type.Results == nil || len(funcLit.Type.Results.List) != 1 {
-		return nil
+		return nil, ""
 	}
-
-	// Must have exactly one statement in body
+	// 3. 函数体必须只有一条 return 语句
 	if len(funcLit.Body.List) != 1 {
-		return nil
+		return nil, ""
 	}
-
-	// That statement must be a return statement
 	retStmt, ok := funcLit.Body.List[0].(*ast.ReturnStmt)
-	if !ok {
-		return nil
+	if !ok || len(retStmt.Results) != 1 {
+		return nil, ""
 	}
 
-	// Must return exactly one expression
-	if len(retStmt.Results) != 1 {
-		return nil
-	}
-
-	// That expression must be a simple identifier referencing the parameter
-	ident, ok := retStmt.Results[0].(*ast.Ident)
-	if !ok {
-		return nil
-	}
-
-	// Get the parameter name
+	// 4. 获取参数名
 	param := funcLit.Type.Params.List[0]
 	if len(param.Names) != 1 {
-		return nil
+		return nil, ""
 	}
+	paramName := param.Names[0].Name
 
-	// The returned ident must be the same as the parameter name
-	if ident.Name != param.Names[0].Name {
-		return nil
-	}
-
-	// No free variables allowed (pure identity, no captures)
-	if len(freeVars) > 0 {
-		return nil
-	}
-
-	// Return the AST expression for the return type
+	// 5. 获取返回值类型表达式（用于返回）
 	retTypeField := funcLit.Type.Results.List[0]
 	if retTypeField == nil {
-		return nil
+		return nil, ""
 	}
 
-	return retTypeField.Type
+	// 6. 分析返回表达式，确定操作类型
+	expr := retStmt.Results[0]
+	var op model.OpKind
+
+	switch e := expr.(type) {
+	case *ast.Ident:
+		if e.Name == paramName {
+			op = model.OpDirect
+		}
+	case *ast.UnaryExpr:
+		if e.Op == token.AND {
+			if ident, ok := e.X.(*ast.Ident); ok && ident.Name == paramName {
+				op = model.OpAddr
+			}
+		} else if e.Op == token.MUL {
+			if ident, ok := e.X.(*ast.Ident); ok && ident.Name == paramName {
+				op = model.OpDeref
+			}
+		}
+	case *ast.StarExpr:
+		// Go 解析器在某些上下文中将表达式 *x 表示为 StarExpr（与指针类型表示相同）
+		// 这里兜底处理，确保解引用闭包检测正常工作
+		if ident, ok := e.X.(*ast.Ident); ok && ident.Name == paramName {
+			op = model.OpDeref
+		}
+	case *ast.CallExpr:
+		if len(e.Args) == 1 {
+			if ident, ok := e.Args[0].(*ast.Ident); ok && ident.Name == paramName {
+				op = model.OpConvert
+			}
+		}
+	}
+	if op == "" {
+		return nil, ""
+	}
+
+	// 7. 检查自由变量：不允许任何外部捕获
+	if len(freeVars) > 0 {
+		return nil, ""
+	}
+
+	// 8. 匹配成功，返回类型表达式和操作类型
+	return retTypeField.Type, op
 }
 
 func (e *Extractor) collectUsedPkgsFromExpr(expr ast.Expr, info *types.Info) []string {
@@ -1849,6 +1884,7 @@ func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) (model.
 	node.ShouldInline = it.ShouldInline
 	node.IsIdentityClosure = it.IsIdentityClosure
 	node.IdentityTargetType = it.IdentityTargetType
+	node.IdentityOp = it.IdentityOp
 	node.Func = it.FuncName
 	node.FuncPkg = it.PkgAlias
 	if it.IsClosure {
@@ -1858,6 +1894,18 @@ func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) (model.
 			return model.Node{}, fmt.Errorf("generate closure definition: %w", err)
 		}
 		node.ClosureDef = closureDef
+		if it.IdentityTargetPkg != "" {
+			found := false
+			for _, p := range usedPkgs {
+				if p == it.IdentityTargetPkg {
+					found = true
+					break
+				}
+			}
+			if !found {
+				usedPkgs = append(usedPkgs, it.IdentityTargetPkg)
+			}
+		}
 		node.UsedPkgs = usedPkgs
 	}
 	return node, nil
@@ -2180,6 +2228,7 @@ func (e *Extractor) buildProviderNode(it extractedItem, argNames []string, name 
 	node.ShouldInline = it.ShouldInline
 	node.IsIdentityClosure = it.IsIdentityClosure
 	node.IdentityTargetType = it.IdentityTargetType
+	node.IdentityOp = it.IdentityOp
 	node.Func = it.FuncName
 	node.FuncPkg = it.PkgAlias
 	if it.IsClosure {
@@ -2189,6 +2238,21 @@ func (e *Extractor) buildProviderNode(it extractedItem, argNames []string, name 
 			return model.Node{}, fmt.Errorf("generate closure definition: %w", err)
 		}
 		node.ClosureDef = closureDef
+		// 身份闭包的目标类型所在包不会出现在 closureDef 的 usedPkgs 中（因为跳过了 generateClosureDef
+		// 对返回类型的解析实际上会出现，但 OpAddr/OpDeref 情况下 retType=*/&T 与 closureDef 返回
+		// 类型相同，为保险起见仍主动合并 IdentityTargetPkg）
+		if it.IdentityTargetPkg != "" {
+			found := false
+			for _, p := range usedPkgs {
+				if p == it.IdentityTargetPkg {
+					found = true
+					break
+				}
+			}
+			if !found {
+				usedPkgs = append(usedPkgs, it.IdentityTargetPkg)
+			}
+		}
 		node.UsedPkgs = usedPkgs
 	}
 	return node, nil

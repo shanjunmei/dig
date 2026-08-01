@@ -2,6 +2,10 @@ package db
 
 import "fmt"
 
+type Pinger interface {
+	Ping()
+}
+
 type DB struct {
 	Name string
 	DSN  string

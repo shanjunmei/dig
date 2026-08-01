@@ -25,6 +25,16 @@ func (m UnusedMode) String() string {
 	}
 }
 
+// OpKind 定义闭包操作类型
+type OpKind string
+
+const (
+	OpDirect  OpKind = "direct"  // 直接返回参数：x
+	OpAddr    OpKind = "addr"    // 取地址：&x
+	OpDeref   OpKind = "deref"   // 解引用：*x
+	OpConvert OpKind = "convert" // 类型转换：T(x)
+)
+
 type GenTarget struct {
 	FuncName string
 	Node     *ast.FuncDecl
@@ -56,8 +66,9 @@ type Node struct {
 
 	Comment string
 
-	ShouldInline       bool   // Phase 3: inline closure as IIFE instead of named function
-	IsIdentityClosure  bool   // Phase 4: identity closure (func(param) T { return param })
+	ShouldInline       bool // Phase 3: inline closure as IIFE instead of named function
+	IsIdentityClosure  bool // Phase 4: identity closure (func(param) T { return param })
+	IdentityOp         OpKind
 	IdentityTargetType string // Phase 4: target type for identity conversion
 }
 

@@ -290,19 +290,24 @@ func buildIIFECall(node model.Node) string {
 	return "func" + def[paramsStart:]
 }
 
-// buildIdentityConversion generates a type conversion expression for identity closures.
-// Identity closure: func(param T1) T2 { return param }
-// Converts to: T2(param)
+// buildIdentityConversion 根据 node 中的信息生成内联表达式字符串
+// ctxParamName 是调用上下文中的变量名（即实参表达式）
 func buildIdentityConversion(node model.Node, ctxParamName string) string {
 	if !node.IsIdentityClosure {
 		return ""
 	}
-	// Get the first (and only) arg - it's the param being converted
-	args := buildCallArgs(node, ctxParamName)
-	if len(args) != 1 {
+	switch node.IdentityOp {
+	case model.OpDirect:
+		return fmt.Sprintf("%s(%s)", node.IdentityTargetType, ctxParamName)
+	case model.OpAddr:
+		return fmt.Sprintf("&%s", ctxParamName)
+	case model.OpDeref:
+		return fmt.Sprintf("*%s", ctxParamName)
+	case model.OpConvert:
+		return fmt.Sprintf("%s(%s)", node.IdentityTargetType, ctxParamName)
+	default:
 		return ""
 	}
-	return fmt.Sprintf("%s(%s)", node.IdentityTargetType, args[0])
 }
 
 // buildCallArgs builds the argument list for a function call from node.Args.
@@ -347,7 +352,12 @@ func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool
 
 	// Phase 4: Identity closure - use direct type conversion
 	if node.IsIdentityClosure {
-		conversion := buildIdentityConversion(node, ctxParamName)
+		identityArgs := buildCallArgs(node, ctxParamName)
+		identityParam := ctxParamName
+		if len(identityArgs) > 0 {
+			identityParam = identityArgs[0]
+		}
+		conversion := buildIdentityConversion(node, identityParam)
 		g.emitLog(buf, "[PROVIDE] identity conversion: %s -> %s", strconv.Quote(logName), node.IdentityTargetType)
 		if blank {
 			fmt.Fprintf(buf, "_ = %s\n", conversion)
@@ -424,7 +434,12 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node, ctxParam
 
 		// Phase 4: Identity closure - use direct type conversion
 		if node.IsIdentityClosure {
-			conversion := buildIdentityConversion(node, ctxParamName)
+			identityArgs := buildCallArgs(node, ctxParamName)
+			identityParam := ctxParamName
+			if len(identityArgs) > 0 {
+				identityParam = identityArgs[0]
+			}
+			conversion := buildIdentityConversion(node, identityParam)
 			g.emitLog(buf, "[INVOKE] identity conversion: %s -> %s", strconv.Quote(logName), node.IdentityTargetType)
 			if node.HasError {
 				fmt.Fprintf(buf, "if err := %s; err != nil {\n", conversion)
