@@ -267,25 +267,78 @@ func main() { Logf = myLogger.Printf }
 
 ## Comparison Matrix
 
+### Architecture & Approach
+
 | Feature | dig | Google Wire | Uber Fx |
 |---------|-----|-------------|---------|
 | **Approach** | Code generation | Code generation | Runtime reflection |
+| Codegen step required | ✅ `digen` | ✅ `wire` CLI | ❌ |
 | Zero reflection | ✅ | ✅ | ❌ |
-| Zero runtime dependency | ✅ | ✅ | ❌ (needs fx runtime) |
-| Validation timing | Generation | Generation | Runtime (panic) |
-| **Direct value injection** | ✅ `dig.Supply` (any expr) | ⚠️ `wire.Value` (const‑only, verbose) | ✅ `fx.Supply` |
-| Closure capture safety | ✅ enforced | ❌ (silently breaks) | N/A |
-| Built‑in `Invoke` | ✅ | ❌ | ✅ |
-| Module definition | `func Module() dig.Option` | `var Set = wire.NewSet(...)` | `fx.Module("name", ...)` |
-| Module nesting | ✅ explicit | ⚠️ set composition (flat) | ✅ explicit, with naming |
-| Generic support | ✅ compile‑time | ⚠️ explicit, messy | ✅ reflection |
-| Unused provider policies | 3 modes | only `drop` | N/A |
-| Debug logging | ✅ (runtime override) | ❌ manual | ⚠️ tracing (not debug) |
-| API ergonomics | Fx‑style, minimal | Wire‑style, verbose & counter‑intuitive | Fx‑style, minimal |
-| **Multiple instances of same type** | ✅ **Named parameters** | ❌ Not supported (must use wrapper types) | ✅ **Value Groups** |
-| Refactoring friendliness | High (static checks) | Low (cryptic errors) | Medium (runtime errors) |
+| Zero runtime dependency | ✅ | ✅ | ❌ (requires `fx` + `dig` runtime) |
+| Validation timing | Generation time | Generation time | Runtime (`fx.New` / `fx.ValidateApp`) |
+| Provider initialization | Eager (at `InitApp` call) | Eager (in generated injector) | Lazy (only if consumed) |
+| Binary size impact | Minimal | Minimal | Moderate (`fx` + `dig` + `multierr`) |
 
-> **Wire specifics**: `wire.Build` requires dummy `return nil, nil`; `wire.Value` only works with constants; `wire.NewSet` composition is flat, not nested.
+### API Design
+
+| Feature | dig | Google Wire | Uber Fx |
+|---------|-----|-------------|---------|
+| Core API surface | 5 (`Build`/`Provide`/`Supply`/`Invoke`/`Module`) | 7 (`Build`/`NewSet`/`Value`/`InterfaceValue`/`Bind`/`Struct`/`FieldsOf`) | 15+ (`Provide`/`Supply`/`Invoke`/`Module`/`Annotate`/`Annotated`/`Decorate`/`Replace`/`WithLogger`/…) |
+| **Direct value injection** | ✅ `dig.Supply` (any expr) | ⚠️ `wire.Value` (no fn calls / channel recv) | ✅ `fx.Supply` (concrete only; interface needs `fx.As`) |
+| Built‑in `Invoke` | ✅ | ❌ | ✅ |
+| Module definition | `dig.Module(...Option)` | `var Set = wire.NewSet(...)` | `fx.Module("name", ...)` |
+| Module nesting | ✅ explicit | ⚠️ flat set composition | ✅ explicit, named |
+| Module naming required | ❌ | N/A | ✅ |
+| Module scoping (private providers) | ❌ | ❌ | ✅ `fx.Private` |
+| Interface binding | via identity closure (e.g. `func(p *Impl) Iface { return p }`, inlined to a conversion) | ✅ explicit `wire.Bind(new(Iface), new(*Impl))` | ✅ `fx.Annotate(NewImpl, fx.As(new(Iface)))` |
+| Struct field injection | ❌ | ✅ `wire.Struct` | ❌ (use a constructor) |
+| Struct field extraction | ❌ | ✅ `wire.FieldsOf` | ❌ |
+| **Multiple instances of same type** | ✅ **Named parameters** | ❌ (must use wrapper types) | ✅ **Named + Value Groups** |
+| Value groups (collections of same type) | ❌ | ❌ | ✅ `group:"name"` (with `flatten` / `soft`) |
+| Optional dependencies | ❌ | ❌ | ✅ `optional:"true"` |
+| Cleanup functions | ❌ | ✅ 2nd return `func()`, ordering guaranteed | ✅ via `OnStop` hooks |
+| Lifecycle hooks (OnStart / OnStop) | ❌ | ❌ | ✅ `fx.Lifecycle` |
+| Decorators (wrap / replace at runtime) | ❌ | ❌ | ✅ `fx.Decorate` / `fx.Replace` |
+| Generic support | ✅ compile‑time (explicit instantiation) | ❌ (must wrap each instantiation) | ⚠️ instantiated generics only; no generic API |
+| Closure capture safety | ✅ enforced by generator | N/A (functions only) | N/A |
+| API ergonomics | Fx‑style, minimal | Wire‑style, verbose & counter‑intuitive | Fx‑style, minimal |
+
+### Error Handling & Diagnostics
+
+| Feature | dig | Google Wire | Uber Fx |
+|---------|-----|-------------|---------|
+| Error propagation model | Provider errors `panic` (fail‑fast); Invoke errors returned | Provider `error` return, propagated through injector | `app.Err()`; failed start rolls back `OnStop` hooks |
+| Source location in errors | ✅ `file:line:col` on every error | ⚠️ provider / set name only | ⚠️ runtime stack trace |
+| Actionable fix suggestions | ✅ `💡 Fix:` on every error | ❌ | ❌ |
+| Unused provider policies | 3 modes (`error` / `ignore` / `drop`) | hard error only (no modes) | N/A (lazy; silently skipped) |
+| Validation without running | ✅ (generation = validation) | ✅ (generation = validation) | ✅ `fx.ValidateApp(opts)` |
+| Debug logging | ✅ runtime‑overridable `Logf` | ❌ manual | ✅ `fxevent` (Console / Zap / Slog) |
+| Graph visualization (DOT) | ❌ | ❌ | ✅ `fx.DotGraph` + `fx.VisualizeError` |
+| Testing helpers | ❌ | ❌ | ✅ `fxtest` package |
+
+### Runtime & Operations
+
+| Feature | dig | Google Wire | Uber Fx |
+|---------|-----|-------------|---------|
+| App lifecycle object | ❌ (returns bare `func(ctx) error`) | ❌ (returns generated value) | ✅ `*fx.App` (`Start` / `Stop` / `Done` / `Wait`) |
+| Signal handling (SIGINT / SIGTERM) | ❌ (caller's responsibility) | ❌ | ✅ built into `app.Run` |
+| Programmatic shutdown | ❌ | ❌ | ✅ `fx.Shutdowner` + `fx.ExitCode` |
+| Configurable start / stop timeouts | N/A | N/A | ✅ (default 15s) |
+
+### Project Status
+
+| Feature | dig | Google Wire | Uber Fx |
+|---------|-----|-------------|---------|
+| Maintenance status | ✅ active | ⚠️ **archived** (no longer maintained) | ✅ active |
+| Latest version | v1.0.14 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
+| Go version requirement | 1.21+ | standard | 1.21+ (for `slog` logger) |
+| Refactoring friendliness | High (static checks + source location) | Low (cryptic errors) | Medium (runtime errors) |
+
+> **Wire specifics**: `wire.Build` requires a dummy `return nil, nil` (or `panic(wire.Build(...))`); `wire.Value` forbids function calls and channel receives (not just constants, but close); `wire.NewSet` composition is flattened during analysis (no scoping / visibility barriers); the project is **archived** as of v0.7.0 — no new features or fixes will be accepted upstream; generics are not supported (must wrap each instantiation in a concrete provider).
+>
+> **Fx specifics**: richest feature set — full lifecycle (`OnStart`/`OnStop` in dependency order with reverse‑order teardown), decorators (`fx.Decorate`/`fx.Replace`), value groups with `flatten`/`soft` modes, `fx.Private` for module scoping, `fxtest` for testing, `fx.DotGraph` for visualization, and signal‑aware `app.Run` with `fx.Shutdowner`. The cost is runtime reflection (startup latency), runtime panics on wiring errors (mitigated by `fx.ValidateApp` in CI), and a hard dependency on the `fx` + `dig` runtime.
+>
+> **dig trade‑offs**: deliberately minimal — no lifecycle hooks, no cleanup functions, no decorators, no optional dependencies, no app object / signal handling. `InitApp()` returns a bare `func(context.Context) error`, so graceful shutdown is the caller's responsibility. In exchange: zero runtime overhead, compile‑time safety, source‑located errors with `💡 Fix:` suggestions, native generics, and the smallest API surface of the three.
 
 ---
 
@@ -294,11 +347,15 @@ func main() { Logf = myLogger.Printf }
 | Operation | dig | Wire | Fx |
 |-----------|-----|------|----|
 | Constructor | `dig.Provide(NewSvc)` | `wire.NewSet(NewSvc)` | `fx.Provide(NewSvc)` |
-| Value injection | `dig.Supply(val)` | `wire.Value(val)` (const‑only) | `fx.Supply(val)` |
+| Value injection | `dig.Supply(val)` | `wire.Value(val)` (no fn calls) | `fx.Supply(val)` |
 | Startup hook | `dig.Invoke(fn)` | not built‑in | `fx.Invoke(fn)` |
 | Module group | `dig.Module(a, b)` | `wire.NewSet(a, b)` | `fx.Module("name", a, b)` |
 | Build container | `dig.Build(...)` (returns runnable) | `wire.Build(...)` (dummy marker) | `fx.New(...)` |
 | Run | `run := InitApp(); run(ctx)` | call generated function | `app.Run(ctx)` |
+| Interface binding | `dig.Provide(func(p *Impl) Iface { return p })` | `wire.Bind(new(Iface), new(*Impl))` | `fx.Annotate(NewImpl, fx.As(new(Iface)))` |
+| Multiple instances | named return values + named params | not supported (wrapper types) | `fx.Annotated{Name:"x"}` / `group:"x"` |
+| Cleanup / teardown | not supported (caller manages) | provider returns `func()` | `fx.Lifecycle` `OnStop` hook |
+| Graceful shutdown | caller handles signals | caller handles signals | `app.Run` (SIGINT/SIGTERM) + `fx.Shutdowner` |
 
 ---
 

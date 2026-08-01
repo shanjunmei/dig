@@ -98,18 +98,30 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 |---------|-----|-------------|---------|
 | **Approach** | Code generation | Code generation | Runtime reflection |
 | Zero reflection | ✅ | ✅ | ❌ |
-| Zero runtime dependency | ✅ | ✅ | ❌ (needs fx runtime) |
-| Validation timing | Generation | Generation | Runtime (panic) |
-| Direct value injection | ✅ `dig.Supply` (any expr) | ⚠️ `wire.Value` (const-only) | ✅ `fx.Supply` |
-| Closure capture safety | ✅ enforced | ❌ silently breaks | N/A |
+| Zero runtime dependency | ✅ | ✅ | ❌ (needs fx + dig runtime) |
+| Validation timing | Generation | Generation | Runtime (`fx.New` / `fx.ValidateApp`) |
+| Direct value injection | ✅ `dig.Supply` (any expr) | ⚠️ `wire.Value` (no fn calls / channel recv) | ✅ `fx.Supply` (concrete only; interface needs `fx.As`) |
+| Closure capture safety | ✅ enforced | N/A (functions only) | N/A |
 | Built-in `Invoke` | ✅ | ❌ | ✅ |
-| Module definition | `func Module() dig.Option` | `var Set = wire.NewSet(...)` | `fx.Module("name", ...)` |
-| Module nesting | ✅ explicit | ⚠️ flat composition | ✅ explicit with naming |
-| Generic support | ✅ compile-time | ⚠️ cumbersome | ✅ reflection |
-| Unused provider policies | 3 modes | only `drop` | N/A |
-| Debug logging | ✅ (runtime override) | ❌ manual | ⚠️ tracing (not debug) |
-| API ergonomics | Fx-style, minimal | Wire-style, verbose | Fx-style, minimal |
-| **Multiple instances of same type** | ✅ **Named parameters** | ❌ Not supported (must use wrapper types) | ✅ **Value Groups** |
+| Module definition | `dig.Module(...Option)` | `var Set = wire.NewSet(...)` | `fx.Module("name", ...)` |
+| Module nesting | ✅ explicit | ⚠️ flat set composition | ✅ explicit, named |
+| Module scoping (private) | ❌ | ❌ | ✅ `fx.Private` |
+| Interface binding | identity closure (inlined to conversion) | ✅ `wire.Bind(new(Iface), new(*Impl))` | ✅ `fx.Annotate(NewImpl, fx.As(new(Iface)))` |
+| Generic support | ✅ compile-time (explicit instantiation) | ❌ (must wrap each instantiation) | ⚠️ instantiated generics only; no generic API |
+| Unused provider policies | 3 modes (`error`/`ignore`/`drop`) | hard error only (no modes) | N/A (lazy; silently skipped) |
+| Cleanup functions | ❌ | ✅ 2nd return `func()`, ordered | ✅ via `OnStop` hooks |
+| Lifecycle hooks (OnStart/OnStop) | ❌ | ❌ | ✅ `fx.Lifecycle` |
+| Decorators (wrap/replace) | ❌ | ❌ | ✅ `fx.Decorate` / `fx.Replace` |
+| Optional dependencies | ❌ | ❌ | ✅ `optional:"true"` |
+| **Multiple instances of same type** | ✅ **Named parameters** | ❌ Not supported (must use wrapper types) | ✅ **Named + Value Groups** |
+| Error source location | ✅ `file:line:col` on every error | ⚠️ provider/set name only | ⚠️ runtime stack trace |
+| Actionable fix suggestions | ✅ `💡 Fix:` on every error | ❌ | ❌ |
+| App lifecycle object | ❌ (returns bare `func(ctx) error`) | ❌ | ✅ `*fx.App` (Start/Stop/Wait) |
+| Signal handling (SIGINT/SIGTERM) | ❌ (caller's responsibility) | ❌ | ✅ built into `app.Run` |
+| Maintenance status | ✅ active | ⚠️ **archived** (v0.7.0, no longer maintained) | ✅ active (v1.24.0) |
+| API ergonomics | Fx-style, minimal | Wire-style, verbose & counter-intuitive | Fx-style, minimal |
+
+> **dig trade-offs**: deliberately minimal — no lifecycle hooks, no cleanup functions, no decorators, no optional dependencies, no app object/signal handling. `InitApp()` returns a bare `func(context.Context) error`; graceful shutdown is the caller's responsibility. In exchange: zero runtime overhead, compile-time safety, source-located errors with `💡 Fix:`, native generics, smallest API surface.
 
 ## 3. Output Standards by Scenario
 ### Scenario 1: Minimal runnable demo

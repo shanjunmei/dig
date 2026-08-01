@@ -268,25 +268,78 @@ func main() { Logf = myLogger.Printf }
 
 ## 对比矩阵
 
+### 架构与方法
+
 | 特性 | dig | Google Wire | Uber Fx |
 |------|-----|-------------|---------|
 | **方法** | 代码生成 | 代码生成 | 运行时反射 |
+| 需要代码生成步骤 | ✅ `digen` | ✅ `wire` CLI | ❌ |
 | 零反射 | ✅ | ✅ | ❌ |
-| 零运行时依赖 | ✅ | ✅ | ❌（需要 fx 运行时） |
-| 验证时机 | 生成时 | 生成时 | 运行时（panic） |
-| **直接值注入** | ✅ `dig.Supply`（任意表达式） | ⚠️ `wire.Value`（仅常量，繁琐） | ✅ `fx.Supply` |
-| 闭包捕获安全 | ✅ 强制检查 | ❌（静默出错） | N/A |
-| 内置 `Invoke` | ✅ | ❌ | ✅ |
-| 模块定义方式 | `func Module() dig.Option` | `var Set = wire.NewSet(...)` | `fx.Module("name", ...)` |
-| 模块嵌套 | ✅ 显式支持 | ⚠️ Set 组合（扁平） | ✅ 显式支持，带命名 |
-| 泛型支持 | ✅ 编译期 | ⚠️ 显式且繁琐 | ✅ 反射 |
-| 未使用提供者策略 | 3 种模式 | 仅 `drop` | N/A |
-| 调试日志 | ✅（运行时覆盖） | ❌ 手动 | ⚠️ 跟踪（非调试） |
-| API 友好度 | Fx 风格，极简 | Wire 风格，冗长且反直觉 | Fx 风格，极简 |
-| **相同类型的多个实例** | ✅ **命名参数** | ❌ 不支持（需用包装类型） | ✅ **值组 (Value Groups)** |
-| 重构友好度 | 高（静态检查） | 低（晦涩错误） | 中（运行时错误） |
+| 零运行时依赖 | ✅ | ✅ | ❌（依赖 `fx` + `dig` 运行时） |
+| 校验时机 | 生成期 | 生成期 | 运行时（`fx.New` / `fx.ValidateApp`） |
+| 提供者初始化 | 即时（调用 `InitApp` 时） | 即时（在生成的注入器中） | 惰性（仅在被消费时执行） |
+| 二进制体积影响 | 极小 | 极小 | 中等（`fx` + `dig` + `multierr`） |
 
-> **Wire 特别说明**：`wire.Build` 需要写一个哑 `return nil, nil`；`wire.Value` 仅支持常量；`wire.NewSet` 的组合是扁平的，非嵌套。
+### API 设计
+
+| 特性 | dig | Google Wire | Uber Fx |
+|------|-----|-------------|---------|
+| 核心 API 数量 | 5 个（`Build`/`Provide`/`Supply`/`Invoke`/`Module`） | 7 个（`Build`/`NewSet`/`Value`/`InterfaceValue`/`Bind`/`Struct`/`FieldsOf`） | 15+ 个（`Provide`/`Supply`/`Invoke`/`Module`/`Annotate`/`Annotated`/`Decorate`/`Replace`/`WithLogger`/…） |
+| **直接值注入** | ✅ `dig.Supply`（任意表达式） | ⚠️ `wire.Value`（禁止函数调用 / channel 接收） | ✅ `fx.Supply`（仅具体类型；接口需 `fx.As`） |
+| 内置 `Invoke` | ✅ | ❌ | ✅ |
+| 模块定义方式 | `dig.Module(...Option)` | `var Set = wire.NewSet(...)` | `fx.Module("name", ...)` |
+| 模块嵌套 | ✅ 显式支持 | ⚠️ Set 组合（扁平） | ✅ 显式支持，带命名 |
+| 模块是否必须命名 | ❌ | N/A | ✅ |
+| 模块作用域（私有提供者） | ❌ | ❌ | ✅ `fx.Private` |
+| 接口绑定 | 通过身份闭包（如 `func(p *Impl) Iface { return p }`，内联为类型转换） | ✅ 显式 `wire.Bind(new(Iface), new(*Impl))` | ✅ `fx.Annotate(NewImpl, fx.As(new(Iface)))` |
+| 结构体字段注入 | ❌ | ✅ `wire.Struct` | ❌（用构造函数） |
+| 结构体字段提取 | ❌ | ✅ `wire.FieldsOf` | ❌ |
+| **相同类型的多个实例** | ✅ **命名参数** | ❌（需用包装类型） | ✅ **命名 + 值组 (Value Groups)** |
+| 值组（同类型集合） | ❌ | ❌ | ✅ `group:"name"`（支持 `flatten` / `soft`） |
+| 可选依赖 | ❌ | ❌ | ✅ `optional:"true"` |
+| 清理函数 | ❌ | ✅ 第二返回值 `func()`，保证调用顺序 | ✅ 通过 `OnStop` 钩子 |
+| 生命周期钩子 (OnStart / OnStop) | ❌ | ❌ | ✅ `fx.Lifecycle` |
+| 装饰器（运行时包装 / 替换） | ❌ | ❌ | ✅ `fx.Decorate` / `fx.Replace` |
+| 泛型支持 | ✅ 编译期（需显式实例化） | ❌（必须为每个实例化写包装） | ⚠️ 仅已实例化的泛型；无泛型 API |
+| 闭包捕获安全 | ✅ 生成器强制检查 | N/A（仅支持函数） | N/A |
+| API 友好度 | Fx 风格，极简 | Wire 风格，冗长且反直觉 | Fx 风格，极简 |
+
+### 错误处理与诊断
+
+| 特性 | dig | Google Wire | Uber Fx |
+|------|-----|-------------|---------|
+| 错误传播模型 | 提供者错误 `panic`（快速失败）；Invoke 错误返回 | 提供者 `error` 返回值，经注入器传播 | `app.Err()`；启动失败回滚 `OnStop` 钩子 |
+| 错误含源码位置 | ✅ 每条错误均含 `file:line:col` | ⚠️ 仅提供者 / Set 名称 | ⚠️ 运行时堆栈 |
+| 可操作修复建议 | ✅ 每条错误均含 `💡 Fix:` | ❌ | ❌ |
+| 未使用提供者策略 | 3 种模式（`error` / `ignore` / `drop`） | 仅硬错误（无模式） | N/A（惰性；静默跳过） |
+| 不运行即可校验 | ✅（生成即校验） | ✅（生成即校验） | ✅ `fx.ValidateApp(opts)` |
+| 调试日志 | ✅ 运行时可覆盖 `Logf` | ❌ 手动 | ✅ `fxevent`（Console / Zap / Slog） |
+| 依赖图可视化 (DOT) | ❌ | ❌ | ✅ `fx.DotGraph` + `fx.VisualizeError` |
+| 测试辅助 | ❌ | ❌ | ✅ `fxtest` 包 |
+
+### 运行时与运维
+
+| 特性 | dig | Google Wire | Uber Fx |
+|------|-----|-------------|---------|
+| App 生命周期对象 | ❌（返回裸 `func(ctx) error`） | ❌（返回生成值） | ✅ `*fx.App`（`Start` / `Stop` / `Done` / `Wait`） |
+| 信号处理 (SIGINT / SIGTERM) | ❌（调用方负责） | ❌ | ✅ 内置于 `app.Run` |
+| 编程式关停 | ❌ | ❌ | ✅ `fx.Shutdowner` + `fx.ExitCode` |
+| 可配置启停超时 | N/A | N/A | ✅（默认 15s） |
+
+### 项目状态
+
+| 特性 | dig | Google Wire | Uber Fx |
+|------|-----|-------------|---------|
+| 维护状态 | ✅ 活跃 | ⚠️ **已归档**（不再维护） | ✅ 活跃 |
+| 最新版本 | v1.0.14 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
+| Go 版本要求 | 1.21+ | 标准 | 1.21+（用于 `slog` logger） |
+| 重构友好度 | 高（静态检查 + 源码位置） | 低（错误晦涩） | 中（运行时错误） |
+
+> **Wire 特别说明**：`wire.Build` 需要写一个哑 `return nil, nil`（或 `panic(wire.Build(...))`）；`wire.Value` 禁止函数调用与 channel 接收（不仅是常量，但接近）；`wire.NewSet` 在分析时被扁平化（无作用域 / 可见性边界）；项目自 v0.7.0 起**已归档**——上游不再接受任何新功能或修复；不支持泛型（必须为每个实例化编写具体提供者）。
+>
+> **Fx 特别说明**：功能最丰富——完整的生命周期（`OnStart`/`OnStop` 按依赖顺序执行、逆序销毁）、装饰器（`fx.Decorate`/`fx.Replace`）、支持 `flatten`/`soft` 模式的值组、`fx.Private` 模块作用域、`fxtest` 测试包、`fx.DotGraph` 可视化，以及感知信号的 `app.Run` 与 `fx.Shutdowner`。代价是运行时反射（启动延迟）、依赖错误在运行时 panic（可通过 CI 中的 `fx.ValidateApp` 缓解），以及对 `fx` + `dig` 运行时的硬依赖。
+>
+> **dig 取舍**：刻意保持极简——无生命周期钩子、无清理函数、无装饰器、无可选依赖、无 App 对象 / 信号处理。`InitApp()` 返回裸 `func(context.Context) error`，优雅关停由调用方负责。作为交换：零运行时开销、编译期安全、含源码位置与 `💡 Fix:` 建议的错误信息、原生泛型支持，以及三者中最小的 API 表面积。
 
 ---
 
@@ -295,11 +348,15 @@ func main() { Logf = myLogger.Printf }
 | 操作 | dig | Wire | Fx |
 |------|-----|------|----|
 | 构造函数 | `dig.Provide(NewSvc)` | `wire.NewSet(NewSvc)` | `fx.Provide(NewSvc)` |
-| 值注入 | `dig.Supply(val)` | `wire.Value(val)`（仅常量） | `fx.Supply(val)` |
+| 值注入 | `dig.Supply(val)` | `wire.Value(val)`（禁止函数调用） | `fx.Supply(val)` |
 | 启动钩子 | `dig.Invoke(fn)` | 不支持 | `fx.Invoke(fn)` |
 | 模块分组 | `dig.Module(a, b)` | `wire.NewSet(a, b)` | `fx.Module("name", a, b)` |
 | 构建容器 | `dig.Build(...)`（返回可执行函数） | `wire.Build(...)`（哑标记） | `fx.New(...)` |
 | 运行 | `run := InitApp(); run(ctx)` | 调用生成的函数 | `app.Run(ctx)` |
+| 接口绑定 | `dig.Provide(func(p *Impl) Iface { return p })` | `wire.Bind(new(Iface), new(*Impl))` | `fx.Annotate(NewImpl, fx.As(new(Iface)))` |
+| 多实例 | 命名返回值 + 命名参数 | 不支持（包装类型） | `fx.Annotated{Name:"x"}` / `group:"x"` |
+| 清理 / 销毁 | 不支持（调用方管理） | 提供者返回 `func()` | `fx.Lifecycle` 的 `OnStop` 钩子 |
+| 优雅关停 | 调用方处理信号 | 调用方处理信号 | `app.Run`（SIGINT/SIGTERM）+ `fx.Shutdowner` |
 
 ---
 
