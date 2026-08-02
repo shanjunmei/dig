@@ -1,7 +1,6 @@
 package extractor
 
 import (
-	"go/ast"
 	"sort"
 	"strings"
 
@@ -107,14 +106,11 @@ func (m *AliasManager) LoadImportAliases() {
 	// 1. 计算当前包的传递依赖闭包
 	closure := m.findTransitiveImportClosure()
 
-	// 2. 找出闭包内需要排除的包（其它 main 包 + 其它 dig.Build 包）
-	excludePkgPaths := m.findExcludedPackagesInClosure(closure)
-
-	// 3. 仅遍历闭包内的包，收集 import 别名
+	// 2. 仅遍历闭包内的包，收集 import 别名
 	for pkgPath := range closure {
-		if excludePkgPaths[pkgPath] {
+		/*if excludePkgPaths[pkgPath] {
 			continue
-		}
+		}*/
 		p := m.pkgMap[pkgPath]
 		if p == nil {
 			continue
@@ -151,8 +147,8 @@ func (m *AliasManager) LoadImportAliases() {
 		}
 	}
 
-	m.logger.Debugf("[alias] Package %s (closure: %d pkgs, excluded: %d):\n",
-		m.mainPkgPath, len(closure), len(excludePkgPaths))
+	m.logger.Debugf("[alias] Package %s (closure: %d pkgs,):\n",
+		m.mainPkgPath, len(closure))
 	for pkgPath, alias := range m.importAliasMap {
 		m.logger.Debugf("  %s -> %s\n", pkgPath, alias)
 	}
@@ -188,41 +184,6 @@ func (m *AliasManager) findTransitiveImportClosure() map[string]bool {
 		}
 	}
 	return closure
-}
-
-// findExcludedPackagesInClosure 在闭包内找出需要排除的包
-// 排除：其它 main 包 + 其它 dig.Build 包
-func (m *AliasManager) findExcludedPackagesInClosure(closure map[string]bool) map[string]bool {
-	exclude := make(map[string]bool)
-	for pkgPath := range closure {
-		if pkgPath == m.mainPkgPath {
-			continue
-		}
-		p := m.pkgMap[pkgPath]
-		if p == nil {
-			continue
-		}
-		if p.Name == "main" || containsDigBuild(p) {
-			exclude[pkgPath] = true
-		}
-	}
-	return exclude
-}
-
-// containsDigBuild 检查包中是否存在 dig.Build 调用
-func containsDigBuild(p *packages.Package) bool {
-	for _, f := range p.Syntax {
-		for _, decl := range f.Decls {
-			fnDecl, ok := decl.(*ast.FuncDecl)
-			if !ok || fnDecl.Body == nil {
-				continue
-			}
-			if FindDigCallInBlock(fnDecl.Body, p.TypesInfo, "Build") != nil {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // 查询方法
