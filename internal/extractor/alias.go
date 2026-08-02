@@ -1,11 +1,11 @@
 package extractor
 
 import (
-	"fmt"
 	"go/ast"
 	"sort"
 	"strings"
 
+	"github.com/shanjunmei/dig/internal/logger"
 	"github.com/shanjunmei/dig/pkg/alias"
 	"golang.org/x/tools/go/packages"
 )
@@ -17,10 +17,11 @@ type AliasManager struct {
 	pkgAliasMap    map[string]string
 	importAliasMap map[string]string
 	pkgNameMap     map[string]string
-	debug          bool
+
+	logger *logger.Logger
 }
 
-func NewAliasManager(mainPkgPath string, strategy alias.AliasStrategy, pkgMap map[string]*packages.Package, debug bool) *AliasManager {
+func NewAliasManager(mainPkgPath string, strategy alias.AliasStrategy, pkgMap map[string]*packages.Package, logger *logger.Logger) *AliasManager {
 	return &AliasManager{
 		mainPkgPath:    mainPkgPath,
 		strategy:       strategy,
@@ -28,7 +29,8 @@ func NewAliasManager(mainPkgPath string, strategy alias.AliasStrategy, pkgMap ma
 		pkgAliasMap:    make(map[string]string),
 		importAliasMap: make(map[string]string),
 		pkgNameMap:     make(map[string]string),
-		debug:          debug,
+
+		logger: logger,
 	}
 }
 
@@ -148,13 +150,13 @@ func (m *AliasManager) LoadImportAliases() {
 			m.importAliasMap[info.pkgPath] = info.alias
 		}
 	}
-	if m.debug {
-		fmt.Printf("[alias] Package %s (closure: %d pkgs, excluded: %d):\n",
-			m.mainPkgPath, len(closure), len(excludePkgPaths))
-		for pkgPath, alias := range m.importAliasMap {
-			fmt.Printf("  %s -> %s\n", pkgPath, alias)
-		}
+
+	m.logger.Debugf("[alias] Package %s (closure: %d pkgs, excluded: %d):\n",
+		m.mainPkgPath, len(closure), len(excludePkgPaths))
+	for pkgPath, alias := range m.importAliasMap {
+		m.logger.Debugf("  %s -> %s\n", pkgPath, alias)
 	}
+
 }
 
 // findTransitiveImportClosure 计算从当前包出发的传递依赖闭包

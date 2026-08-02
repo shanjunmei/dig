@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/shanjunmei/dig/internal/config"
+	"github.com/shanjunmei/dig/internal/logger"
 	"github.com/shanjunmei/dig/internal/model"
 	"github.com/shanjunmei/dig/pkg/alias"
 	"github.com/shanjunmei/dig/pkg/functional"
@@ -41,6 +42,7 @@ type Extractor struct {
 	provideIndex      int
 	moduleRoot        string
 	cfg               *config.Config
+	logger            *logger.Logger
 }
 
 // ---------- 新模型 ----------
@@ -114,7 +116,7 @@ func (e *Extractor) relPath(absPath string) string {
 }
 
 // NewExtractor 创建提取器
-func NewExtractor(cfg *config.Config, pkgMap map[string]*packages.Package, mainPkgPath string, strategy alias.AliasStrategy, startDir string) *Extractor {
+func NewExtractor(cfg *config.Config, pkgMap map[string]*packages.Package, mainPkgPath string, strategy alias.AliasStrategy, startDir string, logger *logger.Logger) *Extractor {
 	rootDir := findModuleRoot(startDir)
 	e := &Extractor{
 		cfg:               cfg,
@@ -122,12 +124,12 @@ func NewExtractor(cfg *config.Config, pkgMap map[string]*packages.Package, mainP
 		mainPkgPath:       mainPkgPath,
 		items:             []extractedItem{},
 		globalProviderMap: make(map[string]int),
-
-		typeStrCache: make(map[types.Type]string),
+		logger:            logger,
+		typeStrCache:      make(map[types.Type]string),
 
 		moduleRoot: rootDir,
 	}
-	e.aliasManager = NewAliasManager(mainPkgPath, strategy, pkgMap, cfg.DebugAliases)
+	e.aliasManager = NewAliasManager(mainPkgPath, strategy, pkgMap, logger)
 	e.aliasManager.LoadImportAliases()
 	return e
 }
