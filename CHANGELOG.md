@@ -9,6 +9,14 @@
 
 ## [未发布]
 
+### 修复
+- **类型包收集逻辑（核心健壮性修复）**：
+  - `collectUsedPkgsFromType` 的 `*types.Named` 分支错误遍历 `TypeParams()`（声明级类型参数，如 `T any`，无真实包路径），改为遍历 `TypeArgs()`（实例化类型实参，如 `*common.Config`），同时保留 `TypeParams()` 遍历以支持约束内跨包引用
+  - 不对 `*types.Named` 调用 `walk(t.Underlying())`：自引用类型（如 `type Node struct{ Next *Node }`）会导致无限递归栈溢出；struct 字段/方法签名中的跨包引用由 `collectTypeNameAndUsedPkgs` 的 AST 遍历覆盖
+  - 新增 `*types.Signature` 分支：函数/方法签名类型（如 provider 返回 `func(*common.Config) error`、invoke 参数为函数类型）此前不会被递归遍历，导致签名参数/返回值中的跨包引用无法被收集，生成的代码中出现 `func(*github.com/.../common.Config) error` 这种全路径未替换别名，编译失败；现遍历 `Recv`/`Params`/`Results`/`TypeParams` 约束，并依赖 `seen` 去重避免重复
+  - `addPkgToUsed` 从「`typePkg` 单值取顶层包」改为直接复用 `collectUsedPkgsFromType` 全树遍历，不再遗漏 Map 键/值、切片元素、泛型实参内嵌的跨包引用
+  - `generateClosureDef` 中 `allTypes` 循环同上，闭包参数/自由变量/返回类型不再仅靠 `typePkg` 取顶层包，而是全树收集所有跨包引用并逐个 `EnsureAlias`
+
 ### 移除
 - **`-debug-aliases` 独立诊断标志**：别名映射诊断输出统一并入 `-debug` 全局日志（`-debug` 开启时自动打印 `[alias]` 前缀的别名信息），不再提供独立 flag
 - **`findExcludedPackagesInClosure` 辅助函数**：BFS 传递闭包天然不包含「其它 main 包」和「其它含 dig.Build 的库包」（Go 禁止 import main 包，库包不会被重复 import），额外排除逻辑是死代码，已删除且不影响生成结果

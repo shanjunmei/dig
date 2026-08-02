@@ -9,6 +9,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 
 ## [Unreleased]
 
+### Fixed
+- **Type package collection logic (core robustness fix)**:
+  - `collectUsedPkgsFromType`: `*types.Named` branch incorrectly walked `TypeParams()` (declaration-level type params like `T any`, which have no real package path); now walks `TypeArgs()` (instantiation type args like `*common.Config`) while retaining `TypeParams()` walk for cross-package references inside constraints
+  - Does NOT call `walk(t.Underlying())` on `*types.Named`: self-referential types (e.g. `type Node struct{ Next *Node }`) cause infinite recursion / stack overflow; cross-package references in struct fields / method signatures are covered by `collectTypeNameAndUsedPkgs` AST traversal
+  - Added `*types.Signature` branch: function/method signature types (e.g. a provider returning `func(*common.Config) error`, or an invoke parameter being a function type) were previously not recursed into, so cross-package references inside signature params/results were not collected; generated code emitted full-path `func(*github.com/.../common.Config) error` instead of an alias, breaking compilation. Now walks `Recv`/`Params`/`Results`/`TypeParams` constraints, relying on `seen` for deduplication
+  - `addPkgToUsed` changed from "`typePkg` single-value top-level package" to directly reuse `collectUsedPkgsFromType` full tree walk; no longer misses cross-package references inside Map key/value, slice elements, or generic type arguments
+  - `allTypes` loop in `generateClosureDef` changed similarly: closure params / free vars / return types no longer rely on `typePkg` for only the top-level package; instead all cross-package references are tree-collected and `EnsureAlias`-ed individually
+
 ### Removed
 - **Standalone `-debug-aliases` diagnostic flag**: Alias mapping diagnostics are now unified under the global `-debug` log (prints `[alias]` prefixed alias info automatically when `-debug` is on); no separate flag is provided anymore
 - **`findExcludedPackagesInClosure` helper function**: The BFS transitive import closure naturally excludes "other main packages" and "other library packages containing `dig.Build`" (Go forbids importing main packages, and library packages are never imported twice); the extra exclusion logic was dead code, removed without affecting generated output

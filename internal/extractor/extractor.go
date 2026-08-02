@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -165,21 +166,10 @@ func (e *Extractor) extractConstLiteral(c *types.Const) string {
 	}
 }
 
-// addPkgToUsed 将类型所在的非主包添加到 usedPkgs 中
+// addPkgToUsed 将类型树上所有非主包路径添加到 usedPkgs
 func (e *Extractor) addPkgToUsed(typ types.Type, usedPkgs map[string]bool) {
-	switch t := typ.(type) {
-	case *types.Map:
-		// 分别处理键和值
-		if pkg := e.typePkg(t.Key()); pkg != nil && pkg.Path() != e.mainPkgPath {
-			usedPkgs[pkg.Path()] = true
-		}
-		if pkg := e.typePkg(t.Elem()); pkg != nil && pkg.Path() != e.mainPkgPath {
-			usedPkgs[pkg.Path()] = true
-		}
-	default:
-		if pkg := e.typePkg(t); pkg != nil && pkg.Path() != e.mainPkgPath {
-			usedPkgs[pkg.Path()] = true
-		}
+	for _, pkgPath := range e.collectUsedPkgsFromType(typ) {
+		usedPkgs[pkgPath] = true
 	}
 }
 
@@ -365,16 +355,45 @@ func (e *Extractor) collectUsedPkgsFromType(typ types.Type) []string {
 					pkgs = append(pkgs, pkg.Path())
 				}
 			}
+			// 实例化级：遍历类型实参（Cache[*common.Config] → 遍历 *common.Config）
+			if args := t.TypeArgs(); args != nil {
+				for t := range args.Types() {
+					walk(t)
+				}
+			}
+			// 声明级：遍历类型参数约束（泛型定义本身的约束里可能引用跨包）
 			if params := t.TypeParams(); params != nil {
 				for tparam := range params.TypeParams() {
 					walk(tparam)
 				}
 			}
+			// 注意：不调用 walk(t.Underlying())，因为自引用类型（如 type Node struct{ Next *Node }）
+			// 会导致无限递归。struct 字段/方法签名中的跨包引用由 collectTypeNameAndUsedPkgs
+			// 的 AST 遍历覆盖，不需要在此重复。
 		case *types.Pointer, *types.Slice, *types.Array, *types.Chan:
 			walk(t.(interface{ Elem() types.Type }).Elem())
 		case *types.Map:
 			walk(t.Key())
 			walk(t.Elem())
+		case *types.Signature:
+			// 函数/方法签名:遍历接收者、参数和返回值类型,收集其中的跨包引用
+			// 例如 func(*common.Config) error → 遍历 *common.Config 和 error
+			// Recv 通常与外层 *types.Named 相同,已被 seen 去重,遍历是安全的
+			if recv := t.Recv(); recv != nil {
+				walk(recv.Type())
+			}
+			for i := 0; i < t.Params().Len(); i++ {
+				walk(t.Params().At(i).Type())
+			}
+			for i := 0; i < t.Results().Len(); i++ {
+				walk(t.Results().At(i).Type())
+			}
+			// 泛型方法/函数的类型参数约束里可能引用跨包类型
+			if tparams := t.TypeParams(); tparams != nil {
+				for i := 0; i < tparams.Len(); i++ {
+					walk(tparams.At(i).Constraint())
+				}
+			}
 		case *types.Struct:
 			for field := range t.Fields() {
 				walk(field.Type())
@@ -1064,11 +1083,12 @@ func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident) (ast.Ex
 			op = model.OpDirect
 		}
 	case *ast.UnaryExpr:
-		if e.Op == token.AND {
+		switch e.Op {
+		case token.AND:
 			if ident, ok := e.X.(*ast.Ident); ok && ident.Name == paramName {
 				op = model.OpAddr
 			}
-		} else if e.Op == token.MUL {
+		case token.MUL:
 			if ident, ok := e.X.(*ast.Ident); ok && ident.Name == paramName {
 				op = model.OpDeref
 			}
@@ -1911,13 +1931,7 @@ func (e *Extractor) buildInvokeNode(it extractedItem, argNames []string) (model.
 		}
 		node.ClosureDef = closureDef
 		if it.IdentityTargetPkg != "" {
-			found := false
-			for _, p := range usedPkgs {
-				if p == it.IdentityTargetPkg {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(usedPkgs, it.IdentityTargetPkg)
 			if !found {
 				usedPkgs = append(usedPkgs, it.IdentityTargetPkg)
 			}
@@ -2125,9 +2139,9 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 
 	usedPkgs := make(map[string]bool)
 	for _, t := range allTypes {
-		if pkg := e.typePkg(t); pkg != nil && pkg.Path() != e.mainPkgPath {
-			usedPkgs[pkg.Path()] = true
-			e.aliasManager.EnsureAlias(pkg.Path())
+		for _, pkgPath := range e.collectUsedPkgsFromType(t) {
+			usedPkgs[pkgPath] = true
+			e.aliasManager.EnsureAlias(pkgPath)
 		}
 	}
 
@@ -2258,13 +2272,7 @@ func (e *Extractor) buildProviderNode(it extractedItem, argNames []string, name 
 		// 对返回类型的解析实际上会出现，但 OpAddr/OpDeref 情况下 retType=*/&T 与 closureDef 返回
 		// 类型相同，为保险起见仍主动合并 IdentityTargetPkg）
 		if it.IdentityTargetPkg != "" {
-			found := false
-			for _, p := range usedPkgs {
-				if p == it.IdentityTargetPkg {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(usedPkgs, it.IdentityTargetPkg)
 			if !found {
 				usedPkgs = append(usedPkgs, it.IdentityTargetPkg)
 			}
