@@ -15,7 +15,7 @@ A complete standardized production coding convention skill for business microser
 > **Current version**: v1.0.14
 >
 > **Key version changes**:
-> - **v1.0.14**: Closure inlining (`-inline`), identity-closure optimization (direct type conversion instead of wrapper), cross-package alias isolation (deterministic `digen ./...` vs `digen ./<pkg>`), context alias respected in generated code, source location (`file:line:col`) in all error messages, `-debug-aliases` diagnostics flag
+> - **v1.0.14**: Closure inlining (`-inline`), identity-closure optimization (direct type conversion instead of wrapper), cross-package alias isolation (deterministic `digen ./...` vs `digen ./<pkg>`), context alias respected in generated code, source location (`file:line:col`) in all error messages, global logger unifies alias diagnostics and debug output under the `-debug` flag
 > - **v1.0.13**: Version info system (`-version`), Mage build support, Provide closure signature validation, structured errors replacing panics, actionable error messages with `💡 Fix:` suggestions
 > - **v1.0.11**: Added named instance injection, fixed package alias resolution (e.g. `go-redis/v9`)
 > - **v1.0.5**: `InitApp()` returns `func(context.Context) error`; generated code has zero runtime dependency
@@ -44,9 +44,9 @@ Go DI tools fall into two camps:
 - **Zero runtime reflection & zero runtime dependency** – generated code is plain Go, imports nothing.
 - **Minimal API** – just `Build`, `Provide`, `Supply`, `Invoke`, `Module`.
 - **Closure capture safety** – inline closures cannot capture locals from `InitApp`; enforced by generator.
-- **Closure inlining** (`-inline`) – inline simple closures as immediately-invoked function expressions (IIFE), reducing generated function count; identity closures (`func(p T) T { return p }`) collapse to a direct type conversion.
+- **Closure inlining (`-inline`)** – inline simple closures as immediately-invoked function expressions (IIFE), reducing generated function count; identity closures (`func(p T) T { return p }`) collapse to a direct type conversion.
 - **Generic‑aware** – supports generic functions and types natively.
-- **Observability** – debug logging with runtime‑overridable `Logf`.
+- **Observability** – debug logging with runtime‑overridable `Logf`; `-debug` also prints resolved per-package import alias mappings.
 - **Actionable errors** – all error messages include source location (`file:line:col`) and `💡 Fix:` suggestions (since v1.0.13; expanded in v1.0.14).
 - **Unused‑provider policies** – `error` (default), `ignore`, or `drop`.
 - **Module nesting** – compose modules hierarchically; duplicate detection built‑in.
@@ -244,7 +244,7 @@ func main() { Logf = myLogger.Printf }
 `-unused=error|ignore|drop` (default `error`).
 
 ### 8. Package Aliases
-`-alias=full|short|obfuscated|numeric` controls generated import aliases. Use `-debug-aliases` to print the resolved per-package alias mapping during generation.
+`-alias=full|short|obfuscated|numeric` controls generated import aliases. Resolved per-package alias mappings are printed as debug output when `-debug` is enabled.
 
 ### 9. Closure Inlining
 `-inline` inlines simple provider/invoke closures as IIFEs instead of generating named package-level functions. Identity closures (`func(p T) T { return p }`, `func(p *T) T { return *p }`, `func(p T) *T { return &p }`, and direct type-conversion closures) collapse to a single inline expression.
@@ -258,8 +258,7 @@ func main() { Logf = myLogger.Printf }
 | `-out` | `dig_gen.go` | Output filename (ignored in `./...` mode) |
 | `-unused` | `error` | Policy for unused providers |
 | `-debug` | `false` | Enable debug logging (detailed errors are always shown since v1.0.13) |
-| `-debug-aliases` | `false` | Print the resolved per-package import alias mapping (v1.0.14+) |
-| `-alias` | `full` | Import alias strategy: `full` / `short` / `obfuscated` / `numeric` |
+| `-alias` | `full` | Import alias strategy: `full` / `short` / `obfuscated` / `numeric`. When `-debug` is enabled, resolved per-package alias mappings are also printed. |
 | `-inline` | `false` | Inline simple closures as IIFEs; identity closures collapse to a type conversion (v1.0.14+) |
 | `-version` | `false` | Print version information and exit (v1.0.13+) |
 

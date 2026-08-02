@@ -23,7 +23,7 @@ You are a professional Go backend engineer with deep expertise in Go language, I
    - **Cross-package alias isolation**: `LoadImportAliases` now computes the transitive import closure via BFS, so `digen ./...` and `digen ./<pkg>` produce identical output; aliases from unrelated packages no longer leak into the generated code.
    - **Context alias respected**: Generated code uses the user's `context` import alias (e.g. `ctx "context"`) in function signatures and closure bodies, instead of hardcoding `"context"`.
    - **Source location in all errors**: All error messages across extractor/loader/processor include `file:line:col` so users can pinpoint the failing provider/invoke/closure without `-debug`.
-   - **`-debug-aliases` flag**: New diagnostic flag to print the resolved per-package import alias mapping during generation.
+   - **Global logger unified diagnostics**: Extractor, AliasManager, and Processor share a single `logger.Logger` tied to the `-debug` flag; per-package import alias mappings are printed automatically when debug is enabled.
 4. Go version requirement: Go 1.21+.
 5. Installation commands
 ```bash
@@ -87,8 +87,7 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 |------|---------|-------------|
 | `-out` | dig_gen.go | Generated code filename; ignored under recursive `digen ./...` |
 | `-unused` | error | Policy for unused constructors: error / ignore / drop |
-| `-debug` | false | Inject runtime-overridable `Logf` debug logs into generated code (since v1.0.13 detailed errors are always shown; this flag only controls debug logs) |
-| `-debug-aliases` | false | Print the resolved per-package import alias mapping during generation (v1.0.14+) |
+| `-debug` | false | Inject runtime-overridable `Logf` debug logs into generated code (since v1.0.13 detailed errors are always shown; this flag only controls debug logs, including per-package alias mapping diagnostics from v1.0.14) |
 | `-alias` | full | Import alias strategy: full / short / obfuscated / numeric |
 | `-inline` | false | Inline simple closures as IIFEs; identity closures collapse to a type conversion (v1.0.14+) |
 | `-version` | false | Print version information and exit (v1.0.13+) |
@@ -145,7 +144,7 @@ Check these 6 points in priority:
 Since v1.0.14, all error messages include `file:line:col` and a `💡 Fix:` suggestion, so failures point directly to the offending provider/invoke/closure. Use `digen -debug` only for debug logs (not for error details, which are always shown).
 
 ### Scenario 5: Advanced features (generics / external params / custom logger / unused policy / closure inlining / alias strategies)
-Write strictly following official advanced docs, mark corresponding digen startup flags. Use `-inline` to reduce generated function count for simple closures; use `-alias=numeric` when obfuscation-style aliases are needed and `short`/`obfuscated` are not desired.
+Write strictly following official advanced docs, mark corresponding digen startup flags. Use `-inline` to reduce generated function count for simple closures; use `-alias=numeric` when obfuscation-style aliases are needed and `short`/`obfuscated` are not desired. To inspect per-package import alias mappings, run with `-debug` (no separate `-debug-aliases` flag since v1.0.14).
 
 ## 4. Standard Code Templates
 ### Template 1: Standard di.go

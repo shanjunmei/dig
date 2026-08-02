@@ -7,13 +7,23 @@
 
 ---
 
+## [未发布]
+
+### 移除
+- **`-debug-aliases` 独立诊断标志**：别名映射诊断输出统一并入 `-debug` 全局日志（`-debug` 开启时自动打印 `[alias]` 前缀的别名信息），不再提供独立 flag
+- **`findExcludedPackagesInClosure` 辅助函数**：BFS 传递闭包天然不包含「其它 main 包」和「其它含 dig.Build 的库包」（Go 禁止 import main 包，库包不会被重复 import），额外排除逻辑是死代码，已删除且不影响生成结果
+- **每函数仅一个 `dig.Module` 限制**：`findSingleModuleCall` → `findAllModuleCalls`，辅助函数内可有多个 `dig.Module` 调用，其 args 会被合并提取；控制流（if/switch/for/select）内的 Module 调用仍不支持
+- 移除 `gen_failures/multi_module` 和 `gen_failures/multi_module_call` 回归用例（不再为错误场景）
+
+---
+
 ## [v1.0.14] - 2026-08-01
 
 ### 新增
 - **闭包内联（`-inline` 标志）**：将简单 Provide/Invoke 闭包内联为立即调用函数表达式（IIFE），减少生成的函数数量 (#16)
 - **身份闭包优化**：`func(p T) T { return p }` 形式的闭包生成直接类型转换，而非包装函数 (#17)
 - **四种身份闭包操作场景**：引入 `OpKind` 枚举，重构 `analyzeIdentityClosure` 识别直接返回、取址（`&`）、解引用（`*`）、类型转换四种模式
-- **`-debug-aliases` 诊断标志**：生成时打印每个包解析后的导入别名映射
+- **全局日志（`-debug` 标志）统一输出别名诊断**：`-debug` 开启时自动打印 `[alias]` 前缀的包导入别名映射，无需额外 flag
 - **失败用例补充**：新增 5 个错误类型的回归用例（`capture_const`、`capture_ctx`、`init_named_return`、`duplicate_provide`、`multi_module_call`）(#18)
 - 所有错误消息（extractor/loader/processor）新增源码位置（`file:line:col`）前缀，无需 `-debug` 即可定位到出错的 provider/invoke/闭包
 - 修复 `handleProvide` 中 `item.Position` 被 `ConditionalDebugf` 吞掉的 bug（非 debug 模式下 `Position` 始终为空，导致 `checkUnusedProviders` 无法显示位置）

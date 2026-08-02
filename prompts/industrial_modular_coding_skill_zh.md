@@ -544,8 +544,7 @@ func Module() dig.Option {
 |------|--------|------|
 | `-out` | dig_gen.go | 生成DI代码文件名，执行 `digen ./...` 时不生效 |
 | `-unused` | error | 未使用提供器策略：error / ignore / drop |
-| `-debug` | false | 在生成代码中注入可覆写的全局调试日志 Logf（v1.0.13 起详细错误始终显示） |
-| `-debug-aliases` | false | 生成时打印每个包解析后的导入别名映射（v1.0.14+） |
+| `-debug` | false | 在生成代码中注入可覆写的全局调试日志 Logf（v1.0.13 起详细错误始终显示；v1.0.14 起通过全局 Logger 同时输出包级别名映射诊断） |
 | `-alias` | full | 导入别名模式：完整路径 / 短别名 / 混淆 / 数字别名 |
 | `-inline` | false | 将简单闭包内联为 IIFE；身份闭包塌缩为类型转换（v1.0.14+） |
 | `-version` | false | 打印版本信息并退出（v1.0.13+） |

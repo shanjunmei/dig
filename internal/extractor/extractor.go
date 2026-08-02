@@ -1387,7 +1387,11 @@ func findFuncDecl(pkg *packages.Package, name string) *ast.FuncDecl {
 	return nil
 }
 
-func (e *Extractor) findSingleModuleCall(body *ast.BlockStmt, info *types.Info, funcName string, fset *token.FileSet) (*ast.CallExpr, error) {
+// findAllModuleCalls finds all dig.Module calls in a function body.
+// Multiple Module calls are allowed; their args are merged into the provider list.
+// Module calls inside control flow (if/switch/for/select) are not supported
+// because generated code is statically sequential.
+func (e *Extractor) findAllModuleCalls(body *ast.BlockStmt, info *types.Info, funcName string, fset *token.FileSet) ([]*ast.CallExpr, error) {
 	var moduleCalls []*ast.CallExpr
 	var moduleInControl []bool
 	var controlDepth int
@@ -1419,17 +1423,16 @@ func (e *Extractor) findSingleModuleCall(body *ast.BlockStmt, info *types.Info, 
 	)
 
 	pos := fset.Position(body.Pos())
-	switch len(moduleCalls) {
-	case 0:
-		return nil, fmt.Errorf("at %s: function %s does not contain dig.Module\n  💡 Fix: add a single dig.Module(...) call that wraps all dig.Provide/dig.Invoke/dig.Supply calls", pos, funcName)
-	case 1:
-		if moduleInControl[0] {
-			return nil, fmt.Errorf("at %s: function %s contains dig.Module inside control flow (if/switch/for/select), which is not supported\n  💡 Fix: pass it as a parameter to the function (preferred) or move it to package level", pos, funcName)
-		}
-		return moduleCalls[0], nil
-	default:
-		return nil, fmt.Errorf("at %s: function %s contains multiple dig.Module calls; only one is allowed\n  💡 Fix: merge all providers/invokes into a single dig.Module call", pos, funcName)
+	if len(moduleCalls) == 0 {
+		return nil, fmt.Errorf("at %s: function %s does not contain dig.Module\n  💡 Fix: add a dig.Module(...) call that wraps all dig.Provide/dig.Invoke/dig.Supply calls", pos, funcName)
 	}
+	for i, inControl := range moduleInControl {
+		if inControl {
+			modPos := fset.Position(moduleCalls[i].Pos())
+			return nil, fmt.Errorf("at %s: function %s contains dig.Module inside control flow (if/switch/for/select), which is not supported\n  💡 Fix: pass it as a parameter to the function (preferred) or move it to package level", modPos, funcName)
+		}
+	}
+	return moduleCalls, nil
 }
 
 func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packages.Package) error {
@@ -1458,14 +1461,16 @@ func (e *Extractor) extractOptionsFromFuncCall(call *ast.CallExpr, curPkg *packa
 		return fmt.Errorf("at %s: function %s has no body", pos, fn.Name())
 	}
 
-	modCall, err := e.findSingleModuleCall(funcDecl.Body, subPkg.TypesInfo, fn.Name(), subPkg.Fset)
+	modCalls, err := e.findAllModuleCalls(funcDecl.Body, subPkg.TypesInfo, fn.Name(), subPkg.Fset)
 	if err != nil {
 		return err
 	}
 
-	for _, arg := range modCall.Args {
-		if err := e.extractOptions(arg, subPkg, subPkg); err != nil {
-			return err
+	for _, modCall := range modCalls {
+		for _, arg := range modCall.Args {
+			if err := e.extractOptions(arg, subPkg, subPkg); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

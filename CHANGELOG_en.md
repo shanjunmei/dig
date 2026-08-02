@@ -7,13 +7,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 
 ---
 
+## [Unreleased]
+
+### Removed
+- **Standalone `-debug-aliases` diagnostic flag**: Alias mapping diagnostics are now unified under the global `-debug` log (prints `[alias]` prefixed alias info automatically when `-debug` is on); no separate flag is provided anymore
+- **`findExcludedPackagesInClosure` helper function**: The BFS transitive import closure naturally excludes "other main packages" and "other library packages containing `dig.Build`" (Go forbids importing main packages, and library packages are never imported twice); the extra exclusion logic was dead code, removed without affecting generated output
+- **Single `dig.Module` per function restriction**: `findSingleModuleCall` → `findAllModuleCalls`; helper functions may now contain multiple `dig.Module` calls whose args are merged; Module calls inside control flow (if/switch/for/select) remain unsupported
+- Removed `gen_failures/multi_module` and `gen_failures/multi_module_call` regression examples (no longer error cases)
+
+---
+
 ## [v1.0.14] - 2026-08-01
 
 ### Added
 - **Closure inlining (`-inline` flag)**: Inline simple Provide/Invoke closures as immediately-invoked function expressions (IIFE), reducing generated function count (#16)
 - **Identity closure optimization**: Closures of the form `func(p T) T { return p }` emit a direct type conversion instead of a wrapper function (#17)
 - **Four identity-closure operation scenarios**: Introduced `OpKind` enum and refactored `analyzeIdentityClosure` to recognize direct return, address-of (`&`), dereference (`*`), and type conversion
-- **`-debug-aliases` diagnostic flag**: Prints the resolved per-package import alias mapping during generation
+- **Unified alias diagnostics via global `-debug` log**: When `-debug` is enabled, per-package import alias mappings are printed with the `[alias]` prefix automatically; no extra flag needed
 - **Failure examples**: Added regression examples for 5 error types (`capture_const`, `capture_ctx`, `init_named_return`, `duplicate_provide`, `multi_module_call`) (#18)
 - Source location (`file:line:col`) prefix added to all error messages across extractor/loader/processor, so failing providers/invokes/closures can be pinpointed without `-debug`
 - Fixed bug where `item.Position` in `handleProvide` was swallowed by `ConditionalDebugf` (Position was always empty outside debug mode, causing `checkUnusedProviders` to report without a location)

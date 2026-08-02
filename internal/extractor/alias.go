@@ -93,8 +93,12 @@ func (m *AliasManager) EnsureAlias(pkgPath string) string {
 }
 
 // LoadImportAliases 从已加载的包中收集 import 别名
-// 策略：基于当前包的传递依赖闭包收集别名，排除其它 main 包和其它 dig.Build 包
+// 策略：基于当前包的传递依赖闭包收集别名（BFS 从 main 包出发遍历 Imports）
 // 这样保证 digen ./... 与 digen ./<pkg> 生成结果一致
+//
+// BFS 传递闭包通常已天然不包含「其它 main 包」和「其它含 dig.Build 的库包」
+// （因为 Go 禁止 import main 包，库包一般不会被 import 两次）。
+// 如出现别名冲突场景可在后续重新引入额外排除逻辑。
 func (m *AliasManager) LoadImportAliases() {
 	type importInfo struct {
 		filePath string
@@ -108,9 +112,6 @@ func (m *AliasManager) LoadImportAliases() {
 
 	// 2. 仅遍历闭包内的包，收集 import 别名
 	for pkgPath := range closure {
-		/*if excludePkgPaths[pkgPath] {
-			continue
-		}*/
 		p := m.pkgMap[pkgPath]
 		if p == nil {
 			continue
@@ -147,10 +148,10 @@ func (m *AliasManager) LoadImportAliases() {
 		}
 	}
 
-	m.logger.Debugf("[alias] Package %s (closure: %d pkgs,):\n",
+	m.logger.Debugf("[alias] Package %s (closure: %d pkgs,):",
 		m.mainPkgPath, len(closure))
 	for pkgPath, alias := range m.importAliasMap {
-		m.logger.Debugf("  %s -> %s\n", pkgPath, alias)
+		m.logger.Debugf("  %s -> %s", pkgPath, alias)
 	}
 
 }

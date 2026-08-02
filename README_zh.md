@@ -16,7 +16,7 @@
 > **当前版本**：v1.0.14
 >
 > **关键版本变更**：
-> - **v1.0.14**：闭包内联（`-inline`）、身份闭包优化（直接类型转换替代包装函数）、跨包别名隔离（`digen ./...` 与 `digen ./<pkg>` 输出一致）、生成代码正确使用 context 别名、所有错误消息含源码位置（`file:line:col`）、新增 `-debug-aliases` 诊断参数
+> - **v1.0.14**: 闭包内联（`-inline`）、身份闭包优化（直接类型转换替代包装函数）、跨包别名隔离（`digen ./...` 与 `digen ./<pkg>` 输出一致）、生成代码正确使用 context 别名、所有错误消息含源码位置（`file:line:col`）、全局 Logger 统一将别名诊断与调试输出归入 `-debug` 参数
 > - **v1.0.13**：版本信息系统（`-version`）、Mage 构建支持、Provide 闭包签名校验、结构化错误替换 panic、带 `💡 Fix:` 的可操作错误消息
 > - **v1.0.11**：新增命名多实例注入，修复包别名解析问题（如 `go-redis/v9`）
 > - **v1.0.5**：`InitApp()` 返回 `func(context.Context) error`，生成的代码零运行时依赖
@@ -47,7 +47,7 @@ Go 的依赖注入工具分为两大阵营：
 - **闭包捕获安全** – 内联闭包不能捕获 `InitApp` 中的局部变量，由生成器强制检查。
 - **闭包内联**（`-inline`）– 将简单闭包内联为立即调用函数表达式（IIFE），减少生成的函数数量；身份闭包（`func(p T) T { return p }`）塌缩为一次直接类型转换。
 - **泛型支持** – 原生支持泛型函数和类型。
-- **可观测性** – 支持调试日志，运行时可通过 `Logf` 覆盖。
+- **可观测性** – 支持调试日志，运行时可通过 `Logf` 覆盖；启用 `-debug` 时还会打印每个包解析后的导入别名映射。
 - **可操作错误** – 所有错误消息包含源码位置（`file:line:col`）与 `💡 Fix:` 修复建议（v1.0.13 引入，v1.0.14 扩展）。
 - **未使用提供者策略** – `error`（默认）、`ignore` 或 `drop`。
 - **模块嵌套** – 支持层次化组合模块，内置重复检测。
@@ -245,7 +245,7 @@ func main() { Logf = myLogger.Printf }
 `-unused=error|ignore|drop`（默认为 `error`）。
 
 ### 8. 包别名策略
-`-alias=full|short|obfuscated|numeric` 控制生成的导入别名。使用 `-debug-aliases` 可在生成时打印每个包解析后的别名映射。
+`-alias=full|short|obfuscated|numeric` 控制生成的导入别名。启用 `-debug` 时会在生成日志中同时打印每个包解析后的别名映射。
 
 ### 9. 闭包内联
 `-inline` 将简单的 Provide/Invoke 闭包内联为 IIFE，而不是生成包级命名函数。身份闭包（`func(p T) T { return p }`、`func(p *T) T { return *p }`、`func(p T) *T { return &p }` 以及直接类型转换闭包）会塌缩为单行内联表达式。
@@ -259,8 +259,7 @@ func main() { Logf = myLogger.Printf }
 | `-out` | `dig_gen.go` | 输出文件名（在 `./...` 模式下忽略） |
 | `-unused` | `error` | 未使用提供者的处理策略 |
 | `-debug` | `false` | 启用调试日志（v1.0.13 起详细错误始终显示） |
-| `-debug-aliases` | `false` | 打印每个包解析后的导入别名映射（v1.0.14+） |
-| `-alias` | `full` | 导入别名策略：`full` / `short` / `obfuscated` / `numeric` |
+| `-alias` | `full` | 导入别名策略：`full` / `short` / `obfuscated` / `numeric`；启用 `-debug` 时同时打印别名映射诊断 |
 | `-inline` | `false` | 将简单闭包内联为 IIFE；身份闭包塌缩为类型转换（v1.0.14+） |
 | `-version` | `false` | 打印版本信息并退出（v1.0.13+） |
 

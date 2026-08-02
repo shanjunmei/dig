@@ -544,8 +544,7 @@ func Module() dig.Option {
 |------|---------|-------------|
 | `-out` | dig_gen.go | Generated DI filename, invalid under `digen ./...` |
 | `-unused` | error | Unused provider policy: error / ignore / drop |
-| `-debug` | false | Inject overridable global Logf debug log in generated code (detailed errors always shown since v1.0.13) |
-| `-debug-aliases` | false | Print the resolved per-package import alias mapping during generation (v1.0.14+) |
+| `-debug` | false | Inject overridable global Logf debug log in generated code (detailed errors always shown since v1.0.13; from v1.0.14 also includes per-package alias mapping diagnostics via global logger) |
 | `-alias` | full | Import alias mode: full / short / obfuscated / numeric |
 | `-inline` | false | Inline simple closures as IIFEs; identity closures collapse to a type conversion (v1.0.14+) |
 | `-version` | false | Print version information and exit (v1.0.13+) |

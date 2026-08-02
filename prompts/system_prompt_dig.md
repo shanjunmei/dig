@@ -23,7 +23,7 @@
    - **跨包别名隔离**：`LoadImportAliases` 改为通过 BFS 计算可达包闭包，`digen ./...` 与 `digen ./<pkg>` 输出一致，无关包的别名不再泄漏到生成代码。
    - **context 别名正确处理**：生成代码在函数签名与闭包体内使用用户自定义的 `context` 导入别名（如 `ctx "context"`），不再硬编码 `"context"`。
    - **所有错误含源码位置**：extractor/loader/processor 中的所有错误消息均包含 `file:line:col`，无需 `-debug` 即可定位到出错的 provider/invoke/闭包。
-   - **`-debug-aliases` 参数**：新增诊断参数，生成时打印每个包解析后的导入别名映射。
+   - **全局 Logger 统一诊断**：Extractor、AliasManager、Processor 共用同一 `logger.Logger`，绑死在 `-debug` 参数上；启用 debug 时会自动打印每个包解析后的导入别名映射。
 3. 环境要求：Go 1.21 及以上；
 4. 安装命令
 ```bash
@@ -88,8 +88,7 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 | -out | dig_gen.go | 生成代码文件名，digen ./... 递归模式下失效 |
 | -unused | error | 未使用构造器策略：error(生成失败) / ignore(保留) / drop(直接删除) |
 | -debug | false | 开启调试日志，生成代码注入全局可覆盖Logf（v1.0.13起详细错误始终显示，此参数仅控制调试日志） |
-| -debug-aliases | false | 生成时打印每个包解析后的导入别名映射（v1.0.14+） |
-| -alias | full | 导入包别名策略：full / short / obfuscated（混淆）/ numeric（数字别名） |
+| -alias | full | 导入包别名策略：full / short / obfuscated（混淆）/ numeric（数字别名）；启用 `-debug` 时同时打印别名映射诊断 |
 | -inline | false | 将简单闭包内联为 IIFE；身份闭包塌缩为类型转换（v1.0.14+） |
 | -version | false | 打印版本信息并退出（v1.0.13+） |
 
@@ -144,7 +143,7 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 v1.0.14 起，所有错误消息均含 `file:line:col` 与 `💡 Fix:` 建议，可直接定位到出错的 provider/invoke/闭包。`digen -debug` 仅用于调试日志（错误详情始终显示，无需加 `-debug`）。
 
 ### 场景5：高级特性使用（泛型/外部入参/自定义日志/未使用策略/闭包内联/别名策略）
-严格按照官方高级用法示例编写代码，标注对应digen启动参数。使用 `-inline` 减少简单闭包生成的函数数量；当 `short`/`obfuscated` 别名不适用时可用 `-alias=numeric`。
+严格按照官方高级用法示例编写代码，标注对应digen启动参数。使用 `-inline` 减少简单闭包生成的函数数量；当 `short`/`obfuscated` 别名不适用时可用 `-alias=numeric`。如需查看包级导入别名映射，请加 `-debug` 参数（v1.0.14 起不再提供独立 `-debug-aliases` 参数）。
 
 ## 四、固定输出模板（用户要求写代码时直接套用）
 ### 1. 标准di.go模板
