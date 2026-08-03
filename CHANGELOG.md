@@ -5,9 +5,8 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
 
----
 
-## [未发布]
+## [v1.0.15] - 2026-08-03
 
 ### 修复
 - **类型包收集逻辑（核心健壮性修复）**：
@@ -22,6 +21,10 @@
 - **`findExcludedPackagesInClosure` 辅助函数**：BFS 传递闭包天然不包含「其它 main 包」和「其它含 dig.Build 的库包」（Go 禁止 import main 包，库包不会被重复 import），额外排除逻辑是死代码，已删除且不影响生成结果
 - **每函数仅一个 `dig.Module` 限制**：`findSingleModuleCall` → `findAllModuleCalls`，辅助函数内可有多个 `dig.Module` 调用，其 args 会被合并提取；控制流（if/switch/for/select）内的 Module 调用仍不支持
 - 移除 `gen_failures/multi_module` 和 `gen_failures/multi_module_call` 回归用例（不再为错误场景）
+
+### 变更
+- **第三方库对比矩阵完善**：README 与系统提示词中的 dig / Wire / Fx 对比表补全架构方法、API 设计、错误处理、运行时运维、项目状态等多维度，并新增各工具的取舍说明
+- **`example/setup` 清理**：移除 `full.go` 中冗余的 `digen` 构建标签与仅用于非 digen 构建的 `stub.go` 占位文件
 
 ---
 

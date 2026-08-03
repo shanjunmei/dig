@@ -12,9 +12,10 @@ A complete standardized production coding convention skill for business microser
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Current version**: v1.0.14
+> **Current version**: v1.0.15
 >
 > **Key version changes**:
+> - **v1.0.15**: Core robustness fix for type package collection (handles function signatures, self-referential types, nested generics); removed `-debug-aliases` flag (unified into `-debug`), removed single `dig.Module` per function restriction; expanded third-party comparison matrix
 > - **v1.0.14**: Closure inlining (`-inline`), identity-closure optimization (direct type conversion instead of wrapper), cross-package alias isolation (deterministic `digen ./...` vs `digen ./<pkg>`), context alias respected in generated code, source location (`file:line:col`) in all error messages, global logger unifies alias diagnostics and debug output under the `-debug` flag
 > - **v1.0.13**: Version info system (`-version`), Mage build support, Provide closure signature validation, structured errors replacing panics, actionable error messages with `💡 Fix:` suggestions
 > - **v1.0.11**: Added named instance injection, fixed package alias resolution (e.g. `go-redis/v9`)
@@ -57,7 +58,7 @@ Go DI tools fall into two camps:
 ## Installation
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.14
+go get github.com/shanjunmei/dig@v1.0.15
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 Requires Go 1.21+.
@@ -329,7 +330,7 @@ func main() { Logf = myLogger.Printf }
 | Feature | dig | Google Wire | Uber Fx |
 |---------|-----|-------------|---------|
 | Maintenance status | ✅ active | ⚠️ **archived** (no longer maintained) | ✅ active |
-| Latest version | v1.0.14 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
+| Latest version | v1.0.15 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
 | Go version requirement | 1.21+ | standard | 1.21+ (for `slog` logger) |
 | Refactoring friendliness | High (static checks + source location) | Low (cryptic errors) | Medium (runtime errors) |
 

@@ -5,9 +5,7 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
----
-
-## [Unreleased]
+## [v1.0.15] - 2026-08-03
 
 ### Fixed
 - **Type package collection logic (core robustness fix)**:
@@ -22,6 +20,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - **`findExcludedPackagesInClosure` helper function**: The BFS transitive import closure naturally excludes "other main packages" and "other library packages containing `dig.Build`" (Go forbids importing main packages, and library packages are never imported twice); the extra exclusion logic was dead code, removed without affecting generated output
 - **Single `dig.Module` per function restriction**: `findSingleModuleCall` → `findAllModuleCalls`; helper functions may now contain multiple `dig.Module` calls whose args are merged; Module calls inside control flow (if/switch/for/select) remain unsupported
 - Removed `gen_failures/multi_module` and `gen_failures/multi_module_call` regression examples (no longer error cases)
+
+### Changed
+- **Third-party library comparison matrix expanded**: README and system prompts now include a complete dig / Wire / Fx comparison across architecture, API design, error handling, runtime/operations, and project status dimensions, plus per-tool trade-off analysis
+- **`example/setup` cleanup**: Removed the redundant `digen` build tag from `full.go` and deleted `stub.go` (a placeholder only used in non-digen builds)
 
 ---
 
