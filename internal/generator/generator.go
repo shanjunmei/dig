@@ -358,7 +358,7 @@ func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool
 			identityParam = identityArgs[0]
 		}
 		conversion := buildIdentityConversion(node, identityParam)
-		g.emitLog(buf, "[PROVIDE] identity conversion: %s -> %s", strconv.Quote(logName), node.IdentityTargetType)
+		g.emitLog(buf, "[PROVIDE] identity conversion: %s -> %s", strconv.Quote(logName), strconv.Quote(node.IdentityTargetType))
 		if blank {
 			fmt.Fprintf(buf, "_ = %s\n", conversion)
 		} else {
@@ -440,7 +440,7 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node, ctxParam
 				identityParam = identityArgs[0]
 			}
 			conversion := buildIdentityConversion(node, identityParam)
-			g.emitLog(buf, "[INVOKE] identity conversion: %s -> %s", strconv.Quote(logName), node.IdentityTargetType)
+			g.emitLog(buf, "[INVOKE] identity conversion: %s -> %s", strconv.Quote(logName), strconv.Quote(node.IdentityTargetType))
 			if node.HasError {
 				fmt.Fprintf(buf, "if err := %s; err != nil {\n", conversion)
 				g.emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), "err")
