@@ -1,6 +1,8 @@
 package setup
 
 import (
+	"fmt"
+
 	"github.com/shanjunmei/dig/example/cache"
 	"github.com/shanjunmei/dig/example/common"
 	"github.com/shanjunmei/dig/example/db"
@@ -9,6 +11,16 @@ import (
 
 	"github.com/shanjunmei/dig"
 )
+
+// BootstrapStore 是 setup 包的包级函数，用于演示"闭包内裸调用同包级函数"场景。
+//
+// 当 Full() 内联闭包 dig.Invoke(func(s *user.Store[string]){ BootstrapStore(s) })
+// 被 digen 提取到 app 包（example/app/dig_gen.go）时，闭包体内的裸标识符
+// BootstrapStore 必须被正确改写为 setup.BootstrapStore，并补上 setup 包导入。
+// 这复现了跨包模块中"Module() 内闭包调用同包工具函数"的常见模式。
+func BootstrapStore(s *user.Store[string]) {
+	fmt.Printf("BootstrapStore: items count=%d\n", len(s.GetAll()))
+}
 
 // Full 返回完整依赖图的共享模块。
 // 适用于需要跨包模块嵌套、命名实例、泛型、闭包 Provide/Invoke 等高级特性的入口。
@@ -84,6 +96,12 @@ func Full() dig.Option {
 			} else {
 				s.Add("low-port")
 			}
+		}),
+
+		// === 闭包内裸调用同包级函数（跨包标识符解析场景）===
+		// digen 将此闭包提取到 app 包时，BootstrapStore 必须改写为 setup.BootstrapStore 并补 setup 包导入。
+		dig.Invoke(func(s *user.Store[string]) {
+			BootstrapStore(s)
 		}),
 	)
 }

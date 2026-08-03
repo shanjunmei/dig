@@ -1316,76 +1316,6 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	return nil
 }
 
-// rewriteBareFunctionCallsInClosure 仅改写 CallExpr.Fun 位置的裸包函数标识符
-// 只处理 f()，不会触碰单独标识符 f（函数值引用，不会误改）
-func (e *Extractor) rewriteBareFunctionCallsInClosure(body *ast.BlockStmt, curPkg *packages.Package) *ast.BlockStmt {
-	newNode := astutil.Apply(body,
-		func(c *astutil.Cursor) bool {
-			node := c.Node()
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-
-			// 剥离泛型索引：NewClient[T]()
-			baseFun, _ := stripGenericIndexes(call.Fun)
-			ident, ok := baseFun.(*ast.Ident)
-			if !ok {
-				return true
-			}
-
-			obj := curPkg.TypesInfo.ObjectOf(ident)
-			fn, ok := obj.(*types.Func)
-			if !ok {
-				return true
-			}
-
-			fnPkg := fn.Pkg()
-			if fnPkg == nil {
-				return true
-			}
-			// 当前包内函数，不需要包前缀
-			if fnPkg.Path() == e.mainPkgPath {
-				return true
-			}
-
-			alias := e.aliasManager.EnsureAlias(fnPkg.Path())
-			if alias == "" {
-				return true
-			}
-
-			// 构造 selector: alias.FuncName
-			selExpr := &ast.SelectorExpr{
-				X:   ast.NewIdent(alias),
-				Sel: ast.NewIdent(ident.Name),
-			}
-
-			// 如果原始带有泛型参数，需要还原 Index / IndexList
-			switch rawFun := call.Fun.(type) {
-			case *ast.IndexExpr:
-				call.Fun = &ast.IndexExpr{
-					X:     selExpr,
-					Index: rawFun.Index,
-				}
-			case *ast.IndexListExpr:
-				call.Fun = &ast.IndexListExpr{
-					X:       selExpr,
-					Indices: rawFun.Indices,
-				}
-			default:
-				call.Fun = selExpr
-			}
-
-			return false
-		},
-		nil,
-	)
-
-	if blk, ok := newNode.(*ast.BlockStmt); ok {
-		return blk
-	}
-	return body
-}
 func (e *Extractor) processArgs(args []ast.Expr, pkg *packages.Package, handler func(ast.Expr, *packages.Package) error) error {
 	for _, arg := range args {
 		if err := handler(arg, pkg); err != nil {
@@ -2104,6 +2034,26 @@ func (e *Extractor) collectTypeNameAndUsedPkgs(body *ast.BlockStmt, pkg *package
 			return true
 		}
 
+		// 处理跨包函数名（如 setup.BootstrapStore）。
+		// 闭包从非主包提取到主包时，裸函数标识符需补包前缀；此处统一通过 typeNameMap
+		// 记录映射，由后续 applyTypeAliasReplacements → replaceTypeNames 在字符串层面完成
+		// 替换（覆盖调用 Func()、&Func、cb := Func 等所有引用场景）。
+		// 注意：不可在 AST 层原地改写（如构造 SelectorExpr 赋给 call.Fun），因为 go/packages
+		// 仅加载一次 setup 包，其闭包体 AST 会被多个 main 包共享；第一个包的原地变异会使
+		// 后续包的 TypesInfo.ObjectOf 失效，导致漏加包导入。
+		// *types.Func 必为包级函数（Go 不支持函数内命名函数定义），无局部变量混淆风险。
+		if fn, ok := obj.(*types.Func); ok {
+			fnPkg := fn.Pkg()
+			if fnPkg != nil && fnPkg.Path() != e.mainPkgPath {
+				alias := e.aliasManager.EnsureAlias(fnPkg.Path())
+				if alias != "" {
+					typeNameMap[ident.Name] = alias + "." + ident.Name
+					usedPkgs[fnPkg.Path()] = true
+				}
+			}
+			return true
+		}
+
 		// 处理包名（如 alias.ParseAliasType 中的 alias）
 		if pkgName, ok := obj.(*types.PkgName); ok {
 			pkgPath := pkgName.Imported().Path()
@@ -2152,7 +2102,6 @@ func (e *Extractor) generateClosureDef(it *extractedItem) (string, []string, err
 	rewrittenBody := e.replaceFreeVarsInBody(it.ClosureLit.Body, freeVarMap, constMap)
 
 	typeNameMap := e.collectTypeNameAndUsedPkgs(rewrittenBody, it.Pkg, usedPkgs)
-	rewrittenBody = e.rewriteBareFunctionCallsInClosure(rewrittenBody, it.Pkg)
 
 	var bodyBuf bytes.Buffer
 	if err := printer.Fprint(&bodyBuf, it.Pkg.Fset, rewrittenBody); err != nil {
