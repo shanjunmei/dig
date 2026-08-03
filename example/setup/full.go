@@ -1,5 +1,3 @@
-//go:build digen
-
 package setup
 
 import (
