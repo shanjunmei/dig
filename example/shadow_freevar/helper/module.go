@@ -8,7 +8,7 @@ import "github.com/shanjunmei/dig"
 func Module() dig.Option {
 	return dig.Module(
 		dig.Provide(func() *Result {
-			return &Result{Value: Db.Count}
+			return &Result{Value: db.Count}
 		}),
 	)
 }

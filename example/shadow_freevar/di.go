@@ -24,9 +24,9 @@ func InitShadowFreeVar() func(context.Context) error {
 	return dig.Build(
 		helper.Module(),
 		dig.Supply(&db.DB{Name: "test"}),
-		dig.Invoke(func(r *helper.Result, Db *db.DB) {
+		dig.Invoke(func(r *helper.Result, db *db.DB) {
 			_ = r
-			_ = Db
+			_ = db
 		}),
 	)
 }

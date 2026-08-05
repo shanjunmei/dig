@@ -12,4 +12,4 @@ type Result struct {
 
 // db 是包级变量，与主包导入的 example/db 的别名 db 同名。
 // 闭包捕获 db 后，提取到主包时参数名若仍为 db 会遮蔽 db 包别名。
-var Db = &Counter{Count: 42}
+var db = &Counter{Count: 42}
