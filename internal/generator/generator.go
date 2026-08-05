@@ -16,6 +16,7 @@ import (
 	"github.com/shanjunmei/dig/internal/config"
 	"github.com/shanjunmei/dig/internal/logger"
 	"github.com/shanjunmei/dig/internal/model"
+	"github.com/shanjunmei/dig/pkg/alias"
 	"github.com/shanjunmei/dig/pkg/functional"
 	"golang.org/x/tools/go/packages"
 )
@@ -329,7 +330,8 @@ func buildCallArgs(node model.Node, ctxParamName string) []string {
 
 // writeProvider writes a single provider statement.
 // If blank is true, the result is assigned to '_' (unused provider).
-func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool, ctxParamName string) {
+// errName is the safe error variable name (avoids shadowing package aliases).
+func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool, ctxParamName, errName string) {
 	if node.IsSupply {
 		expr := node.Value
 		if node.FuncPkg != "" && !isLiteral(expr) && !strings.HasPrefix(expr, node.FuncPkg+".") {
@@ -387,18 +389,18 @@ func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool
 	if blank {
 		if node.HasError {
 			// 有error返回，即使结果不用，依然校验错误并panic，保持行为统一
-			fmt.Fprintf(buf, "if _, err := %s(%s); err != nil {\n", fullCall, argsStr)
-			g.emitLog(buf, "[PROVIDE] failed (unused): %s: %v", strconv.Quote(logName), "err")
-			fmt.Fprintf(buf, "panic(err)\n}\n")
+			fmt.Fprintf(buf, "if _, %s := %s(%s); %s != nil {\n", errName, fullCall, argsStr, errName)
+			g.emitLog(buf, "[PROVIDE] failed (unused): %s: %v", strconv.Quote(logName), errName)
+			fmt.Fprintf(buf, "panic(%s)\n}\n", errName)
 		} else {
 			fmt.Fprintf(buf, "_ = %s(%s)\n", fullCall, argsStr)
 		}
 	} else {
 		if node.HasError {
-			fmt.Fprintf(buf, "%s, err := %s(%s)\n", node.Name, fullCall, argsStr)
-			fmt.Fprintf(buf, "if err != nil {\n")
-			g.emitLog(buf, "[PROVIDE] failed: %s: %v", strconv.Quote(logName), "err")
-			fmt.Fprintf(buf, "panic(err)\n}\n")
+			fmt.Fprintf(buf, "%s, %s := %s(%s)\n", node.Name, errName, fullCall, argsStr)
+			fmt.Fprintf(buf, "if %s != nil {\n", errName)
+			g.emitLog(buf, "[PROVIDE] failed: %s: %v", strconv.Quote(logName), errName)
+			fmt.Fprintf(buf, "panic(%s)\n}\n", errName)
 		} else {
 			fmt.Fprintf(buf, "%s := %s(%s)\n", node.Name, fullCall, argsStr)
 		}
@@ -408,7 +410,7 @@ func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool
 }
 
 // writeProviders writes all provider statements.
-func (g *Generator) writeProviders(buf *bytes.Buffer, nodes []model.Node, refCount map[string]int, unusedMode model.UnusedMode, ctxParamName string) {
+func (g *Generator) writeProviders(buf *bytes.Buffer, nodes []model.Node, refCount map[string]int, unusedMode model.UnusedMode, ctxParamName, errName string) {
 	for _, node := range nodes {
 		if node.IsInvoke {
 			continue
@@ -420,12 +422,12 @@ func (g *Generator) writeProviders(buf *bytes.Buffer, nodes []model.Node, refCou
 		if !node.HasError && refCount[node.Name] == 0 && unusedMode == model.UnusedModeIgnore {
 			blank = true
 		}
-		g.writeProvider(buf, node, blank, ctxParamName)
+		g.writeProvider(buf, node, blank, ctxParamName, errName)
 	}
 }
 
 // writeInvokes writes all invoke statements.
-func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node, ctxParamName string) {
+func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node, ctxParamName, errName string) {
 	for _, node := range nodes {
 		if !node.IsInvoke {
 			continue
@@ -442,9 +444,9 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node, ctxParam
 			conversion := buildIdentityConversion(node, identityParam)
 			g.emitLog(buf, "[INVOKE] identity conversion: %s -> %s", strconv.Quote(logName), strconv.Quote(node.IdentityTargetType))
 			if node.HasError {
-				fmt.Fprintf(buf, "if err := %s; err != nil {\n", conversion)
-				g.emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), "err")
-				fmt.Fprintf(buf, "return err\n}\n")
+				fmt.Fprintf(buf, "if %s := %s; %s != nil {\n", errName, conversion, errName)
+				g.emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), errName)
+				fmt.Fprintf(buf, "return %s\n}\n", errName)
 			} else {
 				fmt.Fprintf(buf, "%s\n", conversion)
 			}
@@ -469,9 +471,9 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node, ctxParam
 		g.emitLog(buf, "[INVOKE] before: %s", strconv.Quote(logName))
 
 		if node.HasError {
-			fmt.Fprintf(buf, "if err := %s(%s); err != nil {\n", fullCall, argsStr)
-			g.emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), "err")
-			fmt.Fprintf(buf, "return err\n}\n")
+			fmt.Fprintf(buf, "if %s := %s(%s); %s != nil {\n", errName, fullCall, argsStr, errName)
+			g.emitLog(buf, "[INVOKE] failed: %s: %v", strconv.Quote(logName), errName)
+			fmt.Fprintf(buf, "return %s\n}\n", errName)
 		} else {
 			fmt.Fprintf(buf, "%s(%s)\n", fullCall, argsStr)
 		}
@@ -486,23 +488,15 @@ func (g *Generator) writeMainFunc(buf *bytes.Buffer, nodes []model.Node, originF
 	if paramStr != "" {
 		paramStr = " " + paramStr
 	}
+	// ShadowGuard 统一收集所有包标识符 + Go 内建标识符，
+	// 供 ctxParam 和 err 变量名查询，避免生成变量遮蔽包别名。
+	sg := alias.NewShadowGuard(importAliasMap, pkgAliasMap, pkgNameMap)
 	ctxAlias := getPkgAlias("context", importAliasMap, pkgAliasMap, pkgNameMap)
-	// Pick a parameter name that does not shadow any package alias used in the generated code.
-	// Try conventional names first, fall back to less common ones.
-	usedAliases := make(map[string]bool, len(importAliasMap)+len(pkgAliasMap)+len(pkgNameMap))
-	for _, a := range importAliasMap {
-		usedAliases[a] = true
-	}
-	for _, a := range pkgAliasMap {
-		usedAliases[a] = true
-	}
-	for _, a := range pkgNameMap {
-		usedAliases[a] = true
-	}
-	ctxParam := pickCtxParamName(ctxAlias, usedAliases)
+	ctxParam := pickCtxParamName(ctxAlias, sg.Reserved())
+	errName := sg.SafeName("err")
 	fmt.Fprintf(buf, "func %s(%s) func(%s.Context) error {\n", originFuncName, paramStr, ctxAlias)
-	g.writeProviders(buf, nodes, refCount, unusedMode, ctxParam)
+	g.writeProviders(buf, nodes, refCount, unusedMode, ctxParam, errName)
 	fmt.Fprintf(buf, "\treturn func(%s %s.Context) error {\n", ctxParam, ctxAlias)
-	g.writeInvokes(buf, nodes, ctxParam)
+	g.writeInvokes(buf, nodes, ctxParam, errName)
 	buf.WriteString("\t\treturn nil\n\t}\n}\n\n")
 }

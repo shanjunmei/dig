@@ -1915,17 +1915,19 @@ func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[
 	freeVarMap := make(map[string]string)
 	constMap := make(map[string]string)
 
+	// ShadowGuard 确保自由变量参数名不遮蔽包别名或闭包参数名
+	sg := alias.NewShadowGuard(
+		e.aliasManager.GetImportAliasMap(),
+		e.aliasManager.GetPkgAliasMap(),
+		e.aliasManager.GetPkgNameMap(),
+	)
+
 	// 闭包参数
 	for _, arg := range it.ClosureParams {
 		typStr := e.replacePkgPathWithAlias(arg.TypeString)
 		paramList = append(paramList, arg.Name+" "+typStr)
 		e.addPkgToUsed(arg.Type, usedPkgs)
-	}
-
-	// Track used names to avoid conflicts
-	usedNames := make(map[string]bool)
-	for _, arg := range it.ClosureParams {
-		usedNames[arg.Name] = true
+		sg.Reserve(arg.Name) // 闭包参数名加入保留集，防止自由变量参数名与之冲突
 	}
 
 	// 自由变量（从 Params 中取闭包参数之后的部分）
@@ -1936,12 +1938,13 @@ func (e *Extractor) buildParamListAndFreeVarMap(it *extractedItem, usedPkgs map[
 			constMap[arg.Name] = arg.ConstValue
 			continue
 		}
-		// Phase 2: Use original variable name, with fallback suffix if needed
+		// 使用 ShadowGuard 选择不冲突的参数名（兼顾闭包参数名和包别名）
+		// 保留既有 _fv 后缀约定：仅在发生冲突时使用
 		paramName := arg.Name
-		if usedNames[paramName] {
-			paramName = arg.Name + "_fv"
+		if sg.Reserved()[paramName] {
+			paramName = sg.SafeName(arg.Name + "_fv")
 		}
-		usedNames[paramName] = true
+		sg.Reserve(paramName) // 防止后续自由变量重名
 
 		typStr := e.replacePkgPathWithAlias(arg.TypeString)
 		paramList = append(paramList, paramName+" "+typStr)
@@ -2251,10 +2254,16 @@ func (e *Extractor) buildSupplyNode(it extractedItem, name string) (model.Node, 
 func (e *Extractor) assignVarNames(order []int, items []extractedItem) []string {
 	n := len(items)
 	varNames := make([]string, n)
+	// ShadowGuard 确保生成的 vN 变量名不遮蔽包别名或内建标识符
+	sg := alias.NewShadowGuard(
+		e.aliasManager.GetImportAliasMap(),
+		e.aliasManager.GetPkgAliasMap(),
+		e.aliasManager.GetPkgNameMap(),
+	)
 	vIdx := 0
 	for _, i := range order {
 		if !items[i].IsInvoke {
-			varNames[i] = fmt.Sprintf("v%d", vIdx)
+			varNames[i] = sg.SafeName(fmt.Sprintf("v%d", vIdx))
 			vIdx++
 		}
 	}
