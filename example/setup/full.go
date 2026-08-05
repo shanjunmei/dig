@@ -73,9 +73,9 @@ func Full() dig.Option {
 		}),
 
 		// === 跨包消费命名实例（primaryDB / replicaDB）===
-		dig.Invoke(func(primaryDB *db.DB, userRedis *db.RedisClient) {
+		dig.Invoke(func(primaryDB *db.DB, userRedis *db.RedisClient, Index db.RedisDbIndex) {
 			primaryDB.Ping()
-			userRedis.Ping()
+			userRedis.Ping(Index)
 		}),
 
 		// === 消费身份闭包产物（验证内联正确性） ===

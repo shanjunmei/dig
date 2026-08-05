@@ -101,18 +101,18 @@ func dig_invoke_5(stringCache *cache.Cache[string], intCache *cache.Cache[int]) 
 	intCache.Print()
 }
 
-func dig_invoke_6(primaryDB *db.DB, userRedis *db.RedisClient) {
+func dig_invoke_6(primaryDB *db.DB, userRedis *db.RedisClient, Index db.RedisDbIndex) {
 	primaryDB.Ping()
-	userRedis.Ping()
+	userRedis.Ping(Index)
 }
 
 func dig_invoke_7(replicaDB *db.DB, sessionRedis *db.RedisClient) {
 	fmt.Printf("Replica: %s, Session: %s\n", replicaDB.Name, sessionRedis.Name)
 }
 
-func dig_invoke_8(primaryDB *db.DB, userRedis *db.RedisClient) {
+func dig_invoke_8(primaryDB *db.DB, userRedis *db.RedisClient, Index db.RedisDbIndex) {
 	primaryDB.Ping()
-	userRedis.Ping()
+	userRedis.Ping(Index)
 }
 
 func dig_invoke_9(pinger db.Pinger, raw any, setupCfg *common.Config, dbVal db.DB, closureDB *db.DB) {
@@ -161,24 +161,25 @@ func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error
 	v7 := role.Config("production")
 	v8 := cache.NewCache[string]()
 	v9 := cache.NewCache[int]()
-	v11, err := dig_provider_3()
+	v11 := db.Index
+	v12, err := dig_provider_3()
 	if err != nil {
 		panic(err)
 	}
-	v12, err := dig_provider_4()
+	v13, err := dig_provider_4()
 	if err != nil {
 		panic(err)
 	}
-	v13 := dig_provider_5()
-	v14 := dig_provider_6()
-	v15 := dig_provider_7()
-	v16 := dig_provider_10()
-	v17 := dig_provider_12()
-	v19 := role.NewServer(v5)
-	v20 := dig_provider_8(v11)
-	v21 := dig_provider_9(v11)
-	v22 := dig_provider_11(v16)
-	v23 := dig_provider_13(v17)
+	v14 := dig_provider_5()
+	v15 := dig_provider_6()
+	v16 := dig_provider_7()
+	v17 := dig_provider_10()
+	v18 := dig_provider_12()
+	v20 := role.NewServer(v5)
+	v21 := dig_provider_8(v12)
+	v22 := dig_provider_9(v12)
+	v23 := dig_provider_11(v17)
+	v24 := dig_provider_13(v18)
 	return func(ctx context.Context) error {
 		dig_invoke_1(v3)
 		if err := user.ProcessStore[int](v2, v4); err != nil {
@@ -186,15 +187,15 @@ func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error
 		}
 		dig_invoke_2(v6)
 		dig_invoke_3(v7)
-		dig_invoke_4(v19)
+		dig_invoke_4(v20)
 		dig_invoke_5(v8, v9)
-		dig_invoke_6(v11, v13)
-		dig_invoke_7(v12, v14)
-		dig_invoke_8(v11, v13)
-		dig_invoke_9(v20, v21, v22, v23, v17)
-		dig_invoke_10(v15, v0)
-		dig_invoke_11(v15)
-		if err := dig_invoke_12(v15, v0, v1); err != nil {
+		dig_invoke_6(v12, v14, v11)
+		dig_invoke_7(v13, v15)
+		dig_invoke_8(v12, v14, v11)
+		dig_invoke_9(v21, v22, v23, v24, v18)
+		dig_invoke_10(v16, v0)
+		dig_invoke_11(v16)
+		if err := dig_invoke_12(v16, v0, v1); err != nil {
 			return err
 		}
 		dig_invoke_13(v8)

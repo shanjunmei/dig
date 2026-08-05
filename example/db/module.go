@@ -8,6 +8,7 @@ import (
 
 func Module() dig.Option {
 	return dig.Module(
+		dig.Supply(Index),
 		// 命名实例注入：每个命名实例需要独立的 dig.Provide
 		// 返回值参数名 = 实例名
 		dig.Provide(func() (primaryDB *DB, err error) {
@@ -32,9 +33,9 @@ func Module() dig.Option {
 		}),
 
 		// 消费命名实例（指定参数名）
-		dig.Invoke(func(primaryDB *DB, userRedis *RedisClient) {
+		dig.Invoke(func(primaryDB *DB, userRedis *RedisClient, Index RedisDbIndex) {
 			primaryDB.Ping()
-			userRedis.Ping()
+			userRedis.Ping(Index)
 		}),
 
 		dig.Invoke(func(replicaDB *DB, sessionRedis *RedisClient) {
