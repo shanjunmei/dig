@@ -17,16 +17,16 @@ func dig_invoke_1(i1 *err.Item1, i2 *err.Item2) {
 }
 
 func InitShadowErr() func(context.Context) error {
-	v0, err2 := err.NewItem1()
+	dv0, err2 := err.NewItem1()
 	if err2 != nil {
 		panic(err2)
 	}
-	v1, err2 := err.NewItem2()
+	dv1, err2 := err.NewItem2()
 	if err2 != nil {
 		panic(err2)
 	}
 	return func(ctx context.Context) error {
-		dig_invoke_1(v0, v1)
+		dig_invoke_1(dv0, dv1)
 		return nil
 	}
 }

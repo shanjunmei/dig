@@ -45,27 +45,27 @@ func dig_invoke_5(str string, cfg *common.Config, log *logger.Logger) error {
 }
 
 func InitAppBasic(cfg *common.Config, log *logger.Logger) func(context.Context) error {
-	v0 := cfg
-	v1 := log
-	v2 := user.NewStore[int]()
-	v3 := repository.NewRepository[string]()
-	v4, err := dig_provider_1()
+	dv0 := cfg
+	dv1 := log
+	dv2 := user.NewStore[int]()
+	dv3 := repository.NewRepository[string]()
+	dv4, err := dig_provider_1()
 	if err != nil {
 		panic(err)
 	}
-	v5 := 100
-	v6 := role_repository.NewRepository[int]()
-	v7 := role.Config("production")
-	v8 := role.NewServer(v5)
+	dv5 := 100
+	dv6 := role_repository.NewRepository[int]()
+	dv7 := role.Config("production")
+	dv8 := role.NewServer(dv5)
 	return func(ctx context.Context) error {
-		dig_invoke_1(v3)
-		if err := user.ProcessStore[int](v2, v4); err != nil {
+		dig_invoke_1(dv3)
+		if err := user.ProcessStore[int](dv2, dv4); err != nil {
 			return err
 		}
-		dig_invoke_2(v6)
-		dig_invoke_3(v7)
-		dig_invoke_4(v8)
-		if err := dig_invoke_5(v4, v0, v1); err != nil {
+		dig_invoke_2(dv6)
+		dig_invoke_3(dv7)
+		dig_invoke_4(dv8)
+		if err := dig_invoke_5(dv4, dv0, dv1); err != nil {
 			return err
 		}
 		return nil

@@ -16,9 +16,9 @@ func dig_invoke_1(handler func(*common.Config) error) error {
 }
 
 func InitGenTest() func(context.Context) error {
-	v0 := makeConfigHandler()
+	dv0 := makeConfigHandler()
 	return func(ctx context.Context) error {
-		if err := dig_invoke_1(v0); err != nil {
+		if err := dig_invoke_1(dv0); err != nil {
 			return err
 		}
 		return nil

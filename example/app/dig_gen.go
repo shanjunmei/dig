@@ -131,20 +131,20 @@ func dig_invoke_13(stringCache *cache.Cache[string]) {
 func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error {
 	Logf("[SUPPLY] before: %s\n", "*github.com/shanjunmei/dig/example/common.Config")
 	// supplied from function 'InitApp' argument 'cfg' (type *github.com/shanjunmei/dig/example/common.Config) at di.go:27
-	v0 := cfg
+	dv0 := cfg
 	Logf("[SUPPLY] after: %s\n", "*github.com/shanjunmei/dig/example/common.Config")
 	Logf("[SUPPLY] before: %s\n", "*github.com/shanjunmei/dig/example/internal/logger.Logger")
 	// supplied from function 'InitApp' argument 'log' (type *github.com/shanjunmei/dig/example/internal/logger.Logger) at di.go:27
-	v1 := log
+	dv1 := log
 	Logf("[SUPPLY] after: %s\n", "*github.com/shanjunmei/dig/example/internal/logger.Logger")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/user.NewStore")
-	v2 := user.NewStore[int]()
+	dv2 := user.NewStore[int]()
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/user.NewStore")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/user/repository.NewRepository")
-	v3 := repository.NewRepository[string]()
+	dv3 := repository.NewRepository[string]()
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/user/repository.NewRepository")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_1")
-	v4, err := dig_provider_1()
+	dv4, err := dig_provider_1()
 	if err != nil {
 		Logf("[PROVIDE] failed: %s: %v\n", "github.com/shanjunmei/dig/example/app.dig_provider_1", err)
 		panic(err)
@@ -152,112 +152,112 @@ func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_1")
 	Logf("[SUPPLY] before: %s\n", "int")
 	// supply from github.com/shanjunmei/dig/example/role at module.go:14
-	v5 := 100
+	dv5 := 100
 	Logf("[SUPPLY] after: %s\n", "int")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/role/repository.NewRepository")
-	v6 := role_repository.NewRepository[int]()
+	dv6 := role_repository.NewRepository[int]()
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/role/repository.NewRepository")
 	Logf("[SUPPLY] before: %s\n", "github.com/shanjunmei/dig/example/role.Config")
 	// supply from github.com/shanjunmei/dig/example/role at module.go:16
-	v7 := role.Config("production")
+	dv7 := role.Config("production")
 	Logf("[SUPPLY] after: %s\n", "github.com/shanjunmei/dig/example/role.Config")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/cache.NewCache")
-	v8 := cache.NewCache[string]()
+	dv8 := cache.NewCache[string]()
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/cache.NewCache")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/cache.NewCache")
-	v9 := cache.NewCache[int]()
+	dv9 := cache.NewCache[int]()
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/cache.NewCache")
 	Logf("[SUPPLY] before: %s\n", "github.com/shanjunmei/dig/example/db.RedisDbIndex")
 	// supply from github.com/shanjunmei/dig/example/db at module.go:11
-	v11 := db.Index
+	dv11 := db.Index
 	Logf("[SUPPLY] after: %s\n", "github.com/shanjunmei/dig/example/db.RedisDbIndex")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_3")
-	v12, err := dig_provider_3()
+	dv12, err := dig_provider_3()
 	if err != nil {
 		Logf("[PROVIDE] failed: %s: %v\n", "github.com/shanjunmei/dig/example/app.dig_provider_3", err)
 		panic(err)
 	}
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_3")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_4")
-	v13, err := dig_provider_4()
+	dv13, err := dig_provider_4()
 	if err != nil {
 		Logf("[PROVIDE] failed: %s: %v\n", "github.com/shanjunmei/dig/example/app.dig_provider_4", err)
 		panic(err)
 	}
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_4")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_5")
-	v14 := dig_provider_5()
+	dv14 := dig_provider_5()
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_5")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_6")
-	v15 := dig_provider_6()
+	dv15 := dig_provider_6()
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_6")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_7")
-	v16 := dig_provider_7()
+	dv16 := dig_provider_7()
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_7")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_10")
-	v17 := func() common.Config {
+	dv17 := func() common.Config {
 		return common.Config{Addr: "127.0.0.1", Port: 9000}
 	}()
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_10")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_12")
-	v18 := dig_provider_12()
+	dv18 := dig_provider_12()
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_12")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/role.NewServer")
-	v20 := role.NewServer(v5)
+	dv20 := role.NewServer(dv5)
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/role.NewServer")
 	Logf("[PROVIDE] identity conversion: %s -> %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_8", "db.Pinger")
-	v21 := db.Pinger(v12)
+	dv21 := db.Pinger(dv12)
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_8")
 	Logf("[PROVIDE] identity conversion: %s -> %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_9", "any")
-	v22 := any(v12)
+	dv22 := any(dv12)
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_9")
 	Logf("[PROVIDE] identity conversion: %s -> %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_11", "*common.Config")
-	v23 := &v17
+	dv23 := &dv17
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_11")
 	Logf("[PROVIDE] identity conversion: %s -> %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_13", "db.DB")
-	v24 := *v18
+	dv24 := *dv18
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_provider_13")
 	return func(ctx context.Context) error {
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_1")
 		func(r *repository.Repository[string]) {
 			r.Print()
-		}(v3)
+		}(dv3)
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_1")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/user.ProcessStore")
-		if err := user.ProcessStore[int](v2, v4); err != nil {
+		if err := user.ProcessStore[int](dv2, dv4); err != nil {
 			Logf("[INVOKE] failed: %s: %v\n", "github.com/shanjunmei/dig/example/user.ProcessStore", err)
 			return err
 		}
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/user.ProcessStore")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_2")
-		dig_invoke_2(v6)
+		dig_invoke_2(dv6)
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_2")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_3")
 		func(cfg role.Config) {
 			fmt.Printf("Config supplied: %s\n", cfg)
-		}(v7)
+		}(dv7)
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_3")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_4")
 		func(s *role.Server) {
 			s.Run()
-		}(v20)
+		}(dv20)
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_4")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_5")
-		dig_invoke_5(v8, v9)
+		dig_invoke_5(dv8, dv9)
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_5")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_6")
-		dig_invoke_6(v12, v14, v11)
+		dig_invoke_6(dv12, dv14, dv11)
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_6")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_7")
 		func(replicaDB *db.DB, sessionRedis *db.RedisClient) {
 			fmt.Printf("Replica: %s, Session: %s\n", replicaDB.Name, sessionRedis.Name)
-		}(v13, v15)
+		}(dv13, dv15)
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_7")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_8")
-		dig_invoke_8(v12, v14, v11)
+		dig_invoke_8(dv12, dv14, dv11)
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_8")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_9")
-		dig_invoke_9(v21, v22, v23, v24, v18)
+		dig_invoke_9(dv21, dv22, dv23, dv24, dv18)
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_9")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_10")
 		func(s *user.Store[string], cfg *common.Config) {
@@ -266,21 +266,21 @@ func InitApp(cfg *common.Config, log *logger.Logger) func(context.Context) error
 			} else {
 				s.Add("low-port")
 			}
-		}(v16, v0)
+		}(dv16, dv0)
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_10")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_11")
 		func(s *user.Store[string]) {
 			setup.BootstrapStore(s)
-		}(v16)
+		}(dv16)
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_11")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_12")
-		if err := dig_invoke_12(v16, v0, v1); err != nil {
+		if err := dig_invoke_12(dv16, dv0, dv1); err != nil {
 			Logf("[INVOKE] failed: %s: %v\n", "github.com/shanjunmei/dig/example/app.dig_invoke_12", err)
 			return err
 		}
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_12")
 		Logf("[INVOKE] before: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_13")
-		dig_invoke_13(v8)
+		dig_invoke_13(dv8)
 		Logf("[INVOKE] after: %s\n", "github.com/shanjunmei/dig/example/app.dig_invoke_13")
 		return nil
 	}

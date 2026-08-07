@@ -2265,7 +2265,10 @@ func (e *Extractor) buildSupplyNode(it extractedItem, name string) (model.Node, 
 func (e *Extractor) assignVarNames(order []int, items []extractedItem) []string {
 	n := len(items)
 	varNames := make([]string, n)
-	// ShadowGuard 确保生成的 vN 变量名不遮蔽包别名或内建标识符
+	// ShadowGuard 作为安全网，防止 dvN 与包别名或内建标识符冲突。
+	// dv 前缀（digen variable）与所有别名策略生成的格式不重叠
+	// （SimpleAliasStrategy 生成 <base>/base2/base3，ContextualAliasStrategy 生成 <segment> 或 <seg1>_<seg2>，
+	// ObfuscatedAliasStrategy 生成单字母+数字，NumericAliasStrategy 生成 _N）。
 	sg := alias.NewShadowGuard(
 		e.aliasManager.GetImportAliasMap(),
 		e.aliasManager.GetPkgAliasMap(),
@@ -2274,10 +2277,8 @@ func (e *Extractor) assignVarNames(order []int, items []extractedItem) []string 
 	vIdx := 0
 	for _, i := range order {
 		if !items[i].IsInvoke {
-			varNames[i] = sg.SafeName(fmt.Sprintf("v%d", vIdx))
-			name := sg.SafeName(fmt.Sprintf("v%d", vIdx))
-			// 关键：把已分配的名字加入保留集，防止后续 SafeName 回退到同名
-			// 例如 v3 被保留时回退到 v32，若不注册则 vIdx=32 时会再次生成 v32
+			name := sg.SafeName(fmt.Sprintf("dv%d", vIdx))
+			// 把已分配的名字加入保留集，防止后续 SafeName 回退到同名
 			sg.Reserve(name)
 			varNames[i] = name
 			vIdx++

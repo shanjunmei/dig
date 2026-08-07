@@ -22,11 +22,11 @@ func dig_invoke_1(r *helper.Result, d *db.DB) {
 }
 
 func InitShadowFreeVar() func(context.Context) error {
-	v0 := &helper.Counter{Count: 42}
-	v1 := &db.DB{Name: "test"}
-	v2 := dig_provider_1(v0)
+	dv0 := &helper.Counter{Count: 42}
+	dv1 := &db.DB{Name: "test"}
+	dv2 := dig_provider_1(dv0)
 	return func(ctx context.Context) error {
-		dig_invoke_1(v2, v1)
+		dig_invoke_1(dv2, dv1)
 		return nil
 	}
 }
