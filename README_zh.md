@@ -13,7 +13,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **当前版本**：v1.0.15
+> **当前版本**：v1.0.16
 >
 > **关键版本变更**：
 > - **v1.0.15**：类型包收集逻辑核心健壮性修复（正确处理函数签名、自引用类型、嵌套泛型）；移除 `-debug-aliases` 标志（统一并入 `-debug`）、放开每函数仅一个 `dig.Module` 限制；完善第三方库对比矩阵
@@ -59,7 +59,7 @@ Go 的依赖注入工具分为两大阵营：
 ## 安装
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.15
+go get github.com/shanjunmei/dig@v1.0.16
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 要求 Go 1.21+。
@@ -331,7 +331,7 @@ func main() { Logf = myLogger.Printf }
 | 特性 | dig | Google Wire | Uber Fx |
 |------|-----|-------------|---------|
 | 维护状态 | ✅ 活跃 | ⚠️ **已归档**（不再维护） | ✅ 活跃 |
-| 最新版本 | v1.0.15 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
+| 最新版本 | v1.0.16 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
 | Go 版本要求 | 1.21+ | 标准 | 1.21+（用于 `slog` logger） |
 | 重构友好度 | 高（静态检查 + 源码位置） | 低（错误晦涩） | 中（运行时错误） |
 

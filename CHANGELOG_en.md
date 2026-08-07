@@ -4,6 +4,59 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v1.0.16] - 2026-08-07
+
+## ✨ New Features
+
+- **ShadowGuard variable name shadowing protection**  
+  Added a shadow protection mechanism that automatically detects and prevents variable name shadowing during code generation, improving the robustness of generated code.
+
+- **Default behavior for unused parameters changed**  
+  Changed the handling of unused parameters from the default `drop` (discard) to `error` (report an error), helping developers catch potential parameter omissions earlier.
+
+
+## 🐛 Bug Fixes
+
+- **Fix missing quotes for generic type parameters in logs**  
+  Improved the generator's logging of Identity Target Type by properly wrapping type parameters with quotes, making log output more consistent and readable.
+
+- **Fix identifier handling for cross‑package bare function calls**  
+  Fixed an issue where the extractor incorrectly recognised identifiers when handling cross‑package bare function calls.
+
+- **Fix free variable shadowing of package aliases**  
+  Resolved a problem where free variable parameter names shadowed package aliases in non‑closure items. Adjusted the extraction logic to register package aliases earlier, ensuring that ShadowGuard correctly handles parameter lists and free variable mappings.
+
+- **Fix shadowing caused by case‑sensitive variable names**  
+  Renamed the package‑level variable `Db` to `db` to avoid naming conflicts with the imported `db` package alias, and updated all code references accordingly.
+
+
+## ♻️ Refactor and Optimisation
+
+- **Refactor ShadowGuard and free variable handling**  
+  Refactored the shadowing logic for free variables and improved the ShadowGuard mechanism, enhancing the overall robustness of the code generator.
+
+- **Enhanced metadata in generated code**  
+  Added debug logs and clearer metadata information to the generated `dig_gen.go` files, making troubleshooting easier.
+
+---
+
+## 📦 Examples and Documentation Updates
+
+- **Update Redis DB Index configuration example**  
+  In the `example` module, added a new `RedisDbIndex` type and a default variable, updated the `Ping` method to receive and log the db index, and injected the db index via DI.
+
+- **Update all generated dig_gen.go files**  
+  Synchronised the regenerated `dig_gen.go` files across all example modules.
+
+---
+
+## 🔧 Chores
+
+- Updated dependency versions and change logs
+- Removed the `debug-aliases` flag and lifted the "one function per module" restriction
+- Improved the third‑party library comparison matrix and cleaned up example code
+
+---
 
 ## [v1.0.15] - 2026-08-03
 
