@@ -35,16 +35,16 @@ func dig_invoke_1(a *app.App) error {
 }
 
 func InitApp(cfg *config.Config) func(context.Context) error {
-	v0 := cfg
-	v1 := loader.NewPackageLoader()
-	v2 := logger.NewLogger(v0)
-	v3 := dig_provider_1(v0)
-	v4 := generator.NewGenerator(v2, v0)
-	v5 := dig_provider_2(v3)
-	v6 := processor.NewProcessor(v1, v4, v2, v0)
-	v7 := app.NewApp(v6, v1, v2, v5, v0)
+	dv0 := cfg
+	dv1 := loader.NewPackageLoader()
+	dv2 := logger.NewLogger(dv0)
+	dv3 := dig_provider_1(dv0)
+	dv4 := generator.NewGenerator(dv2, dv0)
+	dv5 := dig_provider_2(dv3)
+	dv6 := processor.NewProcessor(dv1, dv4, dv2, dv0)
+	dv7 := app.NewApp(dv6, dv1, dv2, dv5, dv0)
 	return func(ctx context.Context) error {
-		if err := dig_invoke_1(v7); err != nil {
+		if err := dig_invoke_1(dv7); err != nil {
 			return err
 		}
 		return nil
