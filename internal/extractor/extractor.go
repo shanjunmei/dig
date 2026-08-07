@@ -2275,6 +2275,11 @@ func (e *Extractor) assignVarNames(order []int, items []extractedItem) []string 
 	for _, i := range order {
 		if !items[i].IsInvoke {
 			varNames[i] = sg.SafeName(fmt.Sprintf("v%d", vIdx))
+			name := sg.SafeName(fmt.Sprintf("v%d", vIdx))
+			// 关键：把已分配的名字加入保留集，防止后续 SafeName 回退到同名
+			// 例如 v3 被保留时回退到 v32，若不注册则 vIdx=32 时会再次生成 v32
+			sg.Reserve(name)
+			varNames[i] = name
 			vIdx++
 		}
 	}

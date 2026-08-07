@@ -24,42 +24,42 @@ import (
 var Logf = log.Printf
 
 // original package: github.com/shanjunmei/dig/example/user
-// closure defined at example/user/module.go:12
+// closure defined at module.go:12
 func dig_provider_1() (str string, err error) {
 	str = "user-module"
 	return
 }
 
 // original package: github.com/shanjunmei/dig/example/db
-// closure defined at example/db/module.go:14
+// closure defined at module.go:14
 func dig_provider_3() (primaryDB *db.DB, err error) {
 	primaryDB = &db.DB{Name: "primary", DSN: "postgres://primary:5432/app"}
 	return
 }
 
 // original package: github.com/shanjunmei/dig/example/db
-// closure defined at example/db/module.go:19
+// closure defined at module.go:19
 func dig_provider_4() (replicaDB *db.DB, err error) {
 	replicaDB = &db.DB{Name: "replica", DSN: "postgres://replica:5432/app"}
 	return
 }
 
 // original package: github.com/shanjunmei/dig/example/db
-// closure defined at example/db/module.go:25
+// closure defined at module.go:25
 func dig_provider_5() (userRedis *db.RedisClient) {
 	userRedis = &db.RedisClient{Name: "user", Address: "redis://user:6379"}
 	return
 }
 
 // original package: github.com/shanjunmei/dig/example/db
-// closure defined at example/db/module.go:30
+// closure defined at module.go:30
 func dig_provider_6() (sessionRedis *db.RedisClient) {
 	sessionRedis = &db.RedisClient{Name: "session", Address: "redis://session:6379"}
 	return
 }
 
 // original package: github.com/shanjunmei/dig/example/setup
-// closure defined at example/setup/full.go:36
+// closure defined at full.go:36
 func dig_provider_7() *user.Store[string] {
 	s := user.NewStore[string]()
 	s.Add("hello")
@@ -68,20 +68,20 @@ func dig_provider_7() *user.Store[string] {
 }
 
 // original package: github.com/shanjunmei/dig/example/setup
-// closure defined at example/setup/full.go:68
+// closure defined at full.go:68
 func dig_provider_12() (closureDB *db.DB) {
 	return &db.DB{Name: "inmem", DSN: "mem://"}
 }
 
 // original package: github.com/shanjunmei/dig/example/role/repository
-// closure defined at example/role/repository/module.go:8
+// closure defined at module.go:8
 func dig_invoke_2(r *role_repository.Repository[int]) {
 	r.Add(42)
 	r.Print()
 }
 
 // original package: github.com/shanjunmei/dig/example/cache
-// closure defined at example/cache/module.go:23
+// closure defined at module.go:23
 func dig_invoke_5(stringCache *cache.Cache[string], intCache *cache.Cache[int]) {
 	stringCache.Set("greeting", "hello")
 	intCache.Set("count", 42)
@@ -91,21 +91,21 @@ func dig_invoke_5(stringCache *cache.Cache[string], intCache *cache.Cache[int]) 
 }
 
 // original package: github.com/shanjunmei/dig/example/db
-// closure defined at example/db/module.go:36
+// closure defined at module.go:36
 func dig_invoke_6(primaryDB *db.DB, userRedis *db.RedisClient, Index db.RedisDbIndex) {
 	primaryDB.Ping()
 	userRedis.Ping(Index)
 }
 
 // original package: github.com/shanjunmei/dig/example/setup
-// closure defined at example/setup/full.go:76
+// closure defined at full.go:76
 func dig_invoke_8(primaryDB *db.DB, userRedis *db.RedisClient, Index db.RedisDbIndex) {
 	primaryDB.Ping()
 	userRedis.Ping(Index)
 }
 
 // original package: github.com/shanjunmei/dig/example/setup
-// closure defined at example/setup/full.go:82
+// closure defined at full.go:82
 func dig_invoke_9(pinger db.Pinger, raw any, setupCfg *common.Config, dbVal db.DB, closureDB *db.DB) {
 	pinger.Ping()
 	if d, ok := raw.(*db.DB); ok {
@@ -116,13 +116,13 @@ func dig_invoke_9(pinger db.Pinger, raw any, setupCfg *common.Config, dbVal db.D
 	closureDB.Ping()
 }
 
-// closure defined at example/app_edge/di.go:40
+// closure defined at di.go:40
 func dig_invoke_13(stringCache *cache.Cache[string], log *logger.Logger) {
 	stringCache.Set("edge", "boundary-test")
 	stringCache.Print()
 }
 
-// closure defined at example/app_edge/di.go:46
+// closure defined at di.go:46
 func dig_invoke_14(cfg *common.Config, log *logger.Logger) error {
 	log.Println("Edge: port =", cfg.Port)
 	return nil
@@ -130,11 +130,11 @@ func dig_invoke_14(cfg *common.Config, log *logger.Logger) error {
 
 func InitAppEdge(cfg *common.Config, log *logger.Logger) func(context.Context) error {
 	Logf("[SUPPLY] before: %s\n", "*github.com/shanjunmei/dig/example/common.Config")
-	// supplied from function 'InitAppEdge' argument 'cfg' (type *github.com/shanjunmei/dig/example/common.Config) at example/app_edge/di.go:23
+	// supplied from function 'InitAppEdge' argument 'cfg' (type *github.com/shanjunmei/dig/example/common.Config) at di.go:23
 	v0 := cfg
 	Logf("[SUPPLY] after: %s\n", "*github.com/shanjunmei/dig/example/common.Config")
 	Logf("[SUPPLY] before: %s\n", "*github.com/shanjunmei/dig/example/internal/logger.Logger")
-	// supplied from function 'InitAppEdge' argument 'log' (type *github.com/shanjunmei/dig/example/internal/logger.Logger) at example/app_edge/di.go:23
+	// supplied from function 'InitAppEdge' argument 'log' (type *github.com/shanjunmei/dig/example/internal/logger.Logger) at di.go:23
 	v1 := log
 	Logf("[SUPPLY] after: %s\n", "*github.com/shanjunmei/dig/example/internal/logger.Logger")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/user.NewStore")
@@ -151,14 +151,14 @@ func InitAppEdge(cfg *common.Config, log *logger.Logger) func(context.Context) e
 	}
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/app_edge.dig_provider_1")
 	Logf("[SUPPLY] before: %s\n", "int")
-	// supply from github.com/shanjunmei/dig/example/role at example/role/module.go:14
+	// supply from github.com/shanjunmei/dig/example/role at module.go:14
 	v5 := 100
 	Logf("[SUPPLY] after: %s\n", "int")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/role/repository.NewRepository")
 	v6 := role_repository.NewRepository[int]()
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/role/repository.NewRepository")
 	Logf("[SUPPLY] before: %s\n", "github.com/shanjunmei/dig/example/role.Config")
-	// supply from github.com/shanjunmei/dig/example/role at example/role/module.go:16
+	// supply from github.com/shanjunmei/dig/example/role at module.go:16
 	v7 := role.Config("production")
 	Logf("[SUPPLY] after: %s\n", "github.com/shanjunmei/dig/example/role.Config")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/cache.NewCache")
@@ -168,7 +168,7 @@ func InitAppEdge(cfg *common.Config, log *logger.Logger) func(context.Context) e
 	v9 := cache.NewCache[int]()
 	Logf("[PROVIDE] after: %s\n", "github.com/shanjunmei/dig/example/cache.NewCache")
 	Logf("[SUPPLY] before: %s\n", "github.com/shanjunmei/dig/example/db.RedisDbIndex")
-	// supply from github.com/shanjunmei/dig/example/db at example/db/module.go:11
+	// supply from github.com/shanjunmei/dig/example/db at module.go:11
 	v11 := db.Index
 	Logf("[SUPPLY] after: %s\n", "github.com/shanjunmei/dig/example/db.RedisDbIndex")
 	Logf("[PROVIDE] before: %s\n", "github.com/shanjunmei/dig/example/app_edge.dig_provider_3")
