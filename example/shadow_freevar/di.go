@@ -20,13 +20,15 @@ import (
 
 // InitShadowFreeVar 主包导入 example/db（别名为 db），
 // 同时使用 helper.Module() 提供的闭包（捕获名为 db 的自由变量）。
+// Supply 提供 *helper.Counter 实例，供闭包自由变量 db 解析。
 func InitShadowFreeVar() func(context.Context) error {
 	return dig.Build(
 		helper.Module(),
+		dig.Supply(&helper.Counter{Count: 42}),
 		dig.Supply(&db.DB{Name: "test"}),
-		dig.Invoke(func(r *helper.Result, db *db.DB) {
+		dig.Invoke(func(r *helper.Result, d *db.DB) {
 			_ = r
-			_ = db
+			_ = d
 		}),
 	)
 }

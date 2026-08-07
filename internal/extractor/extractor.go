@@ -408,7 +408,9 @@ func (e *Extractor) collectUsedPkgsFromType(typ types.Type) []string {
 	return pkgs
 }
 
-// populateUsedPkgs 为所有非闭包 item 填充 UsedPkgs
+// populateUsedPkgs 为所有非闭包 item 填充 UsedPkgs，并提前注册所有使用包的别名。
+// 提前注册确保 buildParamListAndFreeVarMap 中的 ShadowGuard 能看到全部包别名，
+// 避免自由变量参数名遮蔽仅出现在非闭包 item 中的包别名。
 func (e *Extractor) populateUsedPkgs() {
 	for i := range e.items {
 		it := &e.items[i]
@@ -416,6 +418,10 @@ func (e *Extractor) populateUsedPkgs() {
 			continue
 		}
 		if len(it.UsedPkgs) > 0 {
+			// 已有 UsedPkgs 的 item 仍需提前注册别名（如 Supply 在提取阶段已填充 UsedPkgs）
+			for _, pkgPath := range it.UsedPkgs {
+				e.aliasManager.EnsureAlias(pkgPath)
+			}
 			continue
 		}
 		usedMap := make(map[string]bool)
@@ -442,6 +448,11 @@ func (e *Extractor) populateUsedPkgs() {
 					usedMap[p] = true
 				}
 			}
+		}
+
+		// 提前注册别名，确保后续 ShadowGuard 可见
+		for pkgPath := range usedMap {
+			e.aliasManager.EnsureAlias(pkgPath)
 		}
 
 		// 转为切片
