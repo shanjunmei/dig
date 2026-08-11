@@ -24,5 +24,5 @@ type RedisClient struct {
 }
 
 func (r *RedisClient) Ping(index RedisDbIndex) {
-	fmt.Printf("[%s] Redis Ping: %s,db=%v\n", r.Name, r.Address, Index)
+	fmt.Printf("[%s] Redis Ping: %s,db=%v\n", r.Name, r.Address, index)
 }

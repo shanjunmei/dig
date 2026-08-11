@@ -543,14 +543,15 @@ func (e *Extractor) handleSupply(expr ast.Expr, curPkg *packages.Package) error 
 	if instanceName != "" {
 		keyNamed = retType + ":" + instanceName
 	}
-	// 检查命名键冲突
-	if oldIdx, exists := e.globalProviderMap[keyNamed]; exists {
-		oldDesc := e.describeItem(oldIdx)
-		currentDesc := e.describeItemByIt(item)
-		return fmt.Errorf("at %s: duplicate binding for %s with name %q:\n\tprevious: %s\n\tcurrent: %s",
-			pos, retType, instanceName, oldDesc, currentDesc)
-	}
-	if instanceName == "" {
+	// 检查键冲突：命名实例和默认实例使用不同的错误信息
+	if instanceName != "" {
+		if oldIdx, exists := e.globalProviderMap[keyNamed]; exists {
+			oldDesc := e.describeItem(oldIdx)
+			currentDesc := e.describeItemByIt(item)
+			return fmt.Errorf("at %s: duplicate binding for %s with name %q:\n\tprevious: %s\n\tcurrent: %s",
+				pos, retType, instanceName, oldDesc, currentDesc)
+		}
+	} else {
 		if oldIdx, exists := e.globalProviderMap[keyDefault]; exists {
 			oldDesc := e.describeItem(oldIdx)
 			currentDesc := e.describeItemByIt(item)
