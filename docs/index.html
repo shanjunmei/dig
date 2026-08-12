@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="dig — 编译期依赖注入 for Go。Fx 风格极简 API + Wire 风格代码生成，零运行时反射，零运行时依赖。">
+  <meta name="author" content="shanjunmei">
+  <meta property="og:title" content="dig — Compile-time DI for Go">
+  <meta property="og:description" content="Fx-style minimal API + Wire-style code generation. Zero reflection, zero runtime dependency.">
+  <meta property="og:type" content="website">
+  <title>dig — 编译期依赖注入 for Go</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%2300ADD8'/><text x='50' y='68' font-size='52' font-family='monospace' font-weight='bold' text-anchor='middle' fill='white'>dig</text></svg>">
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<!-- ===== Nav ===== -->
+<nav id="navbar">
+  <div class="nav-container">
+    <a href="#" class="nav-logo">
+      <span class="logo-icon">dig</span>
+    </a>
+    <div class="nav-links" id="nav-links">
+      <a href="#why">为什么选择</a>
+      <a href="#features">核心特性</a>
+      <a href="#quickstart">快速开始</a>
+      <a href="#api">API</a>
+      <a href="#comparison">对比矩阵</a>
+      <a href="#examples">示例</a>
+      <a href="https://github.com/shanjunmei/dig" class="nav-github" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <button class="nav-toggle" id="nav-toggle" aria-label="菜单">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</nav>
+
+<!-- ===== Hero ===== -->
+<section id="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-content">
+    <div class="hero-badges">
+      <a href="https://pkg.go.dev/github.com/shanjunmei/dig" target="_blank" rel="noopener">
+        <img src="https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg" alt="Go Reference">
+      </a>
+      <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
+      <img src="https://img.shields.io/badge/version-v1.0.16-00ADD8.svg" alt="v1.0.16">
+      <img src="https://img.shields.io/badge/Go-1.21+-00ADD8.svg" alt="Go 1.21+">
+    </div>
+    <h1 class="hero-title">
+      <span class="hero-dig">dig</span>
+      <span class="hero-subtitle">编译期依赖注入 for Go</span>
+    </h1>
+    <p class="hero-tagline">
+      Fx 风格极简 API + Wire 风格代码生成<br>
+      零运行时反射 · 零运行时依赖 · 编译期安全
+    </p>
+    <div class="hero-cta">
+      <a href="#quickstart" class="btn btn-primary">快速开始</a>
+      <a href="https://github.com/shanjunmei/dig" class="btn btn-secondary" target="_blank" rel="noopener">查看源码</a>
+    </div>
+    <div class="hero-code-preview">
+      <div class="code-window">
+        <div class="code-window-bar">
+          <span class="dot dot-red"></span>
+          <span class="dot dot-yellow"></span>
+          <span class="dot dot-green"></span>
+          <span class="code-window-title">di.go</span>
+        </div>
+        <pre><code><span class="c-comment">//go:build digen</span>
+
+<span class="c-keyword">func</span> <span class="c-func">InitApp</span>() <span class="c-func">func</span>(context.Context) <span class="c-type">error</span> {
+    <span class="c-keyword">return</span> dig.<span class="c-func">Build</span>(
+        dig.<span class="c-func">Provide</span>(NewConfig),
+        dig.<span class="c-func">Provide</span>(NewDB),
+        dig.<span class="c-func">Supply</span>(DefaultTimeout),
+        dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(srv *Server) <span class="c-type">error</span> { <span class="c-keyword">return</span> srv.<span class="c-func">Run</span>() }),
+    )
+}</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Why dig ===== -->
+<section id="why" class="section">
+  <div class="container">
+    <h2 class="section-title">为什么选择 dig？</h2>
+    <p class="section-desc">Go 的依赖注入工具分为两大阵营，dig 取其精华，去其糟粕。</p>
+
+    <div class="why-grid">
+      <div class="why-card why-card-fx">
+        <div class="why-card-header">
+          <span class="why-badge why-badge-blue">Uber Fx</span>
+        </div>
+        <div class="why-body">
+          <div class="why-pro">
+            <span class="why-icon">✓</span>
+            <span>API 优雅（Provide / Invoke / Supply / Module）</span>
+          </div>
+          <div class="why-con">
+            <span class="why-icon">✗</span>
+            <span>运行时反射 — 启动慢、运行时 panic</span>
+          </div>
+          <div class="why-con">
+            <span class="why-icon">✗</span>
+            <span>二进制体积更大</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="why-card why-card-wire">
+        <div class="why-card-header">
+          <span class="why-badge why-badge-orange">Google Wire</span>
+        </div>
+        <div class="why-body">
+          <div class="why-pro">
+            <span class="why-icon">✓</span>
+            <span>编译期安全，零运行时开销</span>
+          </div>
+          <div class="why-con">
+            <span class="why-icon">✗</span>
+            <span>API 冗长且反直觉</span>
+          </div>
+          <div class="why-con">
+            <span class="why-icon">✗</span>
+            <span>已归档，不再维护</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="why-card why-card-dig">
+        <div class="why-card-header">
+          <span class="why-badge why-badge-cyan">dig</span>
+          <span class="why-tag">两者优点</span>
+        </div>
+        <div class="why-body">
+          <div class="why-pro">
+            <span class="why-icon">✓</span>
+            <span>Fx 风格极简 API</span>
+          </div>
+          <div class="why-pro">
+            <span class="why-icon">✓</span>
+            <span>Wire 风格代码生成（无反射）</span>
+          </div>
+          <div class="why-pro">
+            <span class="why-icon">✓</span>
+            <span>原生泛型 + 命名实例注入</span>
+          </div>
+          <div class="why-pro">
+            <span class="why-icon">✓</span>
+            <span>闭包捕获安全 + 可操作错误</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Core Features ===== -->
+<section id="features" class="section section-alt">
+  <div class="container">
+    <h2 class="section-title">核心特性</h2>
+    <p class="section-desc">11 项核心能力，覆盖 Go 依赖注入的完整场景</p>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>编译期解析</h3>
+        <p>依赖图在 <code>go generate</code> 期间完成解析，错误在生成阶段即被捕获，不等到运行时。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📦</div>
+        <h3>零运行时依赖</h3>
+        <p>生成的代码是纯 Go，不导入任何额外包，零反射、零开销。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔑</div>
+        <h3>极简 API</h3>
+        <p>仅需 <code>Build</code>、<code>Provide</code>、<code>Supply</code>、<code>Invoke</code>、<code>Module</code> 五个函数。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
+        <h3>闭包捕获安全</h3>
+        <p>内联闭包不能捕获 <code>InitApp</code> 中的局部变量，由生成器强制检查。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔄</div>
+        <h3>闭包内联</h3>
+        <p><code>-inline</code> 将简单闭包内联为 IIFE，身份闭包塌缩为直接类型转换。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🧬</div>
+        <h3>泛型支持</h3>
+        <p>原生支持泛型函数和类型，显式实例化即可：<code>dig.Provide(NewStore[int])</code></p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🏷️</div>
+        <h3>命名实例注入</h3>
+        <p>通过参数名区分同一类型的多个实例，支持多 DB 连接、多 Redis 客户端等场景。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔍</div>
+        <h3>可观测性</h3>
+        <p>调试日志运行时可覆盖 <code>Logf</code>，<code>-debug</code> 打印导入别名映射。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">💡</div>
+        <h3>可操作错误</h3>
+        <p>所有错误消息包含源码位置 <code>file:line:col</code> 与 <code>💡 Fix:</code> 修复建议。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🧩</div>
+        <h3>模块嵌套</h3>
+        <p>层次化组合模块，内置重复检测，复用性更强。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚙️</div>
+        <h3>未使用提供者策略</h3>
+        <p>三种模式：<code>error</code>（默认）、<code>ignore</code>、<code>drop</code>，灵活控制。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔒</div>
+        <h3>ShadowGuard 保护</h3>
+        <p>变量名遮蔽保护机制，自动检测并避免生成代码中的命名冲突。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Quick Start ===== -->
+<section id="quickstart" class="section">
+  <div class="container">
+    <h2 class="section-title">快速开始</h2>
+    <p class="section-desc">三步上手 dig</p>
+
+    <div class="quickstart-steps">
+      <div class="qs-step">
+        <div class="qs-number">1</div>
+        <div class="qs-content">
+          <h3>安装</h3>
+          <div class="code-window small">
+            <div class="code-window-bar">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-yellow"></span>
+              <span class="dot dot-green"></span>
+              <span class="code-window-title">terminal</span>
+            </div>
+            <pre><code>go get github.com/shanjunmei/dig@v1.0.16
+go install github.com/shanjunmei/dig/cmd/digen@latest</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="qs-step">
+        <div class="qs-number">2</div>
+        <div class="qs-content">
+          <h3>编写 DI 规格文件 <code>di.go</code></h3>
+          <div class="code-window small">
+            <div class="code-window-bar">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-yellow"></span>
+              <span class="dot dot-green"></span>
+              <span class="code-window-title">di.go</span>
+            </div>
+            <pre><code><span class="c-comment">//go:build digen</span>
+<span class="c-keyword">package</span> main
+
+<span class="c-keyword">import</span> (
+    <span class="c-string">"context"</span>
+    <span class="c-string">"github.com/shanjunmei/dig"</span>
+)
+
+<span class="c-comment">//go:generate go run -mod=mod github.com/shanjunmei/dig/cmd/digen -out dig_gen.go</span>
+
+<span class="c-keyword">func</span> <span class="c-func">InitApp</span>() <span class="c-func">func</span>(context.Context) <span class="c-type">error</span> {
+    <span class="c-keyword">return</span> dig.<span class="c-func">Build</span>(
+        dig.<span class="c-func">Provide</span>(NewConfig),
+        dig.<span class="c-func">Provide</span>(NewDB),
+        dig.<span class="c-func">Supply</span>(DefaultTimeout),
+        dig.<span class="c-func">Provide</span>(<span class="c-keyword">func</span>(t Timeout) *Server { <span class="c-keyword">return</span> <span class="c-func">NewServer</span>(t) }),
+        dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(srv *Server) <span class="c-type">error</span> { <span class="c-keyword">return</span> srv.<span class="c-func">Run</span>() }),
+    )
+}</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="qs-step">
+        <div class="qs-number">3</div>
+        <div class="qs-content">
+          <h3>编写业务逻辑 <code>main.go</code></h3>
+          <div class="code-window small">
+            <div class="code-window-bar">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-yellow"></span>
+              <span class="dot dot-green"></span>
+              <span class="code-window-title">main.go</span>
+            </div>
+            <pre><code><span class="c-keyword">package</span> main
+
+<span class="c-keyword">import</span> <span class="c-string">"context"</span>
+
+<span class="c-keyword">type</span> Config <span class="c-keyword">struct</span>{ Addr <span class="c-type">string</span> }
+<span class="c-keyword">func</span> <span class="c-func">NewConfig</span>() *Config { <span class="c-keyword">return</span> &Config{Addr: <span class="c-string">":8080"</span>} }
+
+<span class="c-keyword">type</span> DB <span class="c-keyword">struct</span>{}
+<span class="c-keyword">func</span> <span class="c-func">NewDB</span>(*Config) *DB { <span class="c-keyword">return</span> &DB{} }
+
+<span class="c-keyword">type</span> Timeout <span class="c-type">int</span>
+<span class="c-keyword">var</span> DefaultTimeout Timeout = <span class="c-number">5</span>
+
+<span class="c-keyword">type</span> Server <span class="c-keyword">struct</span>{}
+<span class="c-keyword">func</span> <span class="c-func">NewServer</span>(Timeout) *Server { <span class="c-keyword">return</span> &Server{} }
+<span class="c-keyword">func</span> (*Server) <span class="c-func">Run</span>() <span class="c-type">error</span> { <span class="c-keyword">return</span> <span class="c-type">nil</span> }
+
+<span class="c-keyword">func</span> <span class="c-func">main</span>() {
+    <span class="c-keyword">if</span> err := <span class="c-func">InitApp</span>()(<span class="c-func">context.Background</span>()); err != <span class="c-type">nil</span> {
+        <span class="c-func">panic</span>(err)
+    }
+}</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="qs-step">
+        <div class="qs-number">4</div>
+        <div class="qs-content">
+          <h3>生成并运行</h3>
+          <div class="code-window small">
+            <div class="code-window-bar">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-yellow"></span>
+              <span class="dot dot-green"></span>
+              <span class="code-window-title">terminal</span>
+            </div>
+            <pre><code>digen ./...   <span class="c-comment"># 或 go generate ./...</span>
+go run .</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Core API ===== -->
+<section id="api" class="section section-alt">
+  <div class="container">
+    <h2 class="section-title">核心 API</h2>
+    <p class="section-desc">五个函数，覆盖全部依赖注入场景</p>
+
+    <div class="api-grid">
+      <div class="api-card">
+        <div class="api-signature">dig.<span class="api-name">Build</span>(...Option) func(context.Context) error</div>
+        <div class="api-desc">组装容器，返回可执行函数。入口函数。</div>
+      </div>
+      <div class="api-card">
+        <div class="api-signature">dig.<span class="api-name">Provide</span>(any) Option</div>
+        <div class="api-desc">注册构造函数（返回一个值，可选 error）。</div>
+      </div>
+      <div class="api-card">
+        <div class="api-signature">dig.<span class="api-name">Supply</span>(any) Option</div>
+        <div class="api-desc">直接注入一个已有值（任意表达式，运行时安全）。</div>
+      </div>
+      <div class="api-card">
+        <div class="api-signature">dig.<span class="api-name">Invoke</span>(any) Option</div>
+        <div class="api-desc">在所有提供者就绪后执行一个函数（可返回 error）。</div>
+      </div>
+      <div class="api-card">
+        <div class="api-signature">dig.<span class="api-name">Module</span>(...Option) Option</div>
+        <div class="api-desc">将多个选项组合为可复用、可嵌套的模块。</div>
+      </div>
+    </div>
+
+    <h3 class="subsection-title">命名实例注入</h3>
+    <p class="section-desc">通过参数名区分同一类型的多个实例</p>
+    <div class="code-window">
+      <div class="code-window-bar">
+        <span class="dot dot-red"></span>
+        <span class="dot dot-yellow"></span>
+        <span class="dot dot-green"></span>
+        <span class="code-window-title">named_instances.go</span>
+      </div>
+      <pre><code><span class="c-comment">// 提供者返回两个不同名称的 *sql.DB 实例</span>
+dig.<span class="c-func">Provide</span>(<span class="c-keyword">func</span>() (mainDB *sql.DB, reportDB *sql.DB, err <span class="c-type">error</span>) {
+    main, err = <span class="c-func">connectMain</span>()
+    <span class="c-keyword">if</span> err != <span class="c-type">nil</span> { <span class="c-keyword">return</span> <span class="c-type">nil</span>, <span class="c-type">nil</span>, err }
+    report, err = <span class="c-func">connectReport</span>()
+    <span class="c-keyword">return</span> main, report, err
+})
+
+<span class="c-comment">// 消费方通过参数名获取特定实例</span>
+dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(mainDB *sql.DB) { <span class="c-comment">// mainDB 自动注入</span> })
+dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(reportDB *sql.DB) { <span class="c-comment">// reportDB 自动注入</span> })</code></pre>
+    </div>
+
+    <h3 class="subsection-title">CLI 参数</h3>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>参数</th>
+            <th>默认值</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>-out</code></td><td><code>dig_gen.go</code></td><td>输出文件名（<code>./...</code> 模式下忽略）</td></tr>
+          <tr><td><code>-unused</code></td><td><code>error</code></td><td>未使用提供者的处理策略：<code>error</code> / <code>ignore</code> / <code>drop</code></td></tr>
+          <tr><td><code>-debug</code></td><td><code>false</code></td><td>启用调试日志（v1.0.13 起详细错误始终显示）</td></tr>
+          <tr><td><code>-alias</code></td><td><code>full</code></td><td>导入别名策略：<code>full</code> / <code>short</code> / <code>obfuscated</code> / <code>numeric</code></td></tr>
+          <tr><td><code>-inline</code></td><td><code>false</code></td><td>将简单闭包内联为 IIFE；身份闭包塌缩为类型转换（v1.0.14+）</td></tr>
+          <tr><td><code>-version</code></td><td><code>false</code></td><td>打印版本信息并退出（v1.0.13+）</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Comparison Matrix ===== -->
+<section id="comparison" class="section">
+  <div class="container">
+    <h2 class="section-title">对比矩阵</h2>
+    <p class="section-desc">dig vs Google Wire vs Uber Fx — 全维度对比</p>
+
+    <div class="comparison-tabs">
+      <button class="comp-tab active" data-tab="arch">架构与方法</button>
+      <button class="comp-tab" data-tab="api">API 设计</button>
+      <button class="comp-tab" data-tab="error">错误处理与诊断</button>
+      <button class="comp-tab" data-tab="runtime">运行时与运维</button>
+      <button class="comp-tab" data-tab="status">项目状态</button>
+    </div>
+
+    <div class="comp-panel active" id="comp-arch">
+      <div class="table-wrapper">
+        <table class="data-table comp-table">
+          <thead>
+            <tr><th>特性</th><th class="col-dig">dig</th><th>Google Wire</th><th>Uber Fx</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>方法</strong></td><td class="col-dig">代码生成</td><td>代码生成</td><td>运行时反射</td></tr>
+            <tr><td>需要代码生成步骤</td><td class="col-dig">✅ <code>digen</code></td><td>✅ <code>wire</code> CLI</td><td>❌</td></tr>
+            <tr><td>零反射</td><td class="col-dig">✅</td><td>✅</td><td>❌</td></tr>
+            <tr><td>零运行时依赖</td><td class="col-dig">✅</td><td>✅</td><td>❌（依赖 fx + dig 运行时）</td></tr>
+            <tr><td>校验时机</td><td class="col-dig">生成期</td><td>生成期</td><td>运行时</td></tr>
+            <tr><td>提供者初始化</td><td class="col-dig">即时</td><td>即时</td><td>惰性</td></tr>
+            <tr><td>二进制体积影响</td><td class="col-dig">极小</td><td>极小</td><td>中等</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="comp-panel" id="comp-api">
+      <div class="table-wrapper">
+        <table class="data-table comp-table">
+          <thead>
+            <tr><th>特性</th><th class="col-dig">dig</th><th>Google Wire</th><th>Uber Fx</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>核心 API 数量</strong></td><td class="col-dig">5 个</td><td>7 个</td><td>15+ 个</td></tr>
+            <tr><td>直接值注入</td><td class="col-dig">✅ 任意表达式</td><td>⚠️ 禁止函数调用</td><td>✅ 仅具体类型</td></tr>
+            <tr><td>内置 Invoke</td><td class="col-dig">✅</td><td>❌</td><td>✅</td></tr>
+            <tr><td>模块嵌套</td><td class="col-dig">✅ 显式</td><td>⚠️ 扁平组合</td><td>✅ 显式带命名</td></tr>
+            <tr><td>相同类型多实例</td><td class="col-dig">✅ 命名参数</td><td>❌ 需包装类型</td><td>✅ 命名 + 值组</td></tr>
+            <tr><td>泛型支持</td><td class="col-dig">✅ 编译期</td><td>❌</td><td>⚠️ 仅已实例化</td></tr>
+            <tr><td>闭包捕获安全</td><td class="col-dig">✅ 生成器强制</td><td>N/A</td><td>N/A</td></tr>
+            <tr><td>API 友好度</td><td class="col-dig">Fx 风格极简</td><td>冗长反直觉</td><td>Fx 风格极简</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="comp-panel" id="comp-error">
+      <div class="table-wrapper">
+        <table class="data-table comp-table">
+          <thead>
+            <tr><th>特性</th><th class="col-dig">dig</th><th>Google Wire</th><th>Uber Fx</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>错误传播模型</strong></td><td class="col-dig">Provider panic / Invoke 返回</td><td>error 返回值传播</td><td>app.Err() + 回滚</td></tr>
+            <tr><td>错误含源码位置</td><td class="col-dig">✅ file:line:col</td><td>⚠️ 仅名称</td><td>⚠️ 运行时堆栈</td></tr>
+            <tr><td>可操作修复建议</td><td class="col-dig">✅ 💡 Fix:</td><td>❌</td><td>❌</td></tr>
+            <tr><td>未使用提供者策略</td><td class="col-dig">3 种模式</td><td>仅硬错误</td><td>N/A（惰性）</td></tr>
+            <tr><td>不运行即可校验</td><td class="col-dig">✅ 生成即校验</td><td>✅</td><td>✅ ValidateApp</td></tr>
+            <tr><td>调试日志</td><td class="col-dig">✅ 可覆盖 Logf</td><td>❌</td><td>✅ fxevent</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="comp-panel" id="comp-runtime">
+      <div class="table-wrapper">
+        <table class="data-table comp-table">
+          <thead>
+            <tr><th>特性</th><th class="col-dig">dig</th><th>Google Wire</th><th>Uber Fx</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>App 生命周期对象</strong></td><td class="col-dig">❌ 裸 func</td><td>❌ 生成值</td><td>✅ *fx.App</td></tr>
+            <tr><td>信号处理</td><td class="col-dig">❌ 调用方负责</td><td>❌</td><td>✅ 内置</td></tr>
+            <tr><td>编程式关停</td><td class="col-dig">❌</td><td>❌</td><td>✅ Shutdowner</td></tr>
+            <tr><td>生命周期钩子</td><td class="col-dig">❌</td><td>❌</td><td>✅ OnStart/OnStop</td></tr>
+            <tr><td>装饰器</td><td class="col-dig">❌</td><td>❌</td><td>✅ Decorate/Replace</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="comp-panel" id="comp-status">
+      <div class="table-wrapper">
+        <table class="data-table comp-table">
+          <thead>
+            <tr><th>特性</th><th class="col-dig">dig</th><th>Google Wire</th><th>Uber Fx</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>维护状态</strong></td><td class="col-dig">✅ 活跃</td><td>⚠️ 已归档</td><td>✅ 活跃</td></tr>
+            <tr><td>最新版本</td><td class="col-dig">v1.0.16</td><td>v0.7.0 (beta)</td><td>v1.24.0</td></tr>
+            <tr><td>Go 版本要求</td><td class="col-dig">1.21+</td><td>标准</td><td>1.21+</td></tr>
+            <tr><td>重构友好度</td><td class="col-dig">高</td><td>低</td><td>中</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Examples ===== -->
+<section id="examples" class="section section-alt">
+  <div class="container">
+    <h2 class="section-title">示例</h2>
+    <p class="section-desc">36 个示例覆盖全部 16 个功能维度</p>
+
+    <div class="examples-grid">
+      <div class="example-category">
+        <h3>✅ 成功示例（10 个）</h3>
+        <ul class="example-list">
+          <li><strong>app</strong> — 完整应用：跨包依赖、泛型、命名实例、闭包</li>
+          <li><strong>app_basic</strong> — 基础用法：Provide + Supply + Invoke</li>
+          <li><strong>app_debug</strong> — 调试日志与可观测性</li>
+          <li><strong>app_edge</strong> — 边缘场景：包装类型、自由变量</li>
+          <li><strong>app_inline</strong> — 闭包内联（IIFE / 身份闭包）</li>
+          <li><strong>app_xpkg_generic</strong> — 跨包泛型：cache.Cache[*common.Config]</li>
+          <li><strong>app_runtime_err</strong> — 运行时错误传播路径</li>
+          <li><strong>app_gen_test</strong> — 生成代码测试</li>
+          <li><strong>app_named</strong> — 命名实例注入</li>
+          <li><strong>app_full</strong> — 全功能综合演示</li>
+        </ul>
+      </div>
+      <div class="example-category">
+        <h3>❌ 失败示例（26 个）</h3>
+        <ul class="example-list example-list-fail">
+          <li><strong>ambiguous</strong> — 命名实例歧义</li>
+          <li><strong>capture_const</strong> / <strong>capture_ctx</strong> — 闭包捕获违规</li>
+          <li><strong>closure_capture</strong> — 局部变量捕获禁止</li>
+          <li><strong>control_flow</strong> — Module 内控制流禁止</li>
+          <li><strong>cycle</strong> — 循环依赖检测</li>
+          <li><strong>duplicate_*</strong> — 重复绑定（provide/param/named/supply）</li>
+          <li><strong>private_visibility</strong> — 跨包私有函数引用</li>
+          <li><strong>unused_provider</strong> — 未使用提供者</li>
+          <li><strong>missing_provider</strong> — 缺少提供者</li>
+          <li><strong>invalid_option</strong> / <strong>provide_option</strong> / <strong>supply_option</strong> / <strong>invoke_option</strong> — API 参数校验</li>
+          <li><em>...及更多</em></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="examples-cta">
+      <a href="https://github.com/shanjunmei/dig/tree/main/example" class="btn btn-primary" target="_blank" rel="noopener">查看全部示例</a>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Changelog Highlights ===== -->
+<section id="changelog" class="section">
+  <div class="container">
+    <h2 class="section-title">版本亮点</h2>
+    <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-version">v1.0.16</div>
+        <div class="timeline-date">2026-08-07</div>
+        <div class="timeline-content">
+          <h3>ShadowGuard 变量名遮蔽保护</h3>
+          <p>新增 shadow protection 机制，自动检测并避免生成代码中的变量名遮蔽问题。未使用参数默认行为从 <code>drop</code> 改为 <code>error</code>。</p>
+        </div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-version">v1.0.15</div>
+        <div class="timeline-date">2026-08-03</div>
+        <div class="timeline-content">
+          <h3>类型包收集核心健壮性修复</h3>
+          <p>正确处理函数签名、自引用类型、嵌套泛型。移除 <code>-debug-aliases</code> 标志（统一并入 <code>-debug</code>），放开每函数仅一个 <code>dig.Module</code> 限制。</p>
+        </div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-version">v1.0.14</div>
+        <div class="timeline-date">2026-08-01</div>
+        <div class="timeline-content">
+          <h3>闭包内联 + 身份闭包优化</h3>
+          <p><code>-inline</code> 标志将简单闭包内联为 IIFE，身份闭包塌缩为直接类型转换。跨包别名隔离保证 <code>digen ./...</code> 与 <code>digen ./&lt;pkg&gt;</code> 输出一致。所有错误消息含源码位置。</p>
+        </div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-version">v1.0.13</div>
+        <div class="timeline-date">2026-07-30</div>
+        <div class="timeline-content">
+          <h3>版本信息 + 结构化错误 + Mage 构建</h3>
+          <p>新增 <code>-version</code> 标志、Mage 构建系统。结构化错误替换 panic，所有错误附带 <code>💡 Fix:</code> 修复建议。新增 <code>gen_failures/</code> 回归用例。</p>
+        </div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-version">v1.0.11</div>
+        <div class="timeline-date">2026-07-10</div>
+        <div class="timeline-content">
+          <h3>命名多实例注入</h3>
+          <p>通过参数名区分同一类型的多个实例，支持多 DB 连接、多 Redis 客户端等场景。修复包别名解析问题。</p>
+        </div>
+      </div>
+    </div>
+    <div class="changelog-cta">
+      <a href="https://github.com/shanjunmei/dig/blob/main/CHANGELOG.md" class="btn btn-secondary" target="_blank" rel="noopener">完整变更日志</a>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Footer ===== -->
+<footer>
+  <div class="container">
+    <div class="footer-content">
+      <div class="footer-brand">
+        <span class="logo-icon">dig</span>
+        <p>编译期依赖注入 for Go</p>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col">
+          <h4>资源</h4>
+          <a href="https://github.com/shanjunmei/dig" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://pkg.go.dev/github.com/shanjunmei/dig" target="_blank" rel="noopener">GoDoc</a>
+          <a href="https://github.com/shanjunmei/dig/blob/main/README.md" target="_blank" rel="noopener">README (EN)</a>
+          <a href="https://github.com/shanjunmei/dig/blob/main/README_zh.md" target="_blank" rel="noopener">README (中文)</a>
+        </div>
+        <div class="footer-col">
+          <h4>文档</h4>
+          <a href="https://github.com/shanjunmei/dig/blob/main/CHANGELOG.md" target="_blank" rel="noopener">变更日志</a>
+          <a href="https://github.com/shanjunmei/dig/blob/main/CHANGELOG_en.md" target="_blank" rel="noopener">Changelog (EN)</a>
+          <a href="https://github.com/shanjunmei/dig/tree/main/example" target="_blank" rel="noopener">示例代码</a>
+          <a href="https://github.com/shanjunmei/dig/tree/main/prompts" target="_blank" rel="noopener">AI 提示词</a>
+        </div>
+        <div class="footer-col">
+          <h4>社区</h4>
+          <a href="https://github.com/shanjunmei/dig/issues" target="_blank" rel="noopener">问题反馈</a>
+          <a href="https://github.com/shanjunmei/dig/pulls" target="_blank" rel="noopener">提交 PR</a>
+          <a href="https://opensource.org/licenses/MIT" target="_blank" rel="noopener">MIT 许可证</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>Released under the MIT License. © 2026 <a href="https://github.com/shanjunmei" target="_blank" rel="noopener">shanjunmei</a></p>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/main.js"></script>
+</body>
+</html>
