@@ -4,6 +4,54 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v1.0.17] - 2026-08-13
+
+## 🐛 Bug Fixes
+
+- **Fix bare function/type calls inside closures not intercepting unexported cross-package symbols**  
+  When the extractor lifts a closure from its original package into the generation target package, it prefixes bare identifier calls with the package qualifier. If the original package contains an unexported function (e.g. `buildAuditAuthorizer`), lifting produces an illegal `pkg.buildAuditAuthorizer` cross-package reference. Because `digen` does not compile the generated output, it silently exited 0 and emitted uncompilable code.
+
+  Fix:
+  - Added `checkFunctionVisibilityInClosure`: before generation, walks all bare identifier calls (`fn(args)` / `T(x)`) in the closure body and uses `checkGenerationVisibility` to reject unexported cross-package symbols (same-package, exported, and builtin symbols are allowed), producing a clear `private` error and no broken file
+  - Extended `checkGenerationVisibility`'s switch with a `*types.TypeName` case to also cover unexported cross-package types in type conversions `T(x)`
+  - Added regression example `example/gen_failures/closure_private_fn/`
+
+- **Fix parameter shadowing in `example/db/db.go` `RedisClient.Ping`**  
+  `Ping(index RedisDbIndex)` used the package-level variable `Index` instead of the `index` parameter in its `fmt.Printf`, making the parameter effectively unused. Now correctly references the `index` parameter.
+
+- **Fix duplicate-binding error message for default Supply**  
+  When two default (unnamed) `dig.Supply` calls provide the same type, the error message incorrectly showed `with name ""` instead of `(default)`. Root cause: in the unnamed case `keyNamed == keyDefault`, so the named-key check matched first. Refactored into `if instanceName != "" { ... } else { ... }` branches so the default-instance error correctly shows `(default)`.
+
+## ♻️ Refactor and Optimisation
+
+- **Generator config and sample adjustment**  
+  Regenerated all example `dig_gen.go` files with the unified `dv` variable prefix, inline inlining enabled by default, and debug logging removed from generated code.
+- **unused_provider example reworked**  
+  `example/gen_failures/unused_provider` now registers its provider via the `dig.Provide` + `dig.Supply` pattern.
+
+---
+
+## 📦 Examples and Documentation Updates
+
+- **New success examples**  
+  `example/app_runtime_err` (runtime error-propagation paths: panic for provider errors, propagation for invoke errors) and `example/app_xpkg_generic` (cross-package generic `cache.Cache[*common.Config]` where both the generic type and the type argument come from different packages).
+- **New failure examples**  
+  Under `example/gen_failures/` added `ambiguous`, `duplicate_named`, `duplicate_supply`, `private_visibility`, `unused_provider`, covering named-instance ambiguity, duplicate named binding, duplicate default Supply, cross-package unexported visibility, and unused provider error paths.
+- **GitHub Pages site**  
+  Added `docs/` static site (project intro, core features, quick start, API overview, comparison matrix, examples, version timeline) plus a `.nojekyll` file.
+- **GitHub Pages bilingual toggle**  
+  Added 中文/EN language switching (localStorage persistence, synced title/meta, code blocks stay language-neutral).
+- **System prompts & industrial coding-skill docs updated**  
+  Trimmed and synced the files under `prompts/`.
+
+---
+
+## 🔧 Chores
+
+- Bumped version references in README / CHANGELOG / system prompts to v1.0.17.
+
+---
+
 ## [v1.0.16] - 2026-08-07
 
 ## ✨ New Features

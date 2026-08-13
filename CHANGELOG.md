@@ -4,6 +4,54 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.17] - 2026-08-13
+
+## 🐛 Bug 修复
+
+- **修复闭包内裸函数/类型调用未拦截跨包未导出符号**  
+  提取器在把闭包从原包提升到生成目标包时，会对裸标识符调用补上包前缀。若原包中存在未导出函数（如 `buildAuditAuthorizer`），提升后变成非法的 `pkg.buildAuditAuthorizer` 跨包引用；而 `digen` 不在生成后编译产物，会静默 `exit 0` 产出无法编译的代码。
+
+  修复：
+  - 新增 `checkFunctionVisibilityInClosure`：生成前遍历闭包体内所有裸标识符调用（`fn(args)` / `T(x)`），通过 `checkGenerationVisibility` 拦截跨包未导出符号（同包 / 导出 / 内建符号放行），直接给出清晰的 `private` 错误且不产出坏文件
+  - 扩展 `checkGenerationVisibility` 的 switch 增加 `*types.TypeName` 分支，顺带覆盖类型转换 `T(x)` 中未导出跨包类型
+  - 新增回归示例 `example/gen_failures/closure_private_fn/`
+
+- **修复示例 `example/db/db.go` 中 `RedisClient.Ping` 参数遮蔽**  
+  `Ping(index RedisDbIndex)` 内部 `fmt.Printf` 误用包级变量 `Index` 而非参数 `index`，导致参数形同虚设。已改为正确引用参数 `index`。
+
+- **修复 Supply 重复绑定默认实例错误消息**  
+  两个默认（未命名）`dig.Supply` 提供同一类型时，错误消息错显 `with name ""` 而非 `(default)`。根因是未命名场景下 `keyNamed == keyDefault` 导致命名键检查先命中；已重构为 `if instanceName != "" { ... } else { ... }` 分支，默认实例错误信息正确显示 `(default)`。
+
+## ♻️ 重构与优化
+
+- **生成器配置与示例调整**  
+  重新生成所有示例的 `dig_gen.go`，统一 `dv` 变量前缀、默认开启 inline 内联模式、移除生成代码中的调试日志输出。
+- **未使用 provider 示例改造**  
+  `example/gen_failures/unused_provider` 改用 `dig.Provide` + `dig.Supply` 模式注册 provider。
+
+---
+
+## 📦 示例与文档更新
+
+- **新增成功示例**  
+  `example/app_runtime_err`（运行时错误传播路径：provider 返回 error 触发 panic、invoke 返回 error 向上传播）、`example/app_xpkg_generic`（跨包泛型 `cache.Cache[*common.Config]`，泛型类型与类型实参均来自不同包）。
+- **新增失败示例**  
+  `example/gen_failures/` 下新增 `ambiguous`、`duplicate_named`、`duplicate_supply`、`private_visibility`、`unused_provider`，覆盖命名实例歧义、重复命名绑定、重复默认 Supply、跨包未导出可见性、未使用 provider 等错误路径。
+- **GitHub Pages 站点**  
+  新增 `docs/` 静态站点（项目介绍、核心特性、快速开始、API 概览、对比矩阵、示例、版本时间线），并添加 `.nojekyll`。
+- **GitHub Pages 中 / 英文切换**  
+  站点新增 中文 / EN 切换（localStorage 持久化、同步标题与 meta、代码块保持语言中立）。
+- **系统提示词与工业级编码规范文档更新**  
+  精简并同步 `prompts/` 下文档。
+
+---
+
+## 🔧 杂务
+
+- 同步更新 README / CHANGELOG / 系统提示词中的版本号至 v1.0.17。
+
+---
+
 ## [v1.0.16] - 2026-08-07
 
 ## ✨ 新功能

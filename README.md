@@ -12,9 +12,10 @@ A complete standardized production coding convention skill for business microser
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Current version**: v1.0.16
+> **Current version**: v1.0.17
 >
 > **Key version changes**:
+> - **v1.0.17**: Closure visibility hardening (bare cross-package function/type calls inside lifted closures are now rejected with a clear `private` error before generation; added `closure_private_fn` regression example); example coverage expanded (new success examples `app_runtime_err`, `app_xpkg_generic`; new failure examples for ambiguous / duplicate / unused / private cases); GitHub Pages site with 中文/EN toggle; generated `dig_gen.go` regenerated with unified `dv` prefix and inline mode on by default
 > - **v1.0.15**: Core robustness fix for type package collection (handles function signatures, self-referential types, nested generics); removed `-debug-aliases` flag (unified into `-debug`), removed single `dig.Module` per function restriction; expanded third-party comparison matrix
 > - **v1.0.14**: Closure inlining (`-inline`), identity-closure optimization (direct type conversion instead of wrapper), cross-package alias isolation (deterministic `digen ./...` vs `digen ./<pkg>`), context alias respected in generated code, source location (`file:line:col`) in all error messages, global logger unifies alias diagnostics and debug output under the `-debug` flag
 > - **v1.0.13**: Version info system (`-version`), Mage build support, Provide closure signature validation, structured errors replacing panics, actionable error messages with `💡 Fix:` suggestions
@@ -58,7 +59,7 @@ Go DI tools fall into two camps:
 ## Installation
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.16
+go get github.com/shanjunmei/dig@v1.0.17
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 Requires Go 1.21+.
@@ -330,7 +331,7 @@ func main() { Logf = myLogger.Printf }
 | Feature | dig | Google Wire | Uber Fx |
 |---------|-----|-------------|---------|
 | Maintenance status | ✅ active | ⚠️ **archived** (no longer maintained) | ✅ active |
-| Latest version | v1.0.16 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
+| Latest version | v1.0.17 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
 | Go version requirement | 1.21+ | standard | 1.21+ (for `slog` logger) |
 | Refactoring friendliness | High (static checks + source location) | Low (cryptic errors) | Medium (runtime errors) |
 

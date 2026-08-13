@@ -48,7 +48,7 @@
         <img src="https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg" alt="Go Reference">
       </a>
       <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
-      <img src="https://img.shields.io/badge/version-v1.0.16-00ADD8.svg" alt="v1.0.16">
+      <img src="https://img.shields.io/badge/version-v1.0.17-00ADD8.svg" alt="v1.0.17">
       <img src="https://img.shields.io/badge/Go-1.21+-00ADD8.svg" alt="Go 1.21+">
     </div>
     <h1 class="hero-title">
@@ -250,7 +250,7 @@
               <span class="dot dot-green"></span>
               <span class="code-window-title">terminal</span>
             </div>
-            <pre><code>go get github.com/shanjunmei/dig@v1.0.16
+            <pre><code>go get github.com/shanjunmei/dig@v1.0.17
 go install github.com/shanjunmei/dig/cmd/digen@latest</code></pre>
           </div>
         </div>
@@ -517,7 +517,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
           </thead>
           <tbody>
             <tr><td><strong data-en="Maintenance status">维护状态</strong></td><td class="col-dig" data-en="✅ Active">✅ 活跃</td><td data-en="⚠️ Archived">⚠️ 已归档</td><td data-en="✅ Active">✅ 活跃</td></tr>
-            <tr><td data-en="Latest version">最新版本</td><td class="col-dig">v1.0.16</td><td>v0.7.0 (beta)</td><td>v1.24.0</td></tr>
+            <tr><td data-en="Latest version">最新版本</td><td class="col-dig">v1.0.17</td><td>v0.7.0 (beta)</td><td>v1.24.0</td></tr>
             <tr><td data-en="Go version requirement">Go 版本要求</td><td class="col-dig">1.21+</td><td data-en="Standard">标准</td><td>1.21+</td></tr>
             <tr><td data-en="Refactor friendliness">重构友好度</td><td class="col-dig" data-en="High">高</td><td data-en="Low">低</td><td data-en="Medium">中</td></tr>
           </tbody>
@@ -578,6 +578,14 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
   <div class="container">
     <h2 class="section-title" data-en="Release highlights">版本亮点</h2>
     <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-version">v1.0.17</div>
+        <div class="timeline-date">2026-08-13</div>
+        <div class="timeline-content">
+          <h3 data-en="Unexported cross-package call interception + examples/docs">未导出跨包调用拦截 + 示例/文档完善</h3>
+          <p data-en-html="The generator now rejects unexported cross-package calls inside lifted closures at generation time (previously emitted illegal <code>pkg.fn</code> silently). Fixed a parameter-shadowing bug in the <code>db</code> example and a wrong duplicate-Supply error message. Added new success/failure examples and this GitHub Pages site with zh/en switching.">生成器现在会在生成期拦截闭包提升中的未导出跨包调用（此前会静默产出非法的 <code>pkg.fn</code>）。修复 <code>db</code> 示例的参数遮蔽 bug 及 Supply 重复绑定的错误消息。新增成功/失败示例，以及本 GitHub Pages 站点（含中英文切换）。</p>
+        </div>
+      </div>
       <div class="timeline-item">
         <div class="timeline-version">v1.0.16</div>
         <div class="timeline-date">2026-08-07</div>

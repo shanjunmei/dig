@@ -13,9 +13,10 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **当前版本**：v1.0.16
+> **当前版本**：v1.0.17
 >
 > **关键版本变更**：
+> - **v1.0.17**：闭包可见性加固（提升后的闭包中跨包裸函数/类型调用在生成前以清晰的 `private` 错误拦截，新增 `closure_private_fn` 回归示例）；示例覆盖率扩展（新增成功示例 `app_runtime_err`、`app_xpkg_generic`，新增命名歧义/重复/未使用/未导出等失败示例）；GitHub Pages 站点支持中 / 英文切换；重新生成全部 `dig_gen.go`，统一 `dv` 前缀并默认开启 inline 内联
 > - **v1.0.15**：类型包收集逻辑核心健壮性修复（正确处理函数签名、自引用类型、嵌套泛型）；移除 `-debug-aliases` 标志（统一并入 `-debug`）、放开每函数仅一个 `dig.Module` 限制；完善第三方库对比矩阵
 > - **v1.0.14**: 闭包内联（`-inline`）、身份闭包优化（直接类型转换替代包装函数）、跨包别名隔离（`digen ./...` 与 `digen ./<pkg>` 输出一致）、生成代码正确使用 context 别名、所有错误消息含源码位置（`file:line:col`）、全局 Logger 统一将别名诊断与调试输出归入 `-debug` 参数
 > - **v1.0.13**：版本信息系统（`-version`）、Mage 构建支持、Provide 闭包签名校验、结构化错误替换 panic、带 `💡 Fix:` 的可操作错误消息
@@ -59,7 +60,7 @@ Go 的依赖注入工具分为两大阵营：
 ## 安装
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.16
+go get github.com/shanjunmei/dig@v1.0.17
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 要求 Go 1.21+。
@@ -331,7 +332,7 @@ func main() { Logf = myLogger.Printf }
 | 特性 | dig | Google Wire | Uber Fx |
 |------|-----|-------------|---------|
 | 维护状态 | ✅ 活跃 | ⚠️ **已归档**（不再维护） | ✅ 活跃 |
-| 最新版本 | v1.0.16 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
+| 最新版本 | v1.0.17 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
 | Go 版本要求 | 1.21+ | 标准 | 1.21+（用于 `slog` logger） |
 | 重构友好度 | 高（静态检查 + 源码位置） | 低（错误晦涩） | 中（运行时错误） |
 
