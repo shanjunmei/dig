@@ -798,6 +798,12 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 		return err
 	}
 
+	// 2b. 检查闭包体内的裸函数/类型调用对生成目标包的可见性
+	// （例如同包未导出函数 buildAuditAuthorizer 被提升到主包后变成 pkg.buildAuditAuthorizer）
+	if err := e.checkFunctionVisibilityInClosure(funcLit.Body, curPkg); err != nil {
+		return err
+	}
+
 	// 3. 构建参数列表和自由变量
 	params, closureParams, freeVars, freeTypes, freeTypeStrs, err :=
 		e.buildClosureArgumentLists(funcLit, curPkg)
@@ -1532,6 +1538,9 @@ func (e *Extractor) checkGenerationVisibility(obj types.Object, curPkg *packages
 	case *types.Const:
 		pkg = o.Pkg()
 		name = o.Name()
+	case *types.TypeName:
+		pkg = o.Pkg()
+		name = o.Name()
 	default:
 		return nil
 	}
@@ -1579,7 +1588,39 @@ func (e *Extractor) checkMethodVisibilityInClosure(body *ast.BlockStmt, pkg *pac
 	return err
 }
 
-// buildProviderNotFoundError 构造友好的错误信息
+// checkFunctionVisibilityInClosure 检查闭包体中的裸函数/类型调用（形如 fn(args) 或
+// T(x)，区别于方法调用 x.Method()）对生成目标包是否可见。
+//
+// 闭包定义在 curPkg 中，对同包未导出符号（如 buildAuditAuthorizer）的调用合法；但当闭包
+// 被提升到 mainPkgPath 时，generator 会为其补上包前缀（pkg.buildAuditAuthorizer），跨包引用
+// 未导出符号在 Go 中非法，会导致生成代码无法编译。本函数在生成之前拦截该情况并给出
+// 清晰的 “private” 错误，而不是静默产出坏代码。
+func (e *Extractor) checkFunctionVisibilityInClosure(body *ast.BlockStmt, pkg *packages.Package) error {
+	var err error
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		// 仅处理裸标识符调用（fn(args) / T(x)）；选择器调用（x.Method / pkg.Fn）
+		// 由 checkMethodVisibilityInClosure 负责校验 sel.Sel 的可见性。
+		ident, ok := call.Fun.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		obj := pkg.TypesInfo.ObjectOf(ident)
+		if obj == nil {
+			return true
+		}
+		// checkGenerationVisibility 内部已放行：同包符号、导出符号、内建符号。
+		if visErr := e.checkGenerationVisibility(obj, pkg); visErr != nil {
+			err = visErr
+			return false
+		}
+		return true
+	})
+	return err
+}
 func (e *Extractor) buildProviderNotFoundError(typeString, requiredName string, it extractedItem) error {
 	available := e.getAvailableProviders(typeString)
 
