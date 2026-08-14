@@ -200,6 +200,36 @@ func (e *Extractor) buildExtractedParams(sig *types.Signature) []ExtractedArg {
 	return params
 }
 
+// checkProviderContextParams rejects providers (non-invoke options) that declare
+// a context.Context parameter.
+//
+// Providers are resolved eagerly inside InitApp, i.e. before the runtime
+// context.Context (the one passed to the returned func(context.Context) error) is
+// ever created, so a provider can never legitimately receive a context. Context
+// injection is only valid inside dig.Invoke, whose body runs within
+// func(context.Context) error.
+//
+// Without this guard digen emits a call that references `ctx` in the outer scope
+// of InitApp where it is undefined, producing non-compilable code that only fails
+// later at `go build` (e.g. "undefined: ctx"). This check moves the failure to
+// generation time with an actionable message.
+func (e *Extractor) checkProviderContextParams(item extractedItem, pos token.Position) error {
+	if item.IsInvoke {
+		return nil
+	}
+	for _, p := range item.Params {
+		if p.IsContext {
+			return fmt.Errorf("at %s: provider %q declares a context.Context parameter %q, "+
+				"but providers are resolved eagerly inside InitApp before the runtime context.Context is available. "+
+				"Context injection is only supported inside dig.Invoke (which runs within func(context.Context) error)\n"+
+				"  💡 Fix: remove the context.Context parameter from the constructor, then either pass the needed value via "+
+				"dig.Supply(...), or move the context-dependent work into a dig.Invoke(func(ctx context.Context) {...})",
+				pos, e.describeItemByIt(item), p.Name)
+		}
+	}
+	return nil
+}
+
 // extractGenericArgStr 从带泛型索引的 expr 取出 [T1,T2] 字符串，清洗包路径
 func (e *Extractor) extractGenericArgStr(expr ast.Expr, curPkg *packages.Package) (string, error) {
 	_, indexNode := stripGenericIndexes(expr)
@@ -846,6 +876,11 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	item.Params = params
 	item.ClosureParams = closureParams
 
+	// Providers cannot take a context.Context parameter (resolved before ctx exists).
+	if err := e.checkProviderContextParams(item, curPkg.Fset.Position(funcLit.Pos())); err != nil {
+		return err
+	}
+
 	// Phase 3: Analyze inlinability
 	if e.cfg.InlineClosures {
 		// Build isConst slice from params (after closure params, these are free vars)
@@ -1300,6 +1335,11 @@ func (e *Extractor) handleProvide(expr ast.Expr, curPkg *packages.Package) error
 	item.Params = e.buildExtractedParams(sig) // 保留参数名
 	item.GenericArgsStr = genericStr
 	item.InstanceName = instanceName
+
+	// Providers cannot take a context.Context parameter (resolved before ctx exists).
+	if err := e.checkProviderContextParams(item, pos); err != nil {
+		return err
+	}
 
 	relPath := e.relPath(pos.Filename)
 	item.Position = fmt.Sprintf("%s:%d", relPath, pos.Line)
