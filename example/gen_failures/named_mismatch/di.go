@@ -1,3 +1,5 @@
+//go:build digen
+
 package gf_named_mismatch
 
 import (

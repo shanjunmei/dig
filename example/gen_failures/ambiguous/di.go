@@ -1,3 +1,5 @@
+//go:build digen
+
 // 场景：同类型有多个命名提供者，消费方未指定参数名
 // 预期错误：no provider for type *Service (available: primary, secondary)
 package gf_ambiguous

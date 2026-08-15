@@ -18,6 +18,9 @@ func main() {
 	aliasStr := flag.String("alias", "full", "alias generation style: short, full, obfuscated, numeric")
 	showVersion := flag.Bool("version", false, "print version information and exit")
 	inlineClosures := flag.Bool("inline", false, "inline simple closures as IIFE (Phase 3)")
+	typeCheckNet := flag.Bool("typecheck", true, "type-check generated code to catch internal generator bugs (disable for large ./... runs)")
+	cache := flag.Bool("cache", false, "cache the extracted IR to disk and reuse it for unchanged packages (skips extraction on cache hit)")
+	cacheDir := flag.String("cachedir", "", "IR cache directory (default: os.TempDir()/digen-ir-cache); ignored unless -cache is set")
 	flag.Parse()
 
 	if *showVersion {
@@ -33,6 +36,9 @@ func main() {
 		AliasType:      *aliasStr,
 		Paths:          flag.Args(),
 		InlineClosures: *inlineClosures,
+		TypeCheckNet:   *typeCheckNet,
+		Cache:          *cache,
+		CacheDir:       *cacheDir,
 	}
 	if len(cfg.Paths) == 0 {
 		cfg.Paths = []string{"."}

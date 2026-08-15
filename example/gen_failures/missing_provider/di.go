@@ -1,3 +1,5 @@
+//go:build digen
+
 package gf_missing_provider
 
 import (

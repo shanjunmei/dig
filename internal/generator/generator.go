@@ -7,8 +7,10 @@ import (
 	"go/format"
 	"go/printer"
 	"go/token"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -53,7 +55,209 @@ func (g *Generator) WriteGeneratedCode(pkg *packages.Package, target *model.GenT
 	if err != nil {
 		return err
 	}
+
+	// Post-generation safety net: type-check the freshly formatted generated
+	// file before writing it. See typeCheckGenerated for the full contract.
+	// It is opt-in via Config.TypeCheckNet: enabled by default, but disabled
+	// for large `./...` runs where reloading the package graph per file is
+	// expensive. The net only ever fires on an INTERNAL generator bug, never
+	// on user code (user errors are caught earlier at load time).
+	if g.cfg.TypeCheckNet {
+		if netErr := g.typeCheckGenerated(target.File, []byte(code)); netErr != nil {
+			// netErr is explicitly an INTERNAL generator bug: do NOT write the bad
+			// file to disk. Bubble it up to the caller/orchestrator.
+			return netErr
+		}
+	}
+
 	return os.WriteFile(target.File, []byte(code), 0644)
+}
+
+// typeCheckGenerated is a best-effort post-generation "safety net".
+//
+// It type-checks the freshly formatted generated file inside its owning package
+// using an Overlay that replaces <pkg>/dig_gen.go with the generated content.
+//
+// Why this is sound (and can ONLY indicate a generator bug):
+//   - The loader (internal/loader) loads the user's source with -tags=digen,
+//     which excludes this file via its `//go:build !digen` constraint. A user's
+//     own compile error is therefore caught at load time and aborts before any
+//     generation runs.
+//   - Here we load WITHOUT -tags=digen (so the generated file is INCLUDED via
+//     the overlay and the user's digen-tagged source is EXCLUDED). Consequently
+//     any compile error whose position lands on the generated file is, by
+//     construction, an INTERNAL generator bug — never a user error.
+//
+// This net is a last-resort fail-safe for UNKNOWN generation bugs only; known
+// cases are blocked earlier by semantic rules in the extractor. It must NOT
+// mask those nor fire on user errors.
+//
+// Best-effort: if the type-check infrastructure itself fails to load (overlay/
+// environment issue, missing module graph, etc.) we do NOT fail generation — we
+// simply skip the net and let the file be written normally. The net is a bonus,
+// never a hard blocker that breaks valid generation.
+func (g *Generator) typeCheckGenerated(genFile string, content []byte) error {
+	// go/packages requires ABSOLUTE paths in the Overlay map. digen often runs
+	// with cfg.Paths == ["."] (the default), which makes target.File a relative
+	// path like "dig_gen.go". A relative overlay key never matches the absolute
+	// path go/packages computes internally, so the overlay silently no-ops and
+	// the net either (a) fails with "file not found" on first generation (no
+	// dig_gen.go on disk yet) or (b) worse, type-checks the STALE on-disk
+	// dig_gen.go instead of the freshly generated content — defeating the net
+	// entirely. Normalize to an absolute path so the overlay actually applies.
+	absGenFile, err := filepath.Abs(genFile)
+	if err != nil {
+		g.logger.Debugf("type-check safety net skipped (abs path failed): %v", err)
+		return nil
+	}
+	dir := filepath.Dir(absGenFile)
+	cfg := &packages.Config{
+		Mode: packages.NeedTypes | packages.NeedTypesInfo,
+		// Deliberately NO "-tags=digen": with that tag the generated file is
+		// excluded by its //go:build !digen constraint. We load the package as
+		// it would be compiled in a real `go build` (user digen-tagged source
+		// excluded, generated file included via the overlay).
+		Overlay: map[string][]byte{absGenFile: content},
+	}
+
+	pkgs, err := packages.Load(cfg, dir)
+	if err != nil {
+		// Infrastructure/overlay failure: non-fatal, skip the net.
+		g.logger.Debugf("type-check safety net skipped (packages.Load failed): %v", err)
+		return nil
+	}
+
+	var genErrors []packages.Error
+	for _, p := range pkgs {
+		for _, e := range p.Errors {
+			if errorInGeneratedFile(e, absGenFile) {
+				genErrors = append(genErrors, e)
+			}
+		}
+	}
+	if len(genErrors) == 0 {
+		return nil
+	}
+
+	// The net fired: this is an INTERNAL generator bug. Never phrase it as
+	// "your code is wrong" or merely as "undefined: X". Guide the user to file
+	// a GitHub issue with a pre-filled, one-click report (plus a copy/paste
+	// template for non-interactive environments like CI).
+	var details strings.Builder
+	for _, e := range genErrors {
+		fmt.Fprintf(&details, "  %s: %s\n", e.Pos, e.Msg)
+	}
+
+	issueTitle := "digen generated code failed type-check (internal generator bug)"
+	issueBody := buildGeneratorBugReport(absGenFile, details.String())
+	reportURL := buildIssueReportURL(issueTitle, issueBody)
+
+	var b strings.Builder
+	b.WriteString("digen internal generator error: the generated file ")
+	b.WriteString(genFile)
+	b.WriteString(" failed type-checking. This is an internal digen generator bug, not a problem in your code.\n")
+	b.WriteString("Please help us fix it - file a bug report (a GitHub account is enough):\n")
+	fmt.Fprintf(&b, "  Click to open a pre-filled report: %s\n", reportURL)
+	b.WriteString("\n  Or paste the template below at: ")
+	b.WriteString(digenIssueBaseURL)
+	b.WriteString("\n\n")
+	b.WriteString("==== bug report template (copy/paste) ====\n")
+	b.WriteString(issueBody)
+	b.WriteString("\n==== end of template ====\n")
+	return fmt.Errorf("%s", b.String())
+}
+
+// digenIssueBaseURL is where internal generator bugs should be reported.
+const digenIssueBaseURL = "https://github.com/shanjunmei/dig/issues/new"
+
+// buildIssueReportURL returns a GitHub "new issue" URL with the title and body
+// pre-filled via query parameters, so a user can click once and have everything
+// ready to submit.
+func buildIssueReportURL(title, body string) string {
+	q := url.Values{}
+	q.Set("title", title)
+	q.Set("body", body)
+	return digenIssueBaseURL + "?" + q.Encode()
+}
+
+// buildGeneratorBugReport assembles a self-contained bug-report body for an
+// internal generator error, ready to paste into a GitHub issue.
+func buildGeneratorBugReport(genFile, errorLocations string) string {
+	var b strings.Builder
+	b.WriteString("## What happened\n")
+	b.WriteString("digen generated code that failed to type-check. This is an **internal generator bug** (the user's own code was already type-checked at load time and cannot be the cause).\n\n")
+	b.WriteString("## Generated-file error locations\n")
+	b.WriteString("```\n")
+	b.WriteString(errorLocations)
+	b.WriteString("```\n\n")
+	b.WriteString("## Environment\n")
+	b.WriteString("- digen (module `github.com/shanjunmei/dig`): please paste `go list -m github.com/shanjunmei/dig` (or the git commit you built from)\n")
+	fmt.Fprintf(&b, "- Go: %s\n", runtime.Version())
+	fmt.Fprintf(&b, "- OS/Arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	b.WriteString("\n## How to reproduce\n")
+	b.WriteString("Please attach the source file(s) containing `dig.Build` (the `di.go`) that triggered this generation, plus the exact command you ran (e.g. `digen`).\n")
+	b.WriteString("\n_Generated file: `")
+	b.WriteString(genFile)
+	b.WriteString("`_\n")
+	return b.String()
+}
+
+// errorInGeneratedFile reports whether a packages.Error's position refers to
+// the generated file. It parses the "file:line:col" (or "file:line") Pos string
+// robustly, including Windows drive-letter paths (e.g. "c:\\path\\dig_gen.go:12:5").
+func errorInGeneratedFile(e packages.Error, genFile string) bool {
+	pos := e.Pos
+	if pos == "" {
+		return false
+	}
+	file, ok := splitErrorPos(pos)
+	if !ok {
+		// Without a usable position we cannot attribute the error to the
+		// generated file; err on the side of NOT firing the net.
+		return false
+	}
+	cleanGen := filepath.Clean(genFile)
+	if filepath.Clean(file) == cleanGen {
+		return true
+	}
+	// Fallback: unique base name within a single package.
+	return filepath.Base(file) == filepath.Base(genFile)
+}
+
+// splitErrorPos extracts the file portion of an error position string of the
+// form "file:line", "file:line:col", tolerant of ':' inside Windows paths.
+func splitErrorPos(pos string) (string, bool) {
+	parts := strings.Split(pos, ":")
+	// Count trailing numeric segments (line, and optional col).
+	n := 0
+	for i := len(parts) - 1; i >= 0; i-- {
+		if isAllDigits(parts[i]) {
+			n++
+		} else {
+			break
+		}
+	}
+	if n == 0 {
+		return "", false
+	}
+	file := strings.Join(parts[:len(parts)-n], ":")
+	if file == "" {
+		return "", false
+	}
+	return file, true
+}
+
+// isAllDigits reports whether s is non-empty and consists solely of ASCII digits.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // getPkgAlias returns the import alias for a package path.
@@ -334,7 +538,11 @@ func buildCallArgs(node model.Node, ctxParamName string) []string {
 func (g *Generator) writeProvider(buf *bytes.Buffer, node model.Node, blank bool, ctxParamName, errName string) {
 	if node.IsSupply {
 		expr := node.Value
-		if node.FuncPkg != "" && !isLiteral(expr) && !strings.HasPrefix(expr, node.FuncPkg+".") {
+		// Only qualify the value when it names a package-level symbol of the
+		// defining package. Free variables (parameters/locals of the inlined
+		// module) are captured by the target scope and must be referenced
+		// verbatim — qualifying them yields `undefined: <pkg>.<param>`.
+		if node.FuncPkg != "" && node.ValueIsPkgSymbol && !isLiteral(expr) && !strings.HasPrefix(expr, node.FuncPkg+".") {
 			expr = node.FuncPkg + "." + expr
 		}
 		g.emitLog(buf, "[SUPPLY] before: %s", strconv.Quote(node.RetType))
