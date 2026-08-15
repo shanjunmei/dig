@@ -555,30 +555,33 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
 <section id="examples" class="section section-alt">
   <div class="container">
     <h2 class="section-title" data-en="Examples">示例</h2>
-    <p class="section-desc" data-en="36 examples covering all 16 functional dimensions">36 个示例覆盖全部 16 个功能维度</p>
+    <p class="section-desc" data-en="40 examples covering the main functional dimensions">40 个示例覆盖主要功能维度</p>
 
     <div class="examples-grid">
       <div class="example-category">
-        <h3 data-en-html="✅ Success examples (10)">✅ 成功示例（10 个）</h3>
+        <h3 data-en-html="✅ Success examples (12)">✅ 成功示例（12 个）</h3>
         <ul class="example-list">
           <li data-en-html="<strong>app</strong> — Full app: cross-package deps, generics, named instances, closures"><strong>app</strong> — 完整应用：跨包依赖、泛型、命名实例、闭包</li>
           <li data-en-html="<strong>app_basic</strong> — Basics: Provide + Supply + Invoke"><strong>app_basic</strong> — 基础用法：Provide + Supply + Invoke</li>
           <li data-en-html="<strong>app_debug</strong> — Debug logging &amp; observability"><strong>app_debug</strong> — 调试日志与可观测性</li>
           <li data-en-html="<strong>app_edge</strong> — Edge cases: wrapper types, free variables"><strong>app_edge</strong> — 边缘场景：包装类型、自由变量</li>
-          <li data-en-html="<strong>app_inline</strong> — Closure inlining (IIFE / identity closure)"><strong>app_inline</strong> — 闭包内联（IIFE / 身份闭包）</li>
           <li data-en-html="<strong>app_xpkg_generic</strong> — Cross-package generics: cache.Cache[*common.Config]"><strong>app_xpkg_generic</strong> — 跨包泛型：cache.Cache[*common.Config]</li>
           <li data-en-html="<strong>app_runtime_err</strong> — Runtime error propagation paths"><strong>app_runtime_err</strong> — 运行时错误传播路径</li>
           <li data-en-html="<strong>app_gen_test</strong> — Generated-code tests"><strong>app_gen_test</strong> — 生成代码测试</li>
-          <li data-en-html="<strong>app_named</strong> — Named instance injection"><strong>app_named</strong> — 命名实例注入</li>
-          <li data-en-html="<strong>app_full</strong> — Full-feature comprehensive demo"><strong>app_full</strong> — 全功能综合演示</li>
+          <li data-en-html="<strong>closure_param</strong> — Closure parameters &amp; local variables (allowed inside lifted closures)"><strong>closure_param</strong> — 闭包参数与局部变量（提升闭包中允许使用）</li>
+          <li data-en-html="<strong>context_alias</strong> — context alias injection"><strong>context_alias</strong> — context 别名注入</li>
+          <li data-en-html="<strong>shadow_err</strong> — Variable-shadowing error scenario"><strong>shadow_err</strong> — 变量遮蔽报错场景</li>
+          <li data-en-html="<strong>shadow_freevar</strong> — Free-variable shadowing"><strong>shadow_freevar</strong> — 自由变量遮蔽</li>
+          <li data-en-html="<strong>supply_param</strong> — dig.Supply of a module parameter"><strong>supply_param</strong> — dig.Supply 传入模块参数</li>
         </ul>
       </div>
       <div class="example-category">
-        <h3 data-en-html="❌ Failure examples (26)">❌ 失败示例（26 个）</h3>
+        <h3 data-en-html="❌ Failure examples (28)">❌ 失败示例（28 个）</h3>
         <ul class="example-list example-list-fail">
           <li data-en-html="<strong>ambiguous</strong> — Named-instance ambiguity"><strong>ambiguous</strong> — 命名实例歧义</li>
           <li data-en-html="<strong>capture_const</strong> / <strong>capture_ctx</strong> — Closure capture violations"><strong>capture_const</strong> / <strong>capture_ctx</strong> — 闭包捕获违规</li>
           <li data-en-html="<strong>closure_capture</strong> — Local-variable capture forbidden"><strong>closure_capture</strong> — 局部变量捕获禁止</li>
+          <li data-en-html="<strong>closure_private_fn</strong> — Unexported cross-package call inside a lifted closure"><strong>closure_private_fn</strong> — 提升闭包中的未导出跨包调用</li>
           <li data-en-html="<strong>control_flow</strong> — Control flow inside Module forbidden"><strong>control_flow</strong> — Module 内控制流禁止</li>
           <li data-en-html="<strong>cycle</strong> — Cycle detection"><strong>cycle</strong> — 循环依赖检测</li>
           <li data-en-html="<strong>duplicate_*</strong> — Duplicate bindings (provide/param/named/supply)"><strong>duplicate_*</strong> — 重复绑定（provide/param/named/supply）</li>
@@ -586,6 +589,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
           <li data-en-html="<strong>unused_provider</strong> — Unused provider"><strong>unused_provider</strong> — 未使用提供者</li>
           <li data-en-html="<strong>missing_provider</strong> — Missing provider"><strong>missing_provider</strong> — 缺少提供者</li>
           <li data-en-html="<strong>invalid_option</strong> / <strong>provide_option</strong> / <strong>supply_option</strong> / <strong>invoke_option</strong> — API parameter validation"><strong>invalid_option</strong> / <strong>provide_option</strong> / <strong>supply_option</strong> / <strong>invoke_option</strong> — API 参数校验</li>
+          <li data-en-html="<strong>provider_ctx</strong> — Provider declares a context.Context parameter"><strong>provider_ctx</strong> — provider 声明 context.Context 参数</li>
           <li data-en-html="<em>...and more</em>"><em>...及更多</em></li>
         </ul>
       </div>
