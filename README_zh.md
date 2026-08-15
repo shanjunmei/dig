@@ -13,9 +13,10 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **当前版本**：v1.0.17
+> **当前版本**：v1.0.18
 >
 > **关键版本变更**：
+> - **v1.0.18**：生成期加固——provider 不可声明 `context.Context` 参数（context 注入仅限 Invoke）；DI 规格文件的 `//go:build digen` 标签现于生成期强制校验；生成后 `go/types` 安全网在出现内部生成器 bug 时拒绝写出坏文件并输出可点击的预填 GitHub issue 链接；`gen_failures/` 新增自动化回归测试。**修复 v1.0.17 引入的回归**：跨包模块内联时闭包参数 / 局部变量被误报为 `private`（"var X is private"），v1.0.18 已放行。类型名改写由脆弱的正则改为 AST 精确改写；新增可选的稳定可序列化 IR 磁盘缓存（`-cache` / `-cachedir`，默认关）以跳过未改动包的提取 / 类型检查。
 > - **v1.0.17**：闭包可见性加固（提升后的闭包中跨包裸函数/类型调用在生成前以清晰的 `private` 错误拦截，新增 `closure_private_fn` 回归示例）；示例覆盖率扩展（新增成功示例 `app_runtime_err`、`app_xpkg_generic`，新增命名歧义/重复/未使用/未导出等失败示例）；GitHub Pages 站点支持中 / 英文切换；重新生成全部 `dig_gen.go`，统一 `dv` 前缀并默认开启 inline 内联
 > - **v1.0.15**：类型包收集逻辑核心健壮性修复（正确处理函数签名、自引用类型、嵌套泛型）；移除 `-debug-aliases` 标志（统一并入 `-debug`）、放开每函数仅一个 `dig.Module` 限制；完善第三方库对比矩阵
 > - **v1.0.14**: 闭包内联（`-inline`）、身份闭包优化（直接类型转换替代包装函数）、跨包别名隔离（`digen ./...` 与 `digen ./<pkg>` 输出一致）、生成代码正确使用 context 别名、所有错误消息含源码位置（`file:line:col`）、全局 Logger 统一将别名诊断与调试输出归入 `-debug` 参数
@@ -35,16 +36,18 @@
 Go 的依赖注入工具分为两大阵营：
 
 - **Uber Fx**：API 优雅（`Provide`/`Invoke`/`Supply`/`Module`），但依赖 **运行时反射** – 启动较慢、依赖错误仅在运行时 panic、二进制体积更大。
-- **Google Wire**：编译期安全且零运行时开销，但 **API 冗长且反直觉** – 重复的 `wire.NewSet`、手动接口绑定、`wire.Value` 仅限于编译期常量，以及臭名昭著的 `wire.Build` 必须写 `return nil, nil` 这样的哑占位符。
+- **Google Wire**：编译期安全且零运行时开销，但 **API 冗长且反直觉** – 重复的 `wire.NewSet`、手动接口绑定、`wire.Value` 禁止函数调用与通道接收，以及臭名昭著的 `wire.Build` 必须写 `return nil, nil` 这样的哑占位符。
 
 **dig** 结合了两者优点：**Fx 风格的极简 API** + **Wire 风格代码生成**（无反射、零运行时依赖），外加严格的闭包捕获安全检测、泛型支持、内置 `Invoke`、针对未使用提供者的合理策略，以及**通过参数名原生支持同一类型的多个实例注入**。
+
+> **关于名称的说明**：本项目（`github.com/shanjunmei/dig`）是一个**编译期、代码生成**式的 DI 库，与 Uber 的运行时反射容器 `go.uber.org/dig`（即 `uber-go/fx` 底层的引擎）**毫无关系**。请勿混淆两者。
 
 ---
 
 ## 核心特性
 
 - **编译期解析** – 在 `go generate` 期间完成依赖图解析，错误在生成阶段即被捕获。
-- **零运行时反射与零运行时依赖** – 生成的代码是纯 Go，不导入任何额外包。
+- **零运行时反射与零运行时依赖** – 生成的代码是纯 Go，不导入任何第三方运行时依赖（仅标准库，如 `context`）。
 - **极简 API** – 仅需 `Build`、`Provide`、`Supply`、`Invoke`、`Module`。
 - **闭包捕获安全** – 内联闭包不能捕获 `InitApp` 中的局部变量，由生成器强制检查。
 - **闭包内联**（`-inline`）– 将简单闭包内联为立即调用函数表达式（IIFE），减少生成的函数数量；身份闭包（`func(p T) T { return p }`）塌缩为一次直接类型转换。
@@ -60,10 +63,10 @@ Go 的依赖注入工具分为两大阵营：
 ## 安装
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.17
+go get github.com/shanjunmei/dig@latest
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
-要求 Go 1.21+。
+要求 Go 1.25+。
 
 使用 [Mage](https://magefile.org) 构建（可选，自动注入版本信息）：
 ```bash
@@ -252,6 +255,14 @@ func main() { Logf = myLogger.Printf }
 ### 9. 闭包内联
 `-inline` 将简单的 Provide/Invoke 闭包内联为 IIFE，而不是生成包级命名函数。身份闭包（`func(p T) T { return p }`、`func(p *T) T { return *p }`、`func(p T) *T { return &p }` 以及直接类型转换闭包）会塌缩为单行内联表达式。
 
+### 10. DI 规格文件必须带 `//go:build digen`
+每个包含 `dig.Build(...)` 调用的文件**必须**带有 `//go:build digen` 构建标签。digen 在生成的 `dig_gen.go` 上写死 `//go:build !digen`；若源文件不带对应标签，正常 `go build` 会同时编译两个文件并报 `InitApp redeclared`。digen 现在在生成期强制校验——缺标签时直接给出清晰错误与 `💡 Fix:`，而不是让晦涩的重声明错误推迟暴露。
+
+### 11. `context.Context` 仅限 `Invoke` 使用
+provider（通过 `dig.Provide` / `dig.Supply` / `dig.Module` 注册的构造函数）**不得**声明 `context.Context` 参数。provider 在 `InitApp` 内被即时（eager）解析，早于运行时 `context.Context` 的产生，故该参数在生成代码中必然 `undefined`。context 注入只对 `dig.Invoke(func(ctx context.Context) { ... })` 合法。digen 在生成期拒绝 provider 侧的 `context.Context` 参数，并给出指向 `dig.Invoke` 或 `dig.Supply` 的 `💡 Fix:`。
+
+> **生成安全网**：生成代码后，digen 会对产出的 `dig_gen.go` 做一次 `go/types` 类型检查。由于用户源码在加载阶段已通过完整类型检查，生成文件上的任何类型错误都只能是内部生成器 bug。在此罕见情况下，digen 拒绝写出坏文件，并输出一条**可点击的预填 GitHub issue 链接**（外加可复制模板）以便上报——绝不会静默产出无法编译的文件。
+
 ---
 
 ## CLI 参数
@@ -332,8 +343,8 @@ func main() { Logf = myLogger.Printf }
 | 特性 | dig | Google Wire | Uber Fx |
 |------|-----|-------------|---------|
 | 维护状态 | ✅ 活跃 | ⚠️ **已归档**（不再维护） | ✅ 活跃 |
-| 最新版本 | v1.0.17 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
-| Go 版本要求 | 1.21+ | 标准 | 1.21+（用于 `slog` logger） |
+| 最新版本 | v1.0.18 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
+| Go 版本要求 | 1.25+ | 标准 | 1.21+（用于 `slog` logger） |
 | 重构友好度 | 高（静态检查 + 源码位置） | 低（错误晦涩） | 中（运行时错误） |
 
 > **Wire 特别说明**：`wire.Build` 需要写一个哑 `return nil, nil`（或 `panic(wire.Build(...))`）；`wire.Value` 禁止函数调用与 channel 接收（不仅是常量，但接近）；`wire.NewSet` 在分析时被扁平化（无作用域 / 可见性边界）；项目自 v0.7.0 起**已归档**——上游不再接受任何新功能或修复；不支持泛型（必须为每个实例化编写具体提供者）。

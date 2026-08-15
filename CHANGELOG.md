@@ -4,6 +4,43 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.18] - 2026-08-15
+
+## ✨ 生成期强化与诊断
+
+- **禁止 provider 声明 `context.Context` 参数**  
+  新增 `checkProviderContextParams`：provider（构造函数，无论经 `Provide`、闭包还是 `dig.Module` 包裹）一旦声明 `context.Context` 参数，在生成期直接报错并给出 `file:line:col` 与 `💡 Fix:`，中止生成、不写坏文件。  
+  原因：provider 在 `InitApp` 内被即时（eager）解析，早于运行时 `context.Context` 的产生，故该参数在生成代码中必然 `undefined`；context 注入只对 `dig.Invoke`（运行在内层 `func(ctx)` 里）合法。配套新增回归示例 `example/gen_failures/provider_ctx/`。
+
+- **生成期强制校验 `//go:build digen` 构建标签**  
+  新增 `checkBuildSourceConstraint`：含 `dig.Build` 调用的源文件若缺少 `//go:build digen` 约束，在 `BuildFinalNodes` 阶段报错并给出 `💡 Fix:`，中止生成（不写文件）。原因：生成文件由 digen 写死 `//go:build !digen`，若源文件不带对应标签，正常 `go build` 时两者都会定义 `InitApp` 导致 `redeclared`。把这条"铁的原则"从文档约定升级为生成器真守住的不变量。
+
+- **生成后 `go/types` 类型检查安全网**  
+  `internal/generator/generator.go` 新增 `typeCheckGenerated`：在 `format.Source` 之后、`os.WriteFile` 之前，对生成的 `dig_gen.go` 做一次 `go/types` 类型检查。由于用户源码在加载阶段（`packages.Load` + `NeedTypes` + `-tags=digen`，且 `dig_gen.go` 因 `//go:build !digen` 被排除）已做过完整类型检查，生成文件上的任何类型错误**无条件等价于内部生成器 bug**。触发时：① 不写出坏文件；② 错误显式标注"内部生成器 bug"，附生成文件位置；③ 输出**可点击的预填 GitHub issue 链接**（`https://github.com/shanjunmei/dig/issues/new?title=...&body=...`）与一份可复制的 issue 模板，引导上报。基础设施失败则 best-effort 回退为正常写文件。该网只兜底未知的提取/生成缺陷，绝不替代语义层规则、也绝不伪装成用户错误。
+
+- **`dig.Supply` 的模块参数不再生成跨包未定义引用**  
+  修复生成器缺陷：当 `dig.Supply(x)` 的 `x` 是被内联 `dig.Module` 的函数参数或局部变量时，生成代码会把它限定为包符号（如 `user.cfg`），触发生成后安全网的 `undefined: <pkg>.<param>`。此类自由变量由目标函数自身作用域捕获，现改为原样引用；只有包级符号（var/func/const/type）仍保留限定，对 `db.Index`、`role.Config("production")` 等既有用例行为不变。该修复同时避免内联后的 supply 为源包引入"已导入但未使用"的包。新增回归示例 `example/supply_param/`（+ `example/supply_param_helper/`），由 `example/successtest` 自动发现。
+
+- **用 AST 精确改写取代正则改写类型名**  
+  废弃脆弱的 `replaceTypeNames` 正则字符串改写（word-boundary 正则会误改写字符串字面量 / 注释内的同名 token，且按裸名匹配可能误伤同名局部变量），改用基于 `go/ast` + `astutil.Apply` 的精确改写：先以 `token.Pos` 为 key 收集 `Pos -> "alias.Name"` 重写计划（显式跳过 `SelectorExpr.Sel`），在克隆体上对命中的标识符做替换，绝不触碰字符串字面量、注释或同名局部变量。类型字符串路径 → 别名的 `replacePkgPathWithAlias` 保留以向后兼容。生成产物行为零变化。
+
+- **稳定可序列化 IR 与可选磁盘缓存**  
+  将 extractor→generator 的中间表示 `[]model.Node` 正式化为可序列化、带 schema 版本的稳定 IR：`internal/model` 新增 `CachedExtraction`（Nodes + ImportAliasMap/PkgAliasMap/PkgNameMap + `SchemaVersion`），`Node` / `Arg` 补全 JSON tag；`UnmarshalJSON` 在 `SchemaVer` 不匹配时直接报错而非静默误读。新增 `internal/ir` 包负责磁盘读写（默认 JSON、原子写），并由 `cmd/digen` 的 `-cache`（默认关）/ `-cachedir` 开关启用。开启后未改动的包可跳过昂贵的提取 / 类型检查步骤直接复用缓存；cache key 覆盖配置旋钮、`runtime.Version()` 与（递归）本包及传递依赖的源文件内容哈希，依赖 API 变化会自动使缓存失效，无需手动清理。缓存路径任何失败都优雅回退到重新提取，且默认关闭不影响生成语义。
+
+## 🐛 修复 v1.0.17 引入的回归
+
+- **闭包参数 / 局部变量被误报为 `private`（"var X is private"）**  
+  v1.0.17 新增的 `checkFunctionVisibilityInClosure` 在生成前遍历闭包体内所有裸标识符调用（`fn(args)` / `T(x)`）并对函数标识符调用 `checkGenerationVisibility`。但 `checkGenerationVisibility` 会把闭包参数（及局部函数 / 类型变量）这类 `*types.Var` / `*types.TypeName` 也按"包级未导出符号"处理：当闭包定义在**不同于生成目标**的包中（典型如跨包模块内联 `user.Module(cfg)`，闭包在 `user` 包、生成目标在 `cmd/app`），`curPkg != mainPkgPath` 且其名未导出，于是被误判为"跨包不可见"而报错，导致**合法的闭包参数调用反而无法生成**。`dig.Invoke(func(f func() Config){ _ = f() })` 即会触发 `var "f" is private`。  
+  修复（`internal/extractor/visibility.go`，提交 `81e2a78`）：在 `checkGenerationVisibility` 的 `*types.Var` 分支加 `if !isPackageLevelVar(o) { return nil }`，只对真正的包级变量做可见性校验；`*types.TypeName` 同类也按 `isPackageLevelVar` 思路防护。闭包体本就会内联进目标包，参数与局部变量根本不构成跨包引用，故一律放行。该改动同时消除对 `private_visibility` / `closure_private_fn` 之外合法用例的误伤。
+
+## 📦 示例与文档更新
+
+- **`gen_failures` 自动化回归测试**  
+  新增 `example/gen_failures/gentest/gen_failures_test.go`：遍历各子目录、自行构建 digen（临时路径）、断言非零退出 + 命中预期错误子串，让 `provider_ctx` 等失败样例被 CI 自动兜住。另给 4 个原本缺标签的 fixture（`ambiguous`/`cycle`/`missing_provider`/`named_mismatch`）补了 `//go:build digen`（仅加标签，不动逻辑）。
+- 修正 `prompts/system_prompt_dig.md` / `_en.md` 中"digen 静态校验"的不实宣称（源文件 `//go:build digen` 现由 digen 在生成期校验）。
+
+---
+
 ## [v1.0.17] - 2026-08-13
 
 ## 🐛 Bug 修复

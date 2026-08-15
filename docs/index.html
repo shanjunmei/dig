@@ -25,6 +25,7 @@
       <a href="#features" data-en="Features">核心特性</a>
       <a href="#quickstart" data-en="Quick Start">快速开始</a>
       <a href="#api">API</a>
+      <a href="#constraints" data-en="Constraints">关键约束</a>
       <a href="#comparison" data-en="Comparison">对比矩阵</a>
       <a href="#examples" data-en="Examples">示例</a>
       <a href="https://github.com/shanjunmei/dig" class="nav-github" target="_blank" rel="noopener">GitHub</a>
@@ -48,7 +49,7 @@
         <img src="https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg" alt="Go Reference">
       </a>
       <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
-      <img src="https://img.shields.io/badge/version-v1.0.17-00ADD8.svg" alt="v1.0.17">
+      <img src="https://img.shields.io/badge/version-v1.0.18-00ADD8.svg" alt="v1.0.18">
       <img src="https://img.shields.io/badge/Go-1.21+-00ADD8.svg" alt="Go 1.21+">
     </div>
     <h1 class="hero-title">
@@ -250,7 +251,7 @@
               <span class="dot dot-green"></span>
               <span class="code-window-title">terminal</span>
             </div>
-            <pre><code>go get github.com/shanjunmei/dig@v1.0.17
+            <pre><code>go get github.com/shanjunmei/dig@latest
 go install github.com/shanjunmei/dig/cmd/digen@latest</code></pre>
           </div>
         </div>
@@ -343,6 +344,29 @@ go run .</code></pre>
           </div>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Key Constraints ===== -->
+<section id="constraints" class="section">
+  <div class="container">
+    <h2 class="section-title" data-en="Key Constraints">关键约束</h2>
+    <p class="section-desc" data-en="Rules digen enforces at generation time — violations are reported with a clear error and a 💡 Fix:, never a cryptic build failure">digen 在生成期强制的约束——违反时会给出清晰错误与 <code>💡 Fix:</code> 建议，而非晦涩的编译失败</p>
+
+    <div class="constraint-block">
+      <h3 data-en="Mandatory //go:build digen on the DI spec file">DI 规格文件必须带 //go:build digen</h3>
+      <p data-en-html="Every file containing a <code>dig.Build(...)</code> call must carry the <code>//go:build digen</code> constraint. digen hard-codes <code>//go:build !digen</code> on the generated <code>dig_gen.go</code>; without the matching tag on your source, a normal <code>go build</code> compiles both files and corrupts with <code>InitApp redeclared</code>. digen now enforces this at generation time and prints a clear error with a <code>💡 Fix:</code> instead of letting the redeclaration surface later.">每个包含 <code>dig.Build(...)</code> 调用的文件都必须带 <code>//go:build digen</code> 约束。digen 在生成的 <code>dig_gen.go</code> 上写死 <code>//go:build !digen</code>；若源文件不带对应标签，正常 <code>go build</code> 会同时编译两个文件并报 <code>InitApp redeclared</code>。digen 现在在生成期强制校验，直接给出清晰错误与 <code>💡 Fix:</code>，而非让重声明错误推迟暴露。</p>
+    </div>
+
+    <div class="constraint-block">
+      <h3 data-en="context.Context is for Invoke only">context.Context 仅限 Invoke 使用</h3>
+      <p data-en-html="Providers (constructors registered via <code>dig.Provide</code> / <code>dig.Supply</code> / <code>dig.Module</code>) may not declare a <code>context.Context</code> parameter. Providers are resolved eagerly inside <code>InitApp</code>, before the runtime <code>context.Context</code> exists, so the parameter would be undefined. Context injection is only valid inside <code>dig.Invoke(func(ctx context.Context) { ... })</code>. digen rejects provider-side <code>context.Context</code> parameters at generation time with a <code>💡 Fix:</code> pointing to <code>dig.Invoke</code> or <code>dig.Supply</code>.">provider（通过 <code>dig.Provide</code> / <code>dig.Supply</code> / <code>dig.Module</code> 注册的构造函数）不得声明 <code>context.Context</code> 参数。provider 在 <code>InitApp</code> 内被即时（eager）解析，早于运行时 <code>context.Context</code> 的产生，故该参数在生成代码中必然 <code>undefined</code>。context 注入只对 <code>dig.Invoke(func(ctx context.Context) { ... })</code> 合法。digen 在生成期拒绝 provider 侧的 <code>context.Context</code> 参数，并给出指向 <code>dig.Invoke</code> 或 <code>dig.Supply</code> 的 <code>💡 Fix:</code>。</p>
+    </div>
+
+    <div class="constraint-block">
+      <h3 data-en="Generation safety net">生成安全网</h3>
+      <p data-en-html="After code generation, digen runs a <code>go/types</code> type-check on the emitted <code>dig_gen.go</code>. Because your source is already type-checked when digen loads it, any type error in the generated file can only be an internal generator bug. In that rare case digen refuses to write the broken file and prints a <strong>one-click, pre-filled GitHub issue link</strong> (plus a copy-paste template) so the defect is reported — never a silent, uncompilable file.">生成代码后，digen 会对产出的 <code>dig_gen.go</code> 做一次 <code>go/types</code> 类型检查。由于用户源码在加载阶段已通过完整类型检查，生成文件上的任何类型错误都只能是内部生成器 bug。在此罕见情况下，digen 拒绝写出坏文件，并输出一条<strong>可点击的预填 GitHub issue 链接</strong>（外加可复制模板）以便上报——绝不会静默产出无法编译的文件。</p>
     </div>
   </div>
 </section>
@@ -517,7 +541,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
           </thead>
           <tbody>
             <tr><td><strong data-en="Maintenance status">维护状态</strong></td><td class="col-dig" data-en="✅ Active">✅ 活跃</td><td data-en="⚠️ Archived">⚠️ 已归档</td><td data-en="✅ Active">✅ 活跃</td></tr>
-            <tr><td data-en="Latest version">最新版本</td><td class="col-dig">v1.0.17</td><td>v0.7.0 (beta)</td><td>v1.24.0</td></tr>
+            <tr><td data-en="Latest version">最新版本</td><td class="col-dig">v1.0.18</td><td>v0.7.0 (beta)</td><td>v1.24.0</td></tr>
             <tr><td data-en="Go version requirement">Go 版本要求</td><td class="col-dig">1.21+</td><td data-en="Standard">标准</td><td>1.21+</td></tr>
             <tr><td data-en="Refactor friendliness">重构友好度</td><td class="col-dig" data-en="High">高</td><td data-en="Low">低</td><td data-en="Medium">中</td></tr>
           </tbody>
@@ -578,6 +602,14 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
   <div class="container">
     <h2 class="section-title" data-en="Release highlights">版本亮点</h2>
     <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-version">v1.0.18</div>
+        <div class="timeline-date">2026-08-15</div>
+        <div class="timeline-content">
+          <h3 data-en="Generation-time hardening &amp; diagnostics">生成期加固与诊断</h3>
+          <p data-en-html="Providers can no longer declare a <code>context.Context</code> parameter (context injection is Invoke-only); the <code>//go:build digen</code> tag on the DI spec file is now validated at generation time; a post-generation <code>go/types</code> safety net refuses to emit a broken file and prints a one-click, pre-filled GitHub issue link on any internal generator bug; <code>gen_failures/</code> now has automated regression tests. Also fixes a regression introduced in v1.0.17 where closure parameters / local variables were falsely reported as <code>private</code> (&quot;var X is private&quot;) under cross-package module inlining — now allowed; type-name rewriting switched from a fragile regex to a precise AST rewrite; and a new optional stable serializable IR disk cache (<code>-cache</code> / <code>-cachedir</code>, off by default).">provider 不可声明 <code>context.Context</code> 参数（context 注入仅限 Invoke）；DI 规格文件的 <code>//go:build digen</code> 标签现于生成期强制校验；生成后 <code>go/types</code> 安全网在出现内部生成器 bug 时拒绝写出坏文件并输出可点击的预填 GitHub issue 链接；<code>gen_failures/</code> 新增自动化回归测试。并修复 v1.0.17 引入的回归——跨包模块内联时闭包参数/局部变量被误报为 <code>private</code>（"var X is private"），现已放行；类型名改写由脆弱的正则改为 AST 精确改写；新增可选的稳定可序列化 IR 磁盘缓存（<code>-cache</code>/<code>-cachedir</code>，默认关）。</p>
+        </div>
+      </div>
       <div class="timeline-item">
         <div class="timeline-version">v1.0.17</div>
         <div class="timeline-date">2026-08-13</div>

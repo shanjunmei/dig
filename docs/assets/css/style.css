@@ -391,6 +391,16 @@ pre code { background: none; color: var(--code-text); padding: 0; }
 .feature-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .feature-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
 
+.constraint-block {
+  background: var(--bg-white);
+  border-radius: var(--radius);
+  padding: 24px 20px;
+  border: 1px solid var(--border-color);
+  margin-bottom: 20px;
+}
+.constraint-block h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+.constraint-block p { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
+
 /* ===== Quick Start ===== */
 .quickstart-steps { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px; }
 .qs-step { display: flex; gap: 20px; align-items: flex-start; }

@@ -2,7 +2,7 @@
 
 ## 一、技能身份定位
 
-你是精通 Go 语言、IoC/DI 设计模式、编译时代码生成的专业 Go 后端工程师，专注 `github.com/shanjunmei/dig` 编译期 IoC 容器。所有输出严格遵循 dig v1.0.17+ 官方文档规范，区分 dig / Uber Fx / Google Wire 三者差异，可完成代码编写、问题排查、模块分层、迁移改造、CLI 参数配置、报错解析全流程工作。
+你是精通 Go 语言、IoC/DI 设计模式、编译时代码生成的专业 Go 后端工程师，专注 `github.com/shanjunmei/dig` 编译期 IoC 容器。所有输出严格遵循 dig v1.0.18+ 官方文档规范，区分 dig / Uber Fx / Google Wire 三者差异，可完成代码编写、问题排查、模块分层、迁移改造、CLI 参数配置、报错解析全流程工作。
 
 ## 二、核心知识库约束
 
@@ -14,7 +14,7 @@
 - **开源协议**：MIT
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.17
+go get github.com/shanjunmei/dig@latest
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
 
@@ -39,7 +39,7 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 
 1. `dig.Build(opts ...Option)`：组装 DI 容器，返回启动函数
 2. `dig.Provide(constructors ...any)`：注册构造函数
-3. `dig.Supply(values ...any)`：注入任意运行时/常量变量（突破 Wire 仅常量限制）
+3. `dig.Supply(values ...any)`：注入任意运行时/常量变量（突破 Wire.Value 不允许函数调用的限制；Wire.Value 仅接受常量/复合字面量，不能调用函数）
 4. `dig.Invoke(functions ...any)`：依赖就绪后执行启动逻辑，支持返回 error
 5. `dig.Module(opts ...Option)`：模块分组，支持多层嵌套复用，自动检测重复模块
 
@@ -51,10 +51,10 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 
 **错误场景**：多实例存在但消费者未指定参数名 → 报歧义错误，列出可用名称
 
-### 6. 强制语法约束（digen 静态校验）
+### 6. 强制语法约束（约定 + digen 生成期校验）
 
 1. **闭包捕获限制**：Provide/Invoke 匿名闭包禁止捕获 InitApp 局部变量，仅允许包级变量、字面量
-2. **DI 配置文件隔离**：`//go:build digen` 文件仅 digen 读取，`go build` 跳过；禁止在此定义业务结构体、构造函数、自定义类型、全局常量
+2. **DI 配置文件隔离**：源 `di.go` 文件**应**带 `//go:build digen`（约定）：digen 仅识别 `di.go` 入口、不读取所有源文件；`go build` 会跳过带该 tag 的源文件，从而避免正常构建出现重复的 `InitApp` 声明。生成的 `dig_gen.go` 由 digen 写入 `//go:build !digen`（硬编码，安全）。禁止在此定义业务结构体、构造函数、自定义类型、全局常量。源文件携带 `//go:build digen` 由 digen 在生成期校验（与并行抽取器改动一致）。
 3. **基础类型冲突**：用包装类型区分（如 `type UseMySQL bool`）
 4. **泛型实例化**：必须显式实例化，如 `dig.Provide(NewStore[int])`
 5. **条件分支**：闭包内允许运行时 if；Module() 外层禁止 if（所有分支同时注册），编译期切换用 build tag
@@ -77,7 +77,7 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 |------|-----|-------------|---------|
 | 方法 | 代码生成 | 代码生成 | 运行时反射 |
 | 零反射 / 零运行时依赖 | ✅ / ✅ | ✅ / ✅ | ❌ / ❌ |
-| 直接值注入 | ✅ `dig.Supply`（任意表达式） | ⚠️ `wire.Value`（仅常量） | ✅ `fx.Supply` |
+| 直接值注入 | ✅ `dig.Supply`（任意表达式） | ⚠️ `wire.Value`（禁止函数调用/通道接收） | ✅ `fx.Supply` |
 | 内置 Invoke | ✅ | ❌ | ✅ |
 | 模块嵌套 | ✅ 显式 | ⚠️ 平铺组合 | ✅ 带命名 |
 | 接口绑定 | 身份闭包（内联为类型转换） | ✅ `wire.Bind` | ✅ `fx.As` |

@@ -4,6 +4,43 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v1.0.18] - 2026-08-15
+
+## ✨ Generation-time hardening & diagnostics
+
+- **Providers may no longer declare a `context.Context` parameter**  
+  Added `checkProviderContextParams`: if a provider (constructor registered via `Provide`, a closure, or `dig.Module`) declares a `context.Context` parameter, digen now rejects it at generation time with a `file:line:col` location and a `💡 Fix:`, aborting without writing a broken file.  
+  Reason: providers are resolved eagerly inside `InitApp`, before the runtime `context.Context` exists, so the parameter would be undefined in the generated code; context injection is only valid inside `dig.Invoke` (which runs in the inner `func(ctx)`). Added regression example `example/gen_failures/provider_ctx/`.
+
+- **`//go:build digen` is now validated at generation time**  
+  Added `checkBuildSourceConstraint`: if a source file containing a `dig.Build` call lacks the `//go:build digen` constraint, digen errors at the `BuildFinalNodes` stage with a `💡 Fix:`, aborting generation (no file written). Reason: digen hard-codes `//go:build !digen` on the generated file, so without the matching tag on the source, a normal `go build` compiles both files and fails with `InitApp redeclared`. This promotes the long-standing "iron rule" from a doc convention into an invariant actually enforced by the generator.
+
+- **Post-generation `go/types` safety net**  
+  `internal/generator/generator.go` adds `typeCheckGenerated`, run after `format.Source` and before `os.WriteFile`. Because the user's source is already type-checked during loading (`packages.Load` with `NeedTypes` and `-tags=digen`, while `dig_gen.go` is excluded via `//go:build !digen`), any type error in the generated file is unconditionally an internal generator bug. On trigger: (1) no broken file is written; (2) the error is explicitly labeled an internal generator bug with the generated-file location; (3) a **one-click, pre-filled GitHub issue link** (`https://github.com/shanjunmei/dig/issues/new?title=...&body=...`) plus a copy-paste template is printed to drive the report upstream. If the type-check infrastructure itself fails, it best-effort falls back to writing the file normally.   The net only backstops unknown extraction/generation defects — it never replaces semantic rules and never masquerades as a user error.
+
+- **`dig.Supply` of a module parameter no longer emits an undefined cross-package reference**  
+  Fixed a generator bug where `dig.Supply(x)` whose value `x` is a function parameter or local variable of an inlined `dig.Module` was package-qualified (e.g. `user.cfg`), triggering `undefined: <pkg>.<param>` in the post-generation safety net. Such free variables are captured by the target function's own scope and are now referenced verbatim; only package-level symbols (var/func/const/type) are still qualified, preserving existing behaviour for cases like `db.Index` and `role.Config("production")`. The fix also prevents the inlined supply from pulling an unused import for the source package. Added regression example `example/supply_param/` (+ `example/supply_param_helper/`), auto-discovered by `example/successtest`.
+
+- **AST-based type-name rewriting replaces regex rewriting**  
+  Retired the fragile `replaceTypeNames` regex string rewriter (the word-boundary regex would wrongly rewrite same-named tokens inside string literals / comments, and bare-name matching could clobber same-named locals). It is replaced by a precise `go/ast` + `astutil.Apply` rewrite: first collect a `Pos -> "alias.Name"` rewrite plan keyed by `token.Pos` (explicitly skipping `SelectorExpr.Sel`), then apply it on a clone, touching only matched identifiers — never string literals, comments, or same-named locals. The `replacePkgPathWithAlias` path→alias rewrite for type strings is kept for backward compatibility. Generated output is behaviourally identical.
+
+- **Stable serializable IR and optional disk cache**  
+  The extractor→generator intermediate representation `[]model.Node` is now formalized as a serializable, schema-versioned stable IR: `internal/model` gains `CachedExtraction` (Nodes + ImportAliasMap/PkgAliasMap/PkgNameMap + `SchemaVersion`) and `Node` / `Arg` gain JSON tags; `UnmarshalJSON` errors on a `SchemaVer` mismatch instead of silently misreading. A new `internal/ir` package handles disk read/write (JSON by default, atomic write via temp file + rename), enabled by the `cmd/digen` `-cache` (default off) / `-cachedir` flags. When enabled, unchanged packages skip the expensive extraction / type-check step and reuse the cached IR; the cache key covers config knobs, `runtime.Version()`, and (recursively) the source hashes of the package and its transitive dependencies, so a dependency API change auto-invalidates the cache with no manual cleanup. Any cache-path failure gracefully falls back to re-extraction, and the cache is off by default so generation semantics are unaffected.
+
+## 🐛 Bug Fixes (regressions introduced in v1.0.17)
+
+- **Closure parameters / local variables falsely reported as `private` ("var X is private")**  
+  The `checkFunctionVisibilityInClosure` added in v1.0.17 walks every bare-identifier call (`fn(args)` / `T(x)`) in a closure body before generation and runs `checkGenerationVisibility` on the call's function identifier. But `checkGenerationVisibility` also treats closure parameters (and local function / type variables) — which are `*types.Var` / `*types.TypeName` — as "package-level unexported symbols". When the closure is defined in a package **different from the generation target** (the classic cross-package module-inlining case `user.Module(cfg)`, where the closure lives in `user` but the target is `cmd/app`), `curPkg != mainPkgPath` and the name is unexported, so it is misclassified as "not visible across packages" and rejected — meaning **a perfectly valid closure-parameter call fails to generate**. `dig.Invoke(func(f func() Config){ _ = f() })` triggers exactly `var "f" is private`.  
+  Fix (`internal/extractor/visibility.go`, commit `81e2a78`): the `*types.Var` branch of `checkGenerationVisibility` now returns early with `if !isPackageLevelVar(o) { return nil }`, validating only genuine package-level variables; the `*types.TypeName` case is guarded by the same `isPackageLevelVar` reasoning. Because the closure body is inlined into the target package, parameters and locals never constitute a cross-package reference and are always allowed. This also removes the false positives for legitimate cases beyond `private_visibility` / `closure_private_fn`.
+
+## 📦 Examples and Documentation Updates
+
+- **Automated regression tests for `gen_failures/`**  
+  Added `example/gen_failures/gentest/gen_failures_test.go`, which walks each subdirectory, builds digen into a temp path, and asserts a non-zero exit plus a matching expected-error substring — so `provider_ctx` and other failure fixtures are caught by CI. Also added the `//go:build digen` tag (tag-only, no logic change) to four previously untagged fixtures (`ambiguous` / `cycle` / `missing_provider` / `named_mismatch`).
+- Fixed an inaccurate "digen static check" claim in `prompts/system_prompt_dig.md` / `_en.md` — the source-file `//go:build digen` requirement is now actually enforced by digen at generation time.
+
+---
+
 ## [v1.0.17] - 2026-08-13
 
 ## 🐛 Bug Fixes

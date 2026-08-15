@@ -12,9 +12,10 @@ A complete standardized production coding convention skill for business microser
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Current version**: v1.0.17
+> **Current version**: v1.0.18
 >
 > **Key version changes**:
+> - **v1.0.18**: Generation-time hardening — providers may no longer declare a `context.Context` parameter (context injection is Invoke-only); the `//go:build digen` tag on the DI spec file is now validated at generation time; a post-generation `go/types` safety net refuses to emit a broken file and prints a one-click, pre-filled GitHub issue link on any internal generator bug; `gen_failures/` now has automated regression tests. **Fixes a regression introduced in v1.0.17**: closure parameters / local variables were falsely reported as `private` ("var X is private") under cross-package module inlining — now allowed. Type-name rewriting switched from a fragile regex to a precise AST rewrite; a new optional stable serializable IR disk cache (`-cache` / `-cachedir`, off by default) skips extraction / type-checking for unchanged packages.
 > - **v1.0.17**: Closure visibility hardening (bare cross-package function/type calls inside lifted closures are now rejected with a clear `private` error before generation; added `closure_private_fn` regression example); example coverage expanded (new success examples `app_runtime_err`, `app_xpkg_generic`; new failure examples for ambiguous / duplicate / unused / private cases); GitHub Pages site with 中文/EN toggle; generated `dig_gen.go` regenerated with unified `dv` prefix and inline mode on by default
 > - **v1.0.15**: Core robustness fix for type package collection (handles function signatures, self-referential types, nested generics); removed `-debug-aliases` flag (unified into `-debug`), removed single `dig.Module` per function restriction; expanded third-party comparison matrix
 > - **v1.0.14**: Closure inlining (`-inline`), identity-closure optimization (direct type conversion instead of wrapper), cross-package alias isolation (deterministic `digen ./...` vs `digen ./<pkg>`), context alias respected in generated code, source location (`file:line:col`) in all error messages, global logger unifies alias diagnostics and debug output under the `-debug` flag
@@ -34,16 +35,18 @@ A complete standardized production coding convention skill for business microser
 Go DI tools fall into two camps:
 
 - **Uber Fx**: elegant API (`Provide`/`Invoke`/`Supply`/`Module`) but **runtime reflection** – slower startup, runtime panics on dependency errors, larger binaries.
-- **Google Wire**: compile‑time safety and zero overhead, but **API is verbose and counter‑intuitive** – repetitive `wire.NewSet`, manual interface binding, `wire.Value` limited to compile‑time constants, and the infamous `wire.Build` dummy `return nil, nil` marker.
+- **Google Wire**: compile‑time safety and zero overhead, but **API is verbose and counter‑intuitive** – repetitive `wire.NewSet`, manual interface binding, `wire.Value` forbids function calls and channel receives, and the infamous `wire.Build` dummy `return nil, nil` marker.
 
 **dig** combines the best of both: **Fx‑style minimal API** + **Wire‑style code generation** (no reflection, zero runtime dependency), plus strict closure‑capture safety, generic support, built‑in `Invoke`, sensible policies for unused providers, and **native support for multiple instances of the same type via parameter names**.
+
+> **Note on the name:** This project (`github.com/shanjunmei/dig`) is a *compile‑time, code‑generation* DI library and is **unrelated** to Uber's runtime reflection container `go.uber.org/dig` (the engine behind `uber‑go/fx`). Don't confuse the two.
 
 ---
 
 ## Core Features
 
 - **Compile‑time resolution** – graph resolved during `go generate`; errors are caught at generation time.
-- **Zero runtime reflection & zero runtime dependency** – generated code is plain Go, imports nothing.
+- **Zero runtime reflection & zero runtime dependency** – generated code is plain Go with no third-party runtime dependency (only the standard library, e.g. `context`).
 - **Minimal API** – just `Build`, `Provide`, `Supply`, `Invoke`, `Module`.
 - **Closure capture safety** – inline closures cannot capture locals from `InitApp`; enforced by generator.
 - **Closure inlining (`-inline`)** – inline simple closures as immediately-invoked function expressions (IIFE), reducing generated function count; identity closures (`func(p T) T { return p }`) collapse to a direct type conversion.
@@ -59,10 +62,10 @@ Go DI tools fall into two camps:
 ## Installation
 
 ```bash
-go get github.com/shanjunmei/dig@v1.0.17
+go get github.com/shanjunmei/dig@latest
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
-Requires Go 1.21+.
+Requires Go 1.25+.
 
 Build with [Mage](https://magefile.org) (optional, auto-injects version info):
 ```bash
@@ -251,6 +254,14 @@ func main() { Logf = myLogger.Printf }
 ### 9. Closure Inlining
 `-inline` inlines simple provider/invoke closures as IIFEs instead of generating named package-level functions. Identity closures (`func(p T) T { return p }`, `func(p *T) T { return *p }`, `func(p T) *T { return &p }`, and direct type-conversion closures) collapse to a single inline expression.
 
+### 10. Mandatory `//go:build digen` on the DI spec file
+Every file that contains a `dig.Build(...)` call **must** carry the `//go:build digen` constraint. digen hard-codes `//go:build !digen` on the generated `dig_gen.go`; without the matching tag on your source, a normal `go build` compiles both files and fails with `InitApp redeclared`. digen now enforces this at generation time — if the tag is missing it prints a clear error with a `💡 Fix:` instead of letting a confusing redeclaration surface later.
+
+### 11. `context.Context` is for `Invoke` only
+Providers (constructors registered via `dig.Provide` / `dig.Supply` / `dig.Module`) may **not** declare a `context.Context` parameter. Providers are resolved eagerly inside `InitApp`, before the runtime `context.Context` exists, so the parameter would be undefined in the generated code. Context injection is only valid inside `dig.Invoke(func(ctx context.Context) { ... })`. digen rejects provider-side `context.Context` parameters at generation time with a `💡 Fix:` pointing you to `dig.Invoke` or `dig.Supply`.
+
+> **Generation safety net.** After code generation, digen runs a `go/types` type-check on the emitted `dig_gen.go`. Because your source is already type-checked when digen loads it, any type error in the generated file can only be an internal generator bug. In that rare case digen refuses to write the broken file and prints a **one-click, pre-filled GitHub issue link** (plus a copy-paste template) so the defect is reported upstream — never a silent, uncompilable file.
+
 ---
 
 ## CLI Flags
@@ -262,6 +273,7 @@ func main() { Logf = myLogger.Printf }
 | `-debug` | `false` | Enable debug logging (detailed errors are always shown since v1.0.13) |
 | `-alias` | `full` | Import alias strategy: `full` / `short` / `obfuscated` / `numeric`. When `-debug` is enabled, resolved per-package alias mappings are also printed. |
 | `-inline` | `false` | Inline simple closures as IIFEs; identity closures collapse to a type conversion (v1.0.14+) |
+| `-typecheck` | `true` | Type-check generated code after emission to catch internal generator bugs. Disable (`-typecheck=false`) for large `./...` runs where reloading the package graph per file is expensive. |
 | `-version` | `false` | Print version information and exit (v1.0.13+) |
 
 ---
@@ -331,8 +343,8 @@ func main() { Logf = myLogger.Printf }
 | Feature | dig | Google Wire | Uber Fx |
 |---------|-----|-------------|---------|
 | Maintenance status | ✅ active | ⚠️ **archived** (no longer maintained) | ✅ active |
-| Latest version | v1.0.17 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
-| Go version requirement | 1.21+ | standard | 1.21+ (for `slog` logger) |
+| Latest version | v1.0.18 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
+| Go version requirement | 1.25+ | standard | 1.21+ (for `slog` logger) |
 | Refactoring friendliness | High (static checks + source location) | Low (cryptic errors) | Medium (runtime errors) |
 
 > **Wire specifics**: `wire.Build` requires a dummy `return nil, nil` (or `panic(wire.Build(...))`); `wire.Value` forbids function calls and channel receives (not just constants, but close); `wire.NewSet` composition is flattened during analysis (no scoping / visibility barriers); the project is **archived** as of v0.7.0 — no new features or fixes will be accepted upstream; generics are not supported (must wrap each instantiation in a concrete provider).
