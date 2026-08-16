@@ -34,11 +34,18 @@
       <button type="button" data-lang="zh" class="active">中文</button>
       <button type="button" data-lang="en">EN</button>
     </div>
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="切换深色/浅色模式" title="切换深色/浅色模式">🌙</button>
     <button class="nav-toggle" id="nav-toggle" aria-label="菜单">
       <span></span><span></span><span></span>
     </button>
   </div>
 </nav>
+
+<!-- ===== Table of Contents (TOC) ===== -->
+<aside class="toc" id="toc" aria-label="目录">
+  <input type="search" id="toc-search" class="toc-search" placeholder="搜索目录…" data-en-ph="Search…" aria-label="搜索目录">
+  <nav id="toc-nav"></nav>
+</aside>
 
 <!-- ===== Hero ===== -->
 <section id="hero">
@@ -443,6 +450,9 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
           <tr><td><code>-debug</code></td><td><code>false</code></td><td data-en="Enable debug logging (detailed errors always shown since v1.0.13)">启用调试日志（v1.0.13 起详细错误始终显示）</td></tr>
           <tr><td><code>-alias</code></td><td><code>full</code></td><td data-en-html="Import-alias strategy: <code>full</code> / <code>short</code> / <code>obfuscated</code> / <code>numeric</code>">导入别名策略：<code>full</code> / <code>short</code> / <code>obfuscated</code> / <code>numeric</code></td></tr>
           <tr><td><code>-inline</code></td><td><code>false</code></td><td data-en="Inline simple closures as IIFEs; identity closures collapse to type conversions (v1.0.14+)">将简单闭包内联为 IIFE；身份闭包塌缩为类型转换（v1.0.14+）</td></tr>
+          <tr><td><code>-typecheck</code></td><td><code>true</code></td><td data-en="Type-check generated code after emission to catch internal generator bugs. Disable (-typecheck=false) for large ./... runs.">生成后类型检查产出代码以捕获内部生成器 bug；大型 ./... 运行可关闭（-typecheck=false）以省去逐文件重载包图。</td></tr>
+          <tr><td><code>-cache</code></td><td><code>false</code></td><td data-en="Cache the extracted IR to disk and reuse it for unchanged packages (skips extraction on cache hit).">将提取出的 IR 缓存到磁盘，未改动包命中缓存时跳过提取/类型检查。</td></tr>
+          <tr><td><code>-cachedir</code></td><td><code>""</code></td><td data-en-html='IR cache directory (default: <code>os.TempDir()/digen-ir-cache</code>); ignored unless <code>-cache</code> is set.'>IR 缓存目录（默认：<code>os.TempDir()/digen-ir-cache</code>；仅 -cache 设置时生效）。</td></tr>
           <tr><td><code>-version</code></td><td><code>false</code></td><td data-en="Print version info and exit (v1.0.13+)">打印版本信息并退出（v1.0.13+）</td></tr>
         </tbody>
       </table>
@@ -603,6 +613,59 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
 
     <div class="examples-cta">
       <a href="https://github.com/shanjunmei/dig/tree/main/example" class="btn btn-primary" target="_blank" rel="noopener" data-en="View all examples">查看全部示例</a>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Dependency Graph / Visualization ===== -->
+<section id="graph" class="section section-alt">
+  <div class="container">
+    <h2 class="section-title" data-en="Dependency Graph">依赖关系可视化</h2>
+    <p class="section-desc" data-en="See how digen wires your providers together — every edge is resolved at compile time">
+      直观查看 digen 如何把你的提供者连接起来 —— 每一条依赖边都在编译期解析完成
+    </p>
+
+    <div class="graph-wrap">
+      <svg viewBox="0 0 680 260" class="dep-graph" role="img" aria-label="Dependency graph example">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="arrow-head"></path>
+          </marker>
+        </defs>
+        <g class="edges">
+          <line x1="180" y1="42" x2="500" y2="132"></line>
+          <line x1="180" y1="122" x2="280" y2="132"></line>
+          <line x1="180" y1="202" x2="280" y2="132"></line>
+          <line x1="420" y1="132" x2="500" y2="132"></line>
+        </g>
+        <g class="nodes">
+          <g class="dep-node"><rect x="40" y="20" width="140" height="44" rx="8"></rect><text x="110" y="47">Config</text></g>
+          <g class="dep-node"><rect x="40" y="100" width="140" height="44" rx="8"></rect><text x="110" y="127">DB</text></g>
+          <g class="dep-node"><rect x="40" y="180" width="140" height="44" rx="8"></rect><text x="110" y="207">Cache</text></g>
+          <g class="dep-node"><rect x="280" y="110" width="140" height="44" rx="8"></rect><text x="350" y="137">Repository</text></g>
+          <g class="dep-node dep-root"><rect x="500" y="110" width="140" height="44" rx="8"></rect><text x="570" y="137">App</text></g>
+        </g>
+      </svg>
+    </div>
+
+    <p class="graph-note" data-en-html="Run <code>digen graph ./...</code> to print the full dependency graph as Mermaid — paste it into mermaid.live to render.">
+      运行 <code>digen graph ./...</code> 即可把完整依赖图以 Mermaid 格式打印出来 —— 复制到 mermaid.live 即可渲染。
+    </p>
+
+    <div class="code-window small">
+      <div class="code-window-bar">
+        <span class="dot dot-red"></span>
+        <span class="dot dot-yellow"></span>
+        <span class="dot dot-green"></span>
+        <span class="code-window-title">terminal</span>
+      </div>
+      <pre><code>digen graph ./...
+# package github.com/you/app
+flowchart TD
+  Config["Config"] --> App
+  DB["*DB"] --> Repository
+  Cache["Cache"] --> Repository
+  Repository["*Repository"] --> App</code></pre>
     </div>
   </div>
 </section>

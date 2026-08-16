@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"log"
 
 	"github.com/shanjunmei/dig/internal/app"
 	"github.com/shanjunmei/dig/internal/config"
@@ -29,7 +28,7 @@ func InitApp(cfg *config.Config) func(context.Context) error {
 		dig.Provide(func(_aliasType string) alias.AliasStrategy {
 			aliasType, err := alias.ParseAliasType(_aliasType)
 			if err != nil {
-				log.Fatalln(err)
+				fail("%v", err)
 			}
 			return alias.NewAliasStrategy(aliasType)
 		}),

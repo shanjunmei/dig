@@ -74,6 +74,8 @@ mage install  # install to $GOPATH/bin
 mage test     # run tests with race detector
 ```
 
+> **Note:** `cmd/digenv1` in this repository is a legacy single-file generator prototype and is **not** for end users — always use `cmd/digen`.
+
 ---
 
 ## Quick Start
@@ -277,6 +279,8 @@ The `di.go` file (with `//go:build digen`) may **only** contain the `dig.Build(.
 | `-alias` | `full` | Import alias strategy: `full` / `short` / `obfuscated` / `numeric`. When `-debug` is enabled, resolved per-package alias mappings are also printed. |
 | `-inline` | `false` | Inline simple closures as IIFEs; identity closures collapse to a type conversion (v1.0.14+) |
 | `-typecheck` | `true` | Type-check generated code after emission to catch internal generator bugs. Disable (`-typecheck=false`) for large `./...` runs where reloading the package graph per file is expensive. |
+| `-cache` | `false` | Cache the extracted IR to disk and reuse it for unchanged packages (skips extraction on cache hit). |
+| `-cachedir` | `""` | IR cache directory (default: `os.TempDir()/digen-ir-cache`); ignored unless `-cache` is set. |
 | `-version` | `false` | Print version information and exit (v1.0.13+) |
 
 ---

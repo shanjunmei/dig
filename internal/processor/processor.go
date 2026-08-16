@@ -249,3 +249,38 @@ func (p *Processor) checkUnusedProviders(nodes []model.Node, refCount map[string
 	}
 	return nil
 }
+
+// ExtractNodes returns the extracted IR nodes for a package's injector function
+// without writing any generated file. Used by the graph/explain subcommands.
+func (p *Processor) ExtractNodes(pkg *packages.Package, pkgMap map[string]*packages.Package, strategy alias.AliasStrategy) ([]model.Node, error) {
+	target, err := loader.FindInjectorFunctions(pkg)
+	if err != nil {
+		return nil, err
+	}
+	nodes, _, _, _, err := p.buildNodes(pkg, target, pkgMap, strategy)
+	if err != nil {
+		return nil, err
+	}
+	return nodes, nil
+}
+
+// CheckPackage validates a package's DI contract (extraction + unused-provider
+// check) without writing any file. Used by the check subcommand.
+func (p *Processor) CheckPackage(pkg *packages.Package, pkgMap map[string]*packages.Package, strategy alias.AliasStrategy) error {
+	nodes, err := p.ExtractNodes(pkg, pkgMap, strategy)
+	if err != nil {
+		return err
+	}
+	refCount := make(map[string]int)
+	for _, node := range nodes {
+		for _, arg := range node.Args {
+			refCount[arg.Name]++
+		}
+	}
+	if p.cfg.UnusedMode == model.UnusedModeError {
+		if err := p.checkUnusedProviders(nodes, refCount); err != nil {
+			return fmt.Errorf("unused provider check: %w", err)
+		}
+	}
+	return nil
+}

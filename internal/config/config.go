@@ -24,4 +24,8 @@ type Config struct {
 	// CacheDir overrides the IR cache directory. Empty means
 	// os.TempDir()/digen-ir-cache.
 	CacheDir string
+
+	// DryRun makes check-style commands validate the DI contract (extraction +
+	// unused-provider check) without emitting any generated file.
+	DryRun bool
 }

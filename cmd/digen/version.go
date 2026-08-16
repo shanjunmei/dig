@@ -183,11 +183,15 @@ func versionString() string {
 
 	var b strings.Builder
 
-	if tag := cleanVersion(v); tag != "" {
-		fmt.Fprintf(&b, "digen %s", tag)
-		if v.commits > 0 {
-			fmt.Fprintf(&b, "+%d", v.commits)
-		}
+	// 没有注入版本信息（未用 mage/ldflags 构建，或不在 `go install` 流程内）
+	// 时，至少输出可读内容，而不是空白行。
+	ver := cleanVersion(v)
+	if ver == "" {
+		ver = "(devel)"
+	}
+	fmt.Fprintf(&b, "digen %s", ver)
+	if v.commits > 0 {
+		fmt.Fprintf(&b, "+%d", v.commits)
 	}
 
 	if v.dirty {
