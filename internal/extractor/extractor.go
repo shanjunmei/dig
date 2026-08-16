@@ -13,7 +13,6 @@ import (
 	"golang.org/x/tools/go/packages"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 )
@@ -244,15 +243,6 @@ func validateInvokeSignature(sig *types.Signature, funcName string) error {
 		return nil
 	}
 	return fmt.Errorf("invoke function %s has %d return values (only 0 or error allowed)", funcName, res.Len())
-}
-
-func buildExprRequiresDigen(expr string) bool {
-	expr = strings.ReplaceAll(expr, "&&", " ")
-	expr = strings.ReplaceAll(expr, "||", " ")
-	tokens := strings.FieldsFunc(expr, func(r rune) bool {
-		return r == ' ' || r == '\t' || r == '(' || r == ')' || r == '&' || r == '|'
-	})
-	return slices.Contains(tokens, "digen")
 }
 
 func (e *Extractor) findAllModuleCalls(body *ast.BlockStmt, info *types.Info, funcName string, fset *token.FileSet) ([]*ast.CallExpr, error) {

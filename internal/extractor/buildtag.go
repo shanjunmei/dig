@@ -2,11 +2,11 @@ package extractor
 
 import (
 	"fmt"
+	"github.com/shanjunmei/dig/internal/buildconstraint"
 	"github.com/shanjunmei/dig/internal/model"
 	"go/ast"
 	"go/types"
 	"golang.org/x/tools/go/packages"
-	"strings"
 )
 
 func findFuncDecl(pkg *packages.Package, name string) *ast.FuncDecl {
@@ -31,7 +31,7 @@ func (e *Extractor) checkBuildSourceConstraint() error {
 		if buildCall == nil {
 			continue
 		}
-		if fileHasDigenConstraint(f) {
+		if buildconstraint.FileHasDigenConstraint(f) {
 			continue
 		}
 		pos := pkg.Fset.Position(buildCall.Pos())
@@ -70,29 +70,6 @@ func findDigBuildCallInFile(f *ast.File, info *types.Info) *ast.CallExpr {
 	return found
 }
 
-func fileHasDigenConstraint(f *ast.File) bool {
-	for _, cg := range f.Comments {
-		// Build constraints must appear before the package clause.
-		if cg.End() > f.Package {
-			continue
-		}
-		for _, c := range cg.List {
-			body := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
-			switch {
-			case strings.HasPrefix(body, "go:build"):
-				if buildExprRequiresDigen(strings.TrimSpace(body[len("go:build"):])) {
-					return true
-				}
-			case strings.HasPrefix(body, "+build"):
-				if buildExprRequiresDigen(strings.TrimSpace(body[len("+build"):])) {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 func (e *Extractor) BuildFinalNodes() ([]model.Node, error) {
 	// A source file containing dig.Build(...) must carry `//go:build digen`,
 	// otherwise the user hits a confusing "InitApp redeclared" error at their
@@ -101,5 +78,15 @@ func (e *Extractor) BuildFinalNodes() ([]model.Node, error) {
 		return nil, err
 	}
 	e.populateUsedPkgs()
-	return e.buildFinalNodes()
+	nodes, err := e.buildFinalNodes()
+	if err != nil {
+		return nil, err
+	}
+	// Pre-check the digen DI contract: abort with a clear message if the wiring
+	// references any symbol defined inside a //go:build digen file of the main
+	// package. Runs before any code is written. See contract.go.
+	if err := e.checkContractVisibility(); err != nil {
+		return nil, err
+	}
+	return nodes, nil
 }

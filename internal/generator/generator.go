@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/shanjunmei/dig/internal/buildconstraint"
 	"github.com/shanjunmei/dig/internal/config"
 	"github.com/shanjunmei/dig/internal/logger"
 	"github.com/shanjunmei/dig/internal/model"
@@ -61,11 +62,13 @@ func (g *Generator) WriteGeneratedCode(pkg *packages.Package, target *model.GenT
 	// It is opt-in via Config.TypeCheckNet: enabled by default, but disabled
 	// for large `./...` runs where reloading the package graph per file is
 	// expensive. The net only ever fires on an INTERNAL generator bug, never
-	// on user code (user errors are caught earlier at load time).
+	// on user code (user errors are caught earlier at load time or by the
+	// extractor's checkContractVisibility pre-check).
 	if g.cfg.TypeCheckNet {
-		if netErr := g.typeCheckGenerated(target.File, []byte(code)); netErr != nil {
-			// netErr is explicitly an INTERNAL generator bug: do NOT write the bad
-			// file to disk. Bubble it up to the caller/orchestrator.
+		if netErr := g.typeCheckGenerated(target.File, []byte(code), pkg); netErr != nil {
+			// netErr is an INTERNAL generator bug OR a digen-contract violation
+			// that slipped past the pre-check (e.g. on an IR-cache hit). Do NOT
+			// write the bad file to disk. Bubble it up to the caller/orchestrator.
 			return netErr
 		}
 	}
@@ -96,7 +99,7 @@ func (g *Generator) WriteGeneratedCode(pkg *packages.Package, target *model.GenT
 // environment issue, missing module graph, etc.) we do NOT fail generation — we
 // simply skip the net and let the file be written normally. The net is a bonus,
 // never a hard blocker that breaks valid generation.
-func (g *Generator) typeCheckGenerated(genFile string, content []byte) error {
+func (g *Generator) typeCheckGenerated(genFile string, content []byte, mainPkg *packages.Package) error {
 	// go/packages requires ABSOLUTE paths in the Overlay map. digen often runs
 	// with cfg.Paths == ["."] (the default), which makes target.File a relative
 	// path like "dig_gen.go". A relative overlay key never matches the absolute
@@ -139,12 +142,43 @@ func (g *Generator) typeCheckGenerated(genFile string, content []byte) error {
 		return nil
 	}
 
-	// The net fired: this is an INTERNAL generator bug. Never phrase it as
-	// "your code is wrong" or merely as "undefined: X". Guide the user to file
-	// a GitHub issue with a pre-filled, one-click report (plus a copy/paste
-	// template for non-interactive environments like CI).
-	var details strings.Builder
+	// Classify the errors. A "undefined: X" error where X is a main-package
+	// symbol DEFINED inside a //go:build digen file is a DIGEN-CONTRACT
+	// VIOLATION (user error) — the extractor's checkContractVisibility pre-check
+	// normally catches these, but it is skipped on IR-cache hits, so the net is
+	// the backstop. Everything else is a genuine INTERNAL generator bug.
+	digenNames := collectDigenDefinedMainNames(mainPkg)
+	var contractErrs, internalErrs []packages.Error
 	for _, e := range genErrors {
+		if name, ok := undefinedMainPkgSymbol(e.Msg); ok && digenNames[name] {
+			contractErrs = append(contractErrs, e)
+		} else {
+			internalErrs = append(internalErrs, e)
+		}
+	}
+
+	// Prefer reporting a contract violation: it is the root cause the user must
+	// fix, and any other errors in the same broken file are almost always
+	// cascading from the missing symbol.
+	if len(contractErrs) > 0 {
+		var b strings.Builder
+		b.WriteString("digen contract violation: the generated file ")
+		b.WriteString(genFile)
+		b.WriteString(" failed type-checking because it references symbol(s) defined inside a //go:build digen file of the main package.\n")
+		b.WriteString("At a normal `go build` (without the digen tag) that file is excluded, so the generated dig_gen.go cannot see those symbols.\n")
+		b.WriteString("Move the definition(s) into a file WITHOUT the //go:build digen constraint (e.g. types.go), or into an imported package.\n")
+		for _, e := range contractErrs {
+			fmt.Fprintf(&b, "  %s: %s\n", e.Pos, e.Msg)
+		}
+		return fmt.Errorf("%s", b.String())
+	}
+
+	// No contract violation: this is a genuine INTERNAL generator bug. Never
+	// phrase it as "your code is wrong" or merely as "undefined: X". Guide the
+	// user to file a GitHub issue with a pre-filled, one-click report (plus a
+	// copy/paste template for non-interactive environments like CI).
+	var details strings.Builder
+	for _, e := range internalErrs {
 		fmt.Fprintf(&details, "  %s: %s\n", e.Pos, e.Msg)
 	}
 
@@ -155,7 +189,11 @@ func (g *Generator) typeCheckGenerated(genFile string, content []byte) error {
 	var b strings.Builder
 	b.WriteString("digen internal generator error: the generated file ")
 	b.WriteString(genFile)
-	b.WriteString(" failed type-checking. This is an internal digen generator bug, not a problem in your code.\n")
+	b.WriteString(" failed type-checking.\n")
+	b.WriteString("Most likely cause: the generated code references a type, function, or variable that is DEFINED in your di.go (or another `//go:build digen` file). ")
+	b.WriteString("That file is excluded when building WITHOUT the digen tag, so the generated code cannot see the symbol. ")
+	b.WriteString("Move such definitions to a file WITHOUT the `//go:build digen` constraint, or to an imported package.\n")
+	b.WriteString("If you are certain every referenced symbol lives outside digen-tagged files, this may be a genuine internal generator bug. ")
 	b.WriteString("Please help us fix it - file a bug report (a GitHub account is enough):\n")
 	fmt.Fprintf(&b, "  Click to open a pre-filled report: %s\n", reportURL)
 	b.WriteString("\n  Or paste the template below at: ")
@@ -185,7 +223,7 @@ func buildIssueReportURL(title, body string) string {
 func buildGeneratorBugReport(genFile, errorLocations string) string {
 	var b strings.Builder
 	b.WriteString("## What happened\n")
-	b.WriteString("digen generated code that failed to type-check. This is an **internal generator bug** (the user's own code was already type-checked at load time and cannot be the cause).\n\n")
+	b.WriteString("digen generated code that failed to type-check. This is usually an **internal generator bug**, but it can also happen when a referenced symbol is defined in a `//go:build digen` file (which is excluded at build time, so the generated code cannot see it). In that case move the definition to a non-digen file or an imported package.\n\n")
 	b.WriteString("## Generated-file error locations\n")
 	b.WriteString("```\n")
 	b.WriteString(errorLocations)
@@ -222,6 +260,56 @@ func errorInGeneratedFile(e packages.Error, genFile string) bool {
 	}
 	// Fallback: unique base name within a single package.
 	return filepath.Base(file) == filepath.Base(genFile)
+}
+
+// collectDigenDefinedMainNames returns the set of top-level names of the main
+// package that are declared inside a //go:build digen file. mainPkg is the
+// digen-loaded package graph (the loader uses -tags=digen), so its scope sees
+// the digen file's symbols. These names are invisible to the generated (!digen)
+// file, hence an "undefined: X" for any of them is a contract violation.
+func collectDigenDefinedMainNames(mainPkg *packages.Package) map[string]bool {
+	res := make(map[string]bool)
+	if mainPkg == nil || mainPkg.Types == nil || mainPkg.Fset == nil {
+		return res
+	}
+	files := make(map[string]*ast.File, len(mainPkg.Syntax))
+	for _, f := range mainPkg.Syntax {
+		files[mainPkg.Fset.Position(f.Package).Filename] = f
+	}
+	scope := mainPkg.Types.Scope()
+	for _, name := range scope.Names() {
+		obj := scope.Lookup(name)
+		if obj == nil || obj.Pos() == token.NoPos {
+			continue
+		}
+		if obj.Pkg() == nil || obj.Pkg().Path() != mainPkg.PkgPath {
+			continue
+		}
+		fn := mainPkg.Fset.Position(obj.Pos()).Filename
+		f, ok := files[fn]
+		if !ok {
+			continue
+		}
+		if buildconstraint.FileHasDigenConstraint(f) {
+			res[name] = true
+		}
+	}
+	return res
+}
+
+// undefinedMainPkgSymbol parses a type-check error message of the form
+// "undefined: X" and returns X. It returns ok=false for any other message.
+func undefinedMainPkgSymbol(msg string) (string, bool) {
+	const prefix = "undefined: "
+	if !strings.HasPrefix(msg, prefix) {
+		return "", false
+	}
+	name := strings.TrimSpace(strings.TrimPrefix(msg, prefix))
+	// Strip any trailing qualifier such as a method receiver ("undefined: X.Y").
+	if i := strings.IndexByte(name, '.'); i >= 0 {
+		name = name[:i]
+	}
+	return name, name != ""
 }
 
 // splitErrorPos extracts the file portion of an error position string of the

@@ -69,6 +69,16 @@ var fixtures = map[string]fixtureCfg{
 	"provider_ctx":           {"", `declares a context.Context parameter "ctx"`},
 	"supply_option":          {"", `dig.Supply cannot accept another Option`},
 	"unused_provider":        {"", `unused provider check:`},
+
+	// 以下为 TDD 补全的、此前缺失对应用例的错误分支夹具
+	"missing_build_tag": {"", `file contains dig.Build(...) but is missing`},
+	"no_module":         {"", `does not contain dig.Module`},
+	"init_no_return":    {"", `must have a return value of type func(context.Context) error`},
+	"init_multi_return": {"", `only a single return value allowed`},
+	"init_bad_return":   {"", `invalid return type "int", expected func(context.Context) error`},
+
+	// 契约预检：用户在 //go:build digen 文件中定义类型/构造器却被接线引用
+	"contract_digen_symbol": {"", `digen contract violation`},
 }
 
 // repoRoot returns the dig module root by walking up from this test file.
