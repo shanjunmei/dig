@@ -4,6 +4,25 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+## ✨ 生成期契约预检与诊断增强
+
+- **`di.go` 只放接线的契约预检**  
+  新增 `internal/extractor/contract.go` 的 `checkContractVisibility`：在 `BuildFinalNodes` 提取之后、写文件之前，扫描主包中**定义在 `//go:build digen` 文件内**的包级符号（type/func/var/const），并校验每条接线（`dig.Provide` / `Invoke` / `Supply` / 闭包体）是否引用了其中任一符号。命中即中止生成（不写文件）并给出清晰错误与 `💡 Fix:`，指明该符号定义在哪个 digen 文件、应挪到无 tag 文件或导入包。遍历覆盖构造器签名、`dig.Supply` 值类型、闭包签名与自由变量、合并参数类型，并递归穿透指针/切片/映射/通道/泛型实参。配套新增回归示例 `example/gen_failures/contract_digen_symbol/`。
+
+- **生成后类型检查安全网：契约违规与内部 bug 分类**  
+  `typeCheckGenerated`（v1.0.18 引入）现对生成文件上的类型错误做分类：若 `undefined: X` 中的 X 是主包定义在 digen 文件中的符号，则作为**契约违规**上报（与预检一致的 `💡 Fix:` 指引）；其余才是**内部生成器 bug**（输出预填 issue 链接）。该分类堵住了 IR 缓存命中（`-cache`）跳过 `BuildFinalNodes`、从而也跳过预检的缺口，是契约违反的最后兜底。  
+  ⚠️ 修正了此前的安全网误导措辞：内部 bug 分支不再把"符号定义在 di.go"说成"最可能原因"（若真是如此，早被契约分支捕获），改为明确"这是真正的内部生成器 bug"，仅在用户确实在 digen 文件定义符号时提示迁移。
+
+- **构建约束检查逻辑收敛到共享包**  
+  将 `extractor` 与 `generator` 中重复的实现（`fileHasDigenConstraint` / `genFileHasDigenConstraint`、`buildExprRequiresDigen` / `buildExprRequiresDigenGen`）抽取为无内部依赖的叶子包 `internal/buildconstraint`，导出 `FileHasDigenConstraint(f *ast.File) bool` 与 `RequiresDigen(expr string) bool` 作为单一真源；三处调用点（`generator.go`、`extractor/buildtag.go`、`extractor/contract.go`）统一收敛。消除重复逻辑与维护成本，新增 `internal/buildconstraint/buildconstraint_test.go` 单测。
+
+- **黄金文件（golden-file）回归测试**  
+  新增 `example/golden/golden_test.go`：运行时发现各 `example/*/dig_gen.go`（含 `//go:build digen` 与 `//go:generate` 指令者），解析其 `//go:generate` 还原精确 flags，重生成到临时 `-out`，`normalize()` 剥离 `//go:generate` 元行后逐字节 diff。任何悄然改变输出（含"能编译但语义漂移"）都会被抓出。覆盖 11 个复杂 example，全部与已提交 golden 逐字节一致；已验证能抓漂移（临时篡改 golden 即 FAIL）。
+
+---
+
 ## [v1.0.18] - 2026-08-15
 
 ## ✨ 生成期强化与诊断

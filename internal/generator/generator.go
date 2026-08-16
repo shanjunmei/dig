@@ -61,9 +61,11 @@ func (g *Generator) WriteGeneratedCode(pkg *packages.Package, target *model.GenT
 	// file before writing it. See typeCheckGenerated for the full contract.
 	// It is opt-in via Config.TypeCheckNet: enabled by default, but disabled
 	// for large `./...` runs where reloading the package graph per file is
-	// expensive. The net only ever fires on an INTERNAL generator bug, never
-	// on user code (user errors are caught earlier at load time or by the
-	// extractor's checkContractVisibility pre-check).
+	// expensive. User errors are normally caught earlier (at load time, or by
+	// the extractor's checkContractVisibility pre-check); when the net DOES
+	// fire, the error is a genuine INTERNAL generator bug OR a digen-contract
+	// violation that slipped past that pre-check (which is skipped on IR-cache
+	// hits). Either way, do NOT write the bad file to disk.
 	if g.cfg.TypeCheckNet {
 		if netErr := g.typeCheckGenerated(target.File, []byte(code), pkg); netErr != nil {
 			// netErr is an INTERNAL generator bug OR a digen-contract violation
@@ -81,7 +83,7 @@ func (g *Generator) WriteGeneratedCode(pkg *packages.Package, target *model.GenT
 // It type-checks the freshly formatted generated file inside its owning package
 // using an Overlay that replaces <pkg>/dig_gen.go with the generated content.
 //
-// Why this is sound (and can ONLY indicate a generator bug):
+// Why this is sound:
 //   - The loader (internal/loader) loads the user's source with -tags=digen,
 //     which excludes this file via its `//go:build !digen` constraint. A user's
 //     own compile error is therefore caught at load time and aborts before any
@@ -89,11 +91,17 @@ func (g *Generator) WriteGeneratedCode(pkg *packages.Package, target *model.GenT
 //   - Here we load WITHOUT -tags=digen (so the generated file is INCLUDED via
 //     the overlay and the user's digen-tagged source is EXCLUDED). Consequently
 //     any compile error whose position lands on the generated file is, by
-//     construction, an INTERNAL generator bug — never a user error.
+//     construction, either (a) a genuine INTERNAL generator bug, or (b) a
+//     digen-contract violation whose pre-check (checkContractVisibility) was
+//     skipped — possible only on an IR-cache hit, since the pre-check runs on
+//     every fresh extraction. typeCheckGenerated separates the two: contract
+//     violations get the same actionable guidance as the pre-check, genuine
+//     bugs are escalated as internal errors.
 //
-// This net is a last-resort fail-safe for UNKNOWN generation bugs only; known
-// cases are blocked earlier by semantic rules in the extractor. It must NOT
-// mask those nor fire on user errors.
+// This net is a last-resort fail-safe: it catches UNKNOWN generation bugs and
+// acts as a backstop for the contract pre-check on IR-cache hits. It must NOT
+// mask known cases blocked earlier by the extractor's semantic rules, nor fire
+// on ordinary user errors that the extractor already handles.
 //
 // Best-effort: if the type-check infrastructure itself fails to load (overlay/
 // environment issue, missing module graph, etc.) we do NOT fail generation — we
@@ -190,11 +198,8 @@ func (g *Generator) typeCheckGenerated(genFile string, content []byte, mainPkg *
 	b.WriteString("digen internal generator error: the generated file ")
 	b.WriteString(genFile)
 	b.WriteString(" failed type-checking.\n")
-	b.WriteString("Most likely cause: the generated code references a type, function, or variable that is DEFINED in your di.go (or another `//go:build digen` file). ")
-	b.WriteString("That file is excluded when building WITHOUT the digen tag, so the generated code cannot see the symbol. ")
-	b.WriteString("Move such definitions to a file WITHOUT the `//go:build digen` constraint, or to an imported package.\n")
-	b.WriteString("If you are certain every referenced symbol lives outside digen-tagged files, this may be a genuine internal generator bug. ")
-	b.WriteString("Please help us fix it - file a bug report (a GitHub account is enough):\n")
+	b.WriteString("This is a genuine internal generator bug: none of the errors reference a symbol defined inside a //go:build digen file of your main package (those are reported separately as a \"digen contract violation\"). ")
+	b.WriteString("If you DO reference a symbol defined inside a //go:build digen file, move it to a file WITHOUT that constraint or to an imported package; otherwise please help us fix the bug - file a report (a GitHub account is enough):\n")
 	fmt.Fprintf(&b, "  Click to open a pre-filled report: %s\n", reportURL)
 	b.WriteString("\n  Or paste the template below at: ")
 	b.WriteString(digenIssueBaseURL)
@@ -223,7 +228,7 @@ func buildIssueReportURL(title, body string) string {
 func buildGeneratorBugReport(genFile, errorLocations string) string {
 	var b strings.Builder
 	b.WriteString("## What happened\n")
-	b.WriteString("digen generated code that failed to type-check. This is usually an **internal generator bug**, but it can also happen when a referenced symbol is defined in a `//go:build digen` file (which is excluded at build time, so the generated code cannot see it). In that case move the definition to a non-digen file or an imported package.\n\n")
+	b.WriteString("digen generated code that failed to type-check. This is a genuine **internal generator bug**: the errors did NOT reference any symbol defined inside a `//go:build digen` file of the main package (those are reported separately as a contract violation). If you believe a referenced symbol IS defined in a digen file, move it to a non-digen file or an imported package.\n\n")
 	b.WriteString("## Generated-file error locations\n")
 	b.WriteString("```\n")
 	b.WriteString(errorLocations)

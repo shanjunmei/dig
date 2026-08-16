@@ -113,3 +113,16 @@ expected func(context.Context) error
   - `example/gen_failures/init_multi_return/di.go`
   - `example/gen_failures/init_bad_return/di.go`
 - 修改 harness：`example/gen_failures/gentest/gen_failures_test.go`（在 `fixtures` map 末尾登记 5 条期望子串）
+
+---
+
+## 后续补充（2026-08-16）
+
+本报告撰写后，又落地了若干增强，使覆盖与诊断进一步完善：
+
+- **`di.go` 只放接线的契约预检**（新增第 34 个 `gen_failures` 夹具）：`internal/extractor/contract.go` 的 `checkContractVisibility` 在 `BuildFinalNodes` 提取之后、写文件之前运行，扫描主包中定义在 `//go:build digen` 文件内的包级符号，并校验每条接线是否引用它们；命中即中止并给出 `digen contract violation` 错误。新增夹具 `example/gen_failures/contract_digen_symbol/di.go`（在 digen 文件内定义 `Repo`/`NewRepo` 并被 `dig.Build` 引用），`fixtures` map 登记子串 `digen contract violation`。**故 `gen_failures` 当前共 34 个夹具**（本报告"全 33 个"已过期）。
+- **生成后安全网分类契约违规 vs 内部 bug**：`generator.go` 的 `typeCheckGenerated`（TypeCheckNet）现对触发错误分类——`undefined: X` 且 X 为主包定义在 digen 文件中的符号时作为**契约违规**上报（与预检一致），其余为**内部生成器 bug**（预填 issue 链接）。该分类修正了此前"把契约违反谎称为内部生成器 bug"的误导措辞，并堵住 IR 缓存命中（`-cache`）跳过预检的缺口。
+- **构建约束检查收敛到共享包**：`extractor` 与 `generator` 中重复的 `fileHasDigenConstraint`/`genFileHasDigenConstraint`、`buildExprRequiresDigen`/`buildExprRequiresDigenGen` 抽取为叶子包 `internal/buildconstraint`（`FileHasDigenConstraint` / `RequiresDigen`），三处调用点统一收敛，新增单测。
+- **黄金文件（golden-file）回归测试**：新增 `example/golden/golden_test.go`，对各 `example/*/dig_gen.go` 解析 `//go:generate` 还原 flags、重生成到临时 `-out`、`normalize()` 剥离 `//go:generate` 元行后逐字节 diff，捕捉静默语义漂移；覆盖 11 个复杂 example，全部与已提交 golden 一致。
+
+全量回归仍绿：`go build ./...` 通过；`go test ./internal/...`、`example/gen_failures/...`(34)、`example/golden/...`、`example/successtest/...` 均 ok。

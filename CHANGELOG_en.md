@@ -4,6 +4,25 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## ✨ Generation-time contract pre-check & diagnostics
+
+- **Contract pre-check: `di.go` holds wiring only**  
+  New `checkContractVisibility` in `internal/extractor/contract.go` runs **after** extraction but **before** any file is written. It scans the main package for package-level symbols (type/func/var/const) defined inside a `//go:build digen` file and checks whether any wiring (`dig.Provide` / `Invoke` / `Supply` / closure bodies) references one of them. On a hit it aborts generation (no file written) with a clear error and a `💡 Fix:`, naming the digen file and telling you to move the definition to a non-digen file or an imported package. The walk covers constructor signatures, `dig.Supply` value types, closure signatures and free-variable types, and merged parameter types, recursing through pointers/slices/maps/channels and generic type arguments. Added regression example `example/gen_failures/contract_digen_symbol/`.
+
+- **Post-generation safety net now classifies contract violations vs. internal bugs**  
+  `typeCheckGenerated` (added in v1.0.18) now classifies type errors in the generated file: if `undefined: X` refers to a main-package symbol defined in a digen file, it is reported as a **contract violation** (same `💡 Fix:` guidance as the pre-check); everything else is a genuine **internal generator bug** (pre-filled issue link). This closes the gap where an IR-cache hit (`-cache`) skips `BuildFinalNodes` and therefore the pre-check — the net is the last backstop for contract violations.  
+  ⚠️ Fixed a previously misleading message: the internal-bug branch no longer claims "the symbol is most likely defined in your di.go" (if it were, the contract branch would have caught it); it now states plainly that this is a genuine internal bug and only suggests migration if you did define the symbol in a digen file.
+
+- **Build-constraint checks consolidated into a shared package**  
+  The duplicated implementations in `extractor` and `generator` (`fileHasDigenConstraint` / `genFileHasDigenConstraint`, `buildExprRequiresDigen` / `buildExprRequiresDigenGen`) are extracted into a dependency-free leaf package `internal/buildconstraint`, exposing `FileHasDigenConstraint(f *ast.File) bool` and `RequiresDigen(expr string) bool` as the single source of truth. All three call sites (`generator.go`, `extractor/buildtag.go`, `extractor/contract.go`) now use it. Removes duplicate logic and maintenance cost; added `internal/buildconstraint/buildconstraint_test.go`.
+
+- **Golden-file regression test**  
+  New `example/golden/golden_test.go`: at runtime it discovers each `example/*/dig_gen.go` that carries `//go:build digen` and a `//go:generate` directive, parses the directive to recover the exact flags, regenerates to a temp `-out`, strips the `//go:generate` meta line via `normalize()`, and byte-diff against the committed golden. Any silent output change (including "compiles but semantically drifted") is caught. Covers 11 complex examples, all byte-identical to their committed goldens; verified to catch drift (temporarily mutating a golden makes the test FAIL).
+
+---
+
 ## [v1.0.18] - 2026-08-15
 
 ## ✨ Generation-time hardening & diagnostics

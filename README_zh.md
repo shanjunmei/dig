@@ -261,7 +261,10 @@ func main() { Logf = myLogger.Printf }
 ### 11. `context.Context` 仅限 `Invoke` 使用
 provider（通过 `dig.Provide` / `dig.Supply` / `dig.Module` 注册的构造函数）**不得**声明 `context.Context` 参数。provider 在 `InitApp` 内被即时（eager）解析，早于运行时 `context.Context` 的产生，故该参数在生成代码中必然 `undefined`。context 注入只对 `dig.Invoke(func(ctx context.Context) { ... })` 合法。digen 在生成期拒绝 provider 侧的 `context.Context` 参数，并给出指向 `dig.Invoke` 或 `dig.Supply` 的 `💡 Fix:`。
 
-> **生成安全网**：生成代码后，digen 会对产出的 `dig_gen.go` 做一次 `go/types` 类型检查。由于用户源码在加载阶段已通过完整类型检查，生成文件上的任何类型错误都只能是内部生成器 bug。在此罕见情况下，digen 拒绝写出坏文件，并输出一条**可点击的预填 GitHub issue 链接**（外加可复制模板）以便上报——绝不会静默产出无法编译的文件。
+### 12. `di.go` 只放接线：类型 / 构造器 / 包级变量必须放在无 `//go:build digen` 的文件或导入包
+`di.go`（带 `//go:build digen`）**只能包含 `dig.Build(...)` 接线**（Provide / Invoke / Supply / Module 调用）。所有被接线引用的领域类型、构造函数、包级变量必须定义在**不带该构建标签的文件**（例如 `types.go`）或导入的包里。原因：生成的 `dig_gen.go` 带 `//go:build !digen`，在正常 `go build`（不带 digen 标签）时 `di.go` 被排除，其内符号对生成代码不可见，会导致晦涩的 `undefined: X`。digen 现在在**写文件之前**就做契约预检（`checkContractVisibility`）：一旦接线引用了定义在 digen 文件中的主包符号，立即中止并给出清晰错误与 `💡 Fix:`，而不是事后由类型检查兜底。
+
+> **生成安全网**：生成代码后，digen 会对产出的 `dig_gen.go` 做一次 `go/types` 类型检查。用户源码在加载阶段已通过完整类型检查，因此生成文件上的类型错误只有两类：(a) 真正的**内部生成器 bug**；(b) 漏过契约预检的 **digen 契约违规**（仅发生在 IR 缓存命中、预检被跳过时）。两者都会中止写文件；契约违规给出与预检一致的 `💡 Fix:` 指引，内部 bug 则输出**可点击的预填 GitHub issue 链接**（外加可复制模板）以便上报——绝不会静默产出无法编译的文件。
 
 ---
 

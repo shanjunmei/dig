@@ -365,8 +365,13 @@ go run .</code></pre>
     </div>
 
     <div class="constraint-block">
+      <h3 data-en="di.go holds wiring only">di.go 只放接线</h3>
+      <p data-en-html="A <code>di.go</code> file carrying <code>//go:build digen</code> may contain ONLY <code>dig.Build(...)</code> wiring (Provide / Invoke / Supply / Module calls). Every domain type, constructor, and package-level variable referenced by the wiring must live in a file WITHOUT that constraint (e.g. <code>types.go</code>) or in an imported package. Reason: the generated <code>dig_gen.go</code> carries <code>//go:build !digen</code>, so under a normal <code>go build</code> (no digen tag) your <code>di.go</code> is excluded and its symbols are invisible to the generated code, producing a cryptic <code>undefined: X</code>. digen now runs a contract pre-check (<code>checkContractVisibility</code>) just before writing: if any wiring references a main-package symbol defined inside a digen file, generation aborts immediately with a clear error and a <code>💡 Fix:</code> — instead of failing later inside the type-checker.">带 <code>//go:build digen</code> 的 <code>di.go</code> 只能包含 <code>dig.Build(...)</code> 接线（Provide / Invoke / Supply / Module 调用）。所有被接线引用的领域类型、构造函数、包级变量必须定义在不带该构建标签的文件（例如 <code>types.go</code>）或导入的包里。原因：生成的 <code>dig_gen.go</code> 带 <code>//go:build !digen</code>，正常 <code>go build</code>（不带 digen 标签）时 <code>di.go</code> 被排除，其内符号对生成代码不可见，会导致晦涩的 <code>undefined: X</code>。digen 现在在写文件之前就做契约预检（<code>checkContractVisibility</code>）：一旦接线引用了定义在 digen 文件中的主包符号，立即中止并给出清晰错误与 <code>💡 Fix:</code>，而不是事后由类型检查兜底。</p>
+    </div>
+
+    <div class="constraint-block">
       <h3 data-en="Generation safety net">生成安全网</h3>
-      <p data-en-html="After code generation, digen runs a <code>go/types</code> type-check on the emitted <code>dig_gen.go</code>. Because your source is already type-checked when digen loads it, any type error in the generated file can only be an internal generator bug. In that rare case digen refuses to write the broken file and prints a <strong>one-click, pre-filled GitHub issue link</strong> (plus a copy-paste template) so the defect is reported — never a silent, uncompilable file.">生成代码后，digen 会对产出的 <code>dig_gen.go</code> 做一次 <code>go/types</code> 类型检查。由于用户源码在加载阶段已通过完整类型检查，生成文件上的任何类型错误都只能是内部生成器 bug。在此罕见情况下，digen 拒绝写出坏文件，并输出一条<strong>可点击的预填 GitHub issue 链接</strong>（外加可复制模板）以便上报——绝不会静默产出无法编译的文件。</p>
+      <p data-en-html="After code generation, digen runs a <code>go/types</code> type-check on the emitted <code>dig_gen.go</code>. Because your source is already fully type-checked when digen loads it, a type error in the generated file can only be one of two things: (a) a genuine internal generator bug, or (b) a digen-contract violation that slipped past the pre-check (this only happens on an IR-cache hit, where the pre-check is skipped). In both cases digen refuses to write the broken file. A contract violation gets the same <code>💡 Fix:</code> guidance as the pre-check; an internal bug prints a <strong>one-click, pre-filled GitHub issue link</strong> (plus a copy-paste template) so the defect is reported — never a silent, uncompilable file.">生成代码后，digen 会对产出的 <code>dig_gen.go</code> 做一次 <code>go/types</code> 类型检查。由于用户源码在加载阶段已通过完整类型检查，生成文件上的类型错误只有两类：(a) 真正的<strong>内部生成器 bug</strong>；(b) 漏过契约预检的 <strong>digen 契约违规</strong>（仅发生在 IR 缓存命中、预检被跳过时）。两者都会中止写文件；契约违规给出与预检一致的 <code>💡 Fix:</code> 指引，内部 bug 则输出<strong>可点击的预填 GitHub issue 链接</strong>（外加可复制模板）以便上报——绝不会静默产出无法编译的文件。</p>
     </div>
   </div>
 </section>
@@ -555,7 +560,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
 <section id="examples" class="section section-alt">
   <div class="container">
     <h2 class="section-title" data-en="Examples">示例</h2>
-    <p class="section-desc" data-en="40 examples covering the main functional dimensions">40 个示例覆盖主要功能维度</p>
+    <p class="section-desc" data-en="41 examples covering the main functional dimensions">41 个示例覆盖主要功能维度</p>
 
     <div class="examples-grid">
       <div class="example-category">
@@ -576,7 +581,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
         </ul>
       </div>
       <div class="example-category">
-        <h3 data-en-html="❌ Failure examples (28)">❌ 失败示例（28 个）</h3>
+        <h3 data-en-html="❌ Failure examples (29)">❌ 失败示例（29 个）</h3>
         <ul class="example-list example-list-fail">
           <li data-en-html="<strong>ambiguous</strong> — Named-instance ambiguity"><strong>ambiguous</strong> — 命名实例歧义</li>
           <li data-en-html="<strong>capture_const</strong> / <strong>capture_ctx</strong> — Closure capture violations"><strong>capture_const</strong> / <strong>capture_ctx</strong> — 闭包捕获违规</li>
@@ -590,6 +595,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
           <li data-en-html="<strong>missing_provider</strong> — Missing provider"><strong>missing_provider</strong> — 缺少提供者</li>
           <li data-en-html="<strong>invalid_option</strong> / <strong>provide_option</strong> / <strong>supply_option</strong> / <strong>invoke_option</strong> — API parameter validation"><strong>invalid_option</strong> / <strong>provide_option</strong> / <strong>supply_option</strong> / <strong>invoke_option</strong> — API 参数校验</li>
           <li data-en-html="<strong>provider_ctx</strong> — Provider declares a context.Context parameter"><strong>provider_ctx</strong> — provider 声明 context.Context 参数</li>
+          <li data-en-html="<strong>contract_digen_symbol</strong> — Wiring references a symbol defined inside a <code>//go:build digen</code> file (contract violation)"><strong>contract_digen_symbol</strong> — 接线引用定义在 <code>//go:build digen</code> 文件中的符号（契约违规）</li>
           <li data-en-html="<em>...and more</em>"><em>...及更多</em></li>
         </ul>
       </div>

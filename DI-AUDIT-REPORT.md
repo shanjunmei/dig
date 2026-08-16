@@ -134,3 +134,15 @@ dig.Provide(func(_aliasType string) (alias.AliasStrategy, error) {
 ## 5. 结论
 
 该项目作为 dig 框架本体，其**消费代码（示例 + 生成器自身容器）整体质量很高**，5 条 digen 硬约束、版本兼容、迁移兼容均全面合规，**无 P0/P1 真实缺陷**。唯一可改进项为 P2 的 `log.Fatalln` 最佳实践问题（非必须）；3 处 P3 为无害死重。任务书关于「`_dig.go` / `//go:generate digen` / v1.0.5 迁移」的前提与本项目实际不符，已在校正后完成审计。
+
+---
+
+## 6. 后续补充（2026-08-16）— 框架错误诊断的硬化
+
+本报告审计的是**消费代码**；其后框架本体的生成期错误诊断又做了硬化，与"用户违反 digen 契约却被误判为工具 bug"这一长期痛点直接相关：
+
+- **`di.go` 只放接线的契约预检**：`internal/extractor/contract.go` 的 `checkContractVisibility` 在写文件前拦截"接线引用了定义在 `//go:build digen` 文件中的主包符号"，给出清晰的 `digen contract violation` 错误与 `💡 Fix:`，不再让这类契约违反事后表现为晦涩的 `undefined: X`。
+- **生成后安全网分类**：`generator.go` 的 `typeCheckGenerated` 现将触发的 `undefined: X` 分类——X 属 digen 定义主包符号时为**契约违规**（与预检一致），否则为**内部生成器 bug**（预填 issue 链接）。修正了此前"把契约违反谎称为 internal generator bug"的误导措辞，并堵住 IR 缓存命中跳过预检的缺口。
+- **构建约束检查收敛到 `internal/buildconstraint` 共享包**，消除 `extractor`/`generator` 间的重复实现。
+
+这些硬化不影响本报告对消费代码"无 P0/P1 真实缺陷"的结论；唯 P2 的 `log.Fatalln` 项仍可按原建议择机改进。
