@@ -696,7 +696,7 @@ flowchart TD
         <div class="timeline-version">v1.0.19</div>
         <div class="timeline-date">2026-08-18</div>
         <div class="timeline-content">
-          <h3 data-en="Generation-time contract pre-check &amp; diagnostics">生成期契约预检与诊断增强</h3>
+          <h3 data-en="Generation-time contract pre-check &amp; diagnostics enhancements">生成期契约预检与诊断增强</h3>
           <p data-en-html="Added <code>digen</code> CLI subcommands (init/check/graph/explain/completion); the generation-time contract pre-check ensures <code>di.go</code> holds wiring only and aborts with a <code>💡 Fix:</code> when a symbol defined inside a <code>//go:build digen</code> file is referenced; the post-generation type-check safety net now classifies contract violations versus internal generator bugs; build-constraint checks are consolidated into <code>internal/buildconstraint</code> as the single source of truth; a new golden-file byte-diff regression test covers 11 complex examples.">新增 <code>digen</code> CLI 子命令（init/check/graph/explain/completion）；生成期契约预检确保 <code>di.go</code> 只放接线，一旦引用 <code>//go:build digen</code> 文件内定义的符号即中止生成并给出 <code>💡 Fix:</code>；生成后类型检查安全网区分契约违规与内部生成器 bug；构建约束校验收敛到 <code>internal/buildconstraint</code> 单一真源；新增 golden 文件逐字节回归测试，覆盖 11 个复杂 example。</p>
         </div>
       </div>

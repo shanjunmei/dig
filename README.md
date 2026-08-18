@@ -1,5 +1,5 @@
 ## LLM Agent Skills
-Optimized AI assistant prompts for dig live in [`prompts`](./prompts). Entry point: [`system_prompt_dig_en.md`](./prompts/system_prompt_dig_en.md) — covers core API & CLI, troubleshooting, version migration, and a dig/Wire/Fx comparison.
+AI assistant prompts for dig live in [`prompts`](./prompts). Entry point: [`system_prompt_dig_en.md`](./prompts/system_prompt_dig_en.md) — covers core API & CLI, troubleshooting, version migration, and a dig/Wire/Fx comparison.
 ### Official Industrial Modular Coding Skill
 A complete standardized production coding convention skill for business microservice based on dig:
 [Industrial Modular Coding Skill](./prompts/industrial_modular_coding_skill.md)

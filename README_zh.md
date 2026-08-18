@@ -1,5 +1,5 @@
 ## LLM 智能助手提示词
-优化过的 dig AI 助手提示词统一存放在 [`prompts`](./prompts) 目录，入口为 [`system_prompt_dig.md`](./prompts/system_prompt_dig.md)，覆盖：核心 API 与 CLI、排错、版本迁移、dig/Wire/Fx 对比。
+dig 的 AI 助手提示词统一存放在 [`prompts`](./prompts) 目录，入口为 [`system_prompt_dig.md`](./prompts/system_prompt_dig.md)，覆盖：核心 API 与 CLI、排错、版本迁移、dig/Wire/Fx 对比。
 
 ### 官方工业级模块化开发规范手册
 一套基于 dig 构建、面向业务微服务的完整标准化生产级编码规范手册：
