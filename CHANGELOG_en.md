@@ -21,6 +21,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - **Golden-file regression test**  
   New `example/golden/golden_test.go`: at runtime it discovers each `example/*/dig_gen.go` that carries `//go:build digen` and a `//go:generate` directive, parses the directive to recover the exact flags, regenerates to a temp `-out`, strips the `//go:generate` meta line via `normalize()`, and byte-diff against the committed golden. Any silent output change (including "compiles but semantically drifted") is caught. Covers 11 complex examples, all byte-identical to their committed goldens; verified to catch drift (temporarily mutating a golden makes the test FAIL).
 
+- **`digen` CLI subcommands**  
+  Added `init` (scaffold a di.go with the dig.Build entry point), `check` (validate DI contracts without writing any file), `graph` (print the provider dependency graph as Mermaid), `explain <type>` (explain how a type/provider is resolved), and `completion <shell>` (bash/zsh/fish completion script). `init`/`check`/`graph`/`explain` reuse the generation pipeline and accept all the same flags; the `digen -h` help text and completion scripts list every flag and subcommand.
+
 ---
 
 ## [v1.0.18] - 2026-08-15

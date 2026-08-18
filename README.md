@@ -1,6 +1,5 @@
 ## LLM Agent Skills
-All system prompts for AI assistant are stored in [`prompts`](./prompts)
-- [`system_prompt_dig_en.md`](./prompts/system_prompt_dig_en.md): Professional skill for github.com/shanjunmei/dig compile-time DI library
+Optimized AI assistant prompts for dig live in [`prompts`](./prompts). Entry point: [`system_prompt_dig_en.md`](./prompts/system_prompt_dig_en.md) — covers core API & CLI, troubleshooting, version migration, and a dig/Wire/Fx comparison.
 ### Official Industrial Modular Coding Skill
 A complete standardized production coding convention skill for business microservice based on dig:
 [Industrial Modular Coding Skill](./prompts/industrial_modular_coding_skill.md)
@@ -12,21 +11,7 @@ A complete standardized production coding convention skill for business microser
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Current version**: v1.0.18
->
-> **Key version changes**:
-> - **v1.0.18**: Generation-time hardening — providers may no longer declare a `context.Context` parameter (context injection is Invoke-only); the `//go:build digen` tag on the DI spec file is now validated at generation time; a post-generation `go/types` safety net refuses to emit a broken file and prints a one-click, pre-filled GitHub issue link on any internal generator bug; `gen_failures/` now has automated regression tests. **Fixes a regression introduced in v1.0.17**: closure parameters / local variables were falsely reported as `private` ("var X is private") under cross-package module inlining — now allowed. Type-name rewriting switched from a fragile regex to a precise AST rewrite; a new optional stable serializable IR disk cache (`-cache` / `-cachedir`, off by default) skips extraction / type-checking for unchanged packages.
-> - **v1.0.17**: Closure visibility hardening (bare cross-package function/type calls inside lifted closures are now rejected with a clear `private` error before generation; added `closure_private_fn` regression example); example coverage expanded (new success examples `app_runtime_err`, `app_xpkg_generic`; new failure examples for ambiguous / duplicate / unused / private cases); GitHub Pages site with 中文/EN toggle; generated `dig_gen.go` regenerated with unified `dv` prefix and inline mode on by default
-> - **v1.0.15**: Core robustness fix for type package collection (handles function signatures, self-referential types, nested generics); removed `-debug-aliases` flag (unified into `-debug`), removed single `dig.Module` per function restriction; expanded third-party comparison matrix
-> - **v1.0.14**: Closure inlining (`-inline`), identity-closure optimization (direct type conversion instead of wrapper), cross-package alias isolation (deterministic `digen ./...` vs `digen ./<pkg>`), context alias respected in generated code, source location (`file:line:col`) in all error messages, global logger unifies alias diagnostics and debug output under the `-debug` flag
-> - **v1.0.13**: Version info system (`-version`), Mage build support, Provide closure signature validation, structured errors replacing panics, actionable error messages with `💡 Fix:` suggestions
-> - **v1.0.11**: Added named instance injection, fixed package alias resolution (e.g. `go-redis/v9`)
-> - **v1.0.5**: `InitApp()` returns `func(context.Context) error`; generated code has zero runtime dependency
-> - **v1.0.4**: Initial stable release
->
-> **Upgrade from v1.0.4**: replace `app.Run(ctx)` with `run := InitApp(); run(ctx)`.
->
-> See [CHANGELOG.md](./CHANGELOG.md) (中文) / [CHANGELOG_en.md](./CHANGELOG_en.md) (English) for full release notes.
+> **Current version**: v1.0.18 — full release notes in [CHANGELOG_en.md](./CHANGELOG_en.md).
 
 ---
 
@@ -52,10 +37,11 @@ Go DI tools fall into two camps:
 - **Closure inlining (`-inline`)** – inline simple closures as immediately-invoked function expressions (IIFE), reducing generated function count; identity closures (`func(p T) T { return p }`) collapse to a direct type conversion.
 - **Generic‑aware** – supports generic functions and types natively.
 - **Observability** – debug logging with runtime‑overridable `Logf`; `-debug` also prints resolved per-package import alias mappings.
-- **Actionable errors** – all error messages include source location (`file:line:col`) and `💡 Fix:` suggestions (since v1.0.13; expanded in v1.0.14).
+- **Actionable errors** – all error messages include source location (`file:line:col`) and `💡 Fix:` suggestions.
 - **Unused‑provider policies** – `error` (default), `ignore`, or `drop`.
 - **Module nesting** – compose modules hierarchically; duplicate detection built‑in.
 - **Named instance injection** – inject multiple instances of the same type by distinguishing them via **parameter names**.
+- **ShadowGuard** – generator-level guard that auto-detects and avoids variable-name shadowing in generated code.
 
 ---
 
@@ -275,13 +261,29 @@ The `di.go` file (with `//go:build digen`) may **only** contain the `dig.Build(.
 |------|---------|-------------|
 | `-out` | `dig_gen.go` | Output filename (ignored in `./...` mode) |
 | `-unused` | `error` | Policy for unused providers |
-| `-debug` | `false` | Enable debug logging (detailed errors are always shown since v1.0.13) |
+| `-debug` | `false` | Enable debug logging (detailed errors are always shown) |
 | `-alias` | `full` | Import alias strategy: `full` / `short` / `obfuscated` / `numeric`. When `-debug` is enabled, resolved per-package alias mappings are also printed. |
-| `-inline` | `false` | Inline simple closures as IIFEs; identity closures collapse to a type conversion (v1.0.14+) |
+| `-inline` | `false` | Inline simple closures as IIFEs; identity closures collapse to a type conversion |
 | `-typecheck` | `true` | Type-check generated code after emission to catch internal generator bugs. Disable (`-typecheck=false`) for large `./...` runs where reloading the package graph per file is expensive. |
 | `-cache` | `false` | Cache the extracted IR to disk and reuse it for unchanged packages (skips extraction on cache hit). |
 | `-cachedir` | `""` | IR cache directory (default: `os.TempDir()/digen-ir-cache`); ignored unless `-cache` is set. |
-| `-version` | `false` | Print version information and exit (v1.0.13+) |
+| `-version` | `false` | Print version information and exit |
+
+---
+
+## CLI Commands
+
+Besides the default generation run (`digen [packages...]`), `digen` provides subcommands for scaffolding, validation, and inspection:
+
+| Command | Description |
+|---------|-------------|
+| `digen init [path]` | Scaffold a `di.go` containing the `dig.Build` entry point. |
+| `digen check [pkgs]` | Validate DI contracts (extraction + unused-provider check) **without** writing any file. |
+| `digen graph [pkgs]` | Print the provider dependency graph as a Mermaid flowchart. |
+| `digen explain <type> [pkgs]` | Explain how a type/provider is resolved (match by name or return type). |
+| `digen completion <shell>` | Print a shell completion script (`bash`, `zsh`, `fish`). |
+
+All flags (`-out`, `-unused`, `-debug`, `-alias`, `-inline`, `-typecheck`, `-cache`, `-cachedir`, `-version`) apply to both the generation run and the `check` / `graph` / `explain` subcommands.
 
 ---
 
@@ -331,9 +333,10 @@ The `di.go` file (with `//go:build digen`) may **only** contain the `dig.Build(.
 | Source location in errors | ✅ `file:line:col` on every error | ⚠️ provider / set name only | ⚠️ runtime stack trace |
 | Actionable fix suggestions | ✅ `💡 Fix:` on every error | ❌ | ❌ |
 | Unused provider policies | 3 modes (`error` / `ignore` / `drop`) | hard error only (no modes) | N/A (lazy; silently skipped) |
-| Validation without running | ✅ (generation = validation) | ✅ (generation = validation) | ✅ `fx.ValidateApp(opts)` |
+| Validation without running | ✅ `digen check` / generation | ✅ (generation = validation) | ✅ `fx.ValidateApp(opts)` |
 | Debug logging | ✅ runtime‑overridable `Logf` | ❌ manual | ✅ `fxevent` (Console / Zap / Slog) |
-| Graph visualization (DOT) | ❌ | ❌ | ✅ `fx.DotGraph` + `fx.VisualizeError` |
+| Dependency graph visualization | ✅ `digen graph` (Mermaid) | ❌ | ✅ `fx.DotGraph` + `fx.VisualizeError` (DOT) |
+| Resolution path explanation | ✅ `digen explain <type>` | ❌ (read generated code) | ❌ (runtime errors only) |
 | Testing helpers | ❌ | ❌ | ✅ `fxtest` package |
 
 ### Runtime & Operations
@@ -349,12 +352,12 @@ The `di.go` file (with `//go:build digen`) may **only** contain the `dig.Build(.
 
 | Feature | dig | Google Wire | Uber Fx |
 |---------|-----|-------------|---------|
-| Maintenance status | ✅ active | ⚠️ **archived** (no longer maintained) | ✅ active |
+| Maintenance status | ✅ active | ⚠️ **archived** (bug-fix only) | ✅ active |
 | Latest version | v1.0.18 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
 | Go version requirement | 1.25+ | standard | 1.21+ (for `slog` logger) |
 | Refactoring friendliness | High (static checks + source location) | Low (cryptic errors) | Medium (runtime errors) |
 
-> **Wire specifics**: `wire.Build` requires a dummy `return nil, nil` (or `panic(wire.Build(...))`); `wire.Value` forbids function calls and channel receives (not just constants, but close); `wire.NewSet` composition is flattened during analysis (no scoping / visibility barriers); the project is **archived** as of v0.7.0 — no new features or fixes will be accepted upstream; generics are not supported (must wrap each instantiation in a concrete provider).
+> **Wire specifics**: `wire.Build` requires a dummy `return nil, nil` (or `panic(wire.Build(...))`); `wire.Value` forbids function calls and channel receives (not just constants, but close); `wire.NewSet` composition is flattened during analysis (no scoping / visibility barriers); the project is **archived** as of v0.7.0 — upstream no longer accepts new features, though bug fixes are still accepted; generics are not supported (must write a concrete provider for each instantiation).
 >
 > **Fx specifics**: richest feature set — full lifecycle (`OnStart`/`OnStop` in dependency order with reverse‑order teardown), decorators (`fx.Decorate`/`fx.Replace`), value groups with `flatten`/`soft` modes, `fx.Private` for module scoping, `fxtest` for testing, `fx.DotGraph` for visualization, and signal‑aware `app.Run` with `fx.Shutdowner`. The cost is runtime reflection (startup latency), runtime panics on wiring errors (mitigated by `fx.ValidateApp` in CI), and a hard dependency on the `fx` + `dig` runtime.
 >

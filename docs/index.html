@@ -57,7 +57,7 @@
       </a>
       <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
       <img src="https://img.shields.io/badge/version-v1.0.18-00ADD8.svg" alt="v1.0.18">
-      <img src="https://img.shields.io/badge/Go-1.21+-00ADD8.svg" alt="Go 1.21+">
+      <img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg" alt="Go 1.25+">
     </div>
     <h1 class="hero-title">
       <span class="hero-dig">dig</span>
@@ -173,7 +173,7 @@
 <section id="features" class="section section-alt">
   <div class="container">
     <h2 class="section-title" data-en="Core Features">核心特性</h2>
-    <p class="section-desc" data-en="11 core capabilities covering the full spectrum of Go dependency injection">11 项核心能力，覆盖 Go 依赖注入的完整场景</p>
+    <p class="section-desc" data-en="12 core capabilities covering the full spectrum of Go dependency injection">12 项核心能力，覆盖 Go 依赖注入的完整场景</p>
 
     <div class="features-grid">
       <div class="feature-card">
@@ -447,13 +447,30 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
         <tbody>
           <tr><td><code>-out</code></td><td><code>dig_gen.go</code></td><td data-en="Output file name (ignored in ./... mode)">输出文件名（<code>./...</code> 模式下忽略）</td></tr>
           <tr><td><code>-unused</code></td><td><code>error</code></td><td data-en-html="Policy for unused providers: <code>error</code> / <code>ignore</code> / <code>drop</code>">未使用提供者的处理策略：<code>error</code> / <code>ignore</code> / <code>drop</code></td></tr>
-          <tr><td><code>-debug</code></td><td><code>false</code></td><td data-en="Enable debug logging (detailed errors always shown since v1.0.13)">启用调试日志（v1.0.13 起详细错误始终显示）</td></tr>
+          <tr><td><code>-debug</code></td><td><code>false</code></td><td data-en="Enable debug logging (detailed errors always shown)">启用调试日志（详细错误始终显示）</td></tr>
           <tr><td><code>-alias</code></td><td><code>full</code></td><td data-en-html="Import-alias strategy: <code>full</code> / <code>short</code> / <code>obfuscated</code> / <code>numeric</code>">导入别名策略：<code>full</code> / <code>short</code> / <code>obfuscated</code> / <code>numeric</code></td></tr>
-          <tr><td><code>-inline</code></td><td><code>false</code></td><td data-en="Inline simple closures as IIFEs; identity closures collapse to type conversions (v1.0.14+)">将简单闭包内联为 IIFE；身份闭包塌缩为类型转换（v1.0.14+）</td></tr>
+          <tr><td><code>-inline</code></td><td><code>false</code></td><td data-en="Inline simple closures as IIFEs; identity closures collapse to type conversions">将简单闭包内联为 IIFE；身份闭包塌缩为类型转换</td></tr>
           <tr><td><code>-typecheck</code></td><td><code>true</code></td><td data-en="Type-check generated code after emission to catch internal generator bugs. Disable (-typecheck=false) for large ./... runs.">生成后类型检查产出代码以捕获内部生成器 bug；大型 ./... 运行可关闭（-typecheck=false）以省去逐文件重载包图。</td></tr>
           <tr><td><code>-cache</code></td><td><code>false</code></td><td data-en="Cache the extracted IR to disk and reuse it for unchanged packages (skips extraction on cache hit).">将提取出的 IR 缓存到磁盘，未改动包命中缓存时跳过提取/类型检查。</td></tr>
           <tr><td><code>-cachedir</code></td><td><code>""</code></td><td data-en-html='IR cache directory (default: <code>os.TempDir()/digen-ir-cache</code>); ignored unless <code>-cache</code> is set.'>IR 缓存目录（默认：<code>os.TempDir()/digen-ir-cache</code>；仅 -cache 设置时生效）。</td></tr>
-          <tr><td><code>-version</code></td><td><code>false</code></td><td data-en="Print version info and exit (v1.0.13+)">打印版本信息并退出（v1.0.13+）</td></tr>
+          <tr><td><code>-version</code></td><td><code>false</code></td><td data-en="Print version info and exit">打印版本信息并退出</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="subsection-title" data-en="CLI commands">CLI 命令</h3>
+    <p class="section-desc" data-en="Beyond the default generation run (digen [packages...]), digen offers subcommands for scaffolding, validation, and inspection.">除默认生成运行（digen [packages...]）外，digen 还提供用于脚手架、校验与检视的子命令。</p>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr><th data-en="Command">命令</th><th data-en="Description">说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>digen init [path]</code></td><td data-en="Scaffold a di.go with the dig.Build entry point">生成带 dig.Build 入口的 di.go 脚手架</td></tr>
+          <tr><td><code>digen check [pkgs]</code></td><td data-en="Validate DI contracts without writing any file">校验 DI 契约，不写文件</td></tr>
+          <tr><td><code>digen graph [pkgs]</code></td><td data-en="Print the provider dependency graph as Mermaid">以 Mermaid 打印提供者依赖图</td></tr>
+          <tr><td><code>digen explain &lt;type&gt; [pkgs]</code></td><td data-en="Explain how a type/provider is resolved">解释某类型/提供者的解析路径</td></tr>
+          <tr><td><code>digen completion &lt;shell&gt;</code></td><td data-en="Print a shell completion script (bash, zsh, fish)">输出 shell 补全脚本（bash/zsh/fish）</td></tr>
         </tbody>
       </table>
     </div>
@@ -557,7 +574,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
           <tbody>
             <tr><td><strong data-en="Maintenance status">维护状态</strong></td><td class="col-dig" data-en="✅ Active">✅ 活跃</td><td data-en="⚠️ Archived">⚠️ 已归档</td><td data-en="✅ Active">✅ 活跃</td></tr>
             <tr><td data-en="Latest version">最新版本</td><td class="col-dig">v1.0.18</td><td>v0.7.0 (beta)</td><td>v1.24.0</td></tr>
-            <tr><td data-en="Go version requirement">Go 版本要求</td><td class="col-dig">1.21+</td><td data-en="Standard">标准</td><td>1.21+</td></tr>
+            <tr><td data-en="Go version requirement">Go 版本要求</td><td class="col-dig">1.25+</td><td data-en="Standard">标准</td><td>1.25+</td></tr>
             <tr><td data-en="Refactor friendliness">重构友好度</td><td class="col-dig" data-en="High">高</td><td data-en="Low">低</td><td data-en="Medium">中</td></tr>
           </tbody>
         </table>
@@ -570,7 +587,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
 <section id="examples" class="section section-alt">
   <div class="container">
     <h2 class="section-title" data-en="Examples">示例</h2>
-    <p class="section-desc" data-en="41 examples covering the main functional dimensions">41 个示例覆盖主要功能维度</p>
+    <p class="section-desc" data-en="12 runnable example apps + 35 negative-test fixtures">12 个可运行示例应用 + 35 个负向测试样例</p>
 
     <div class="examples-grid">
       <div class="example-category">
@@ -591,7 +608,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
         </ul>
       </div>
       <div class="example-category">
-        <h3 data-en-html="❌ Failure examples (29)">❌ 失败示例（29 个）</h3>
+        <h3 data-en-html="❌ Failure examples (35)">❌ 失败示例（35 个）</h3>
         <ul class="example-list example-list-fail">
           <li data-en-html="<strong>ambiguous</strong> — Named-instance ambiguity"><strong>ambiguous</strong> — 命名实例歧义</li>
           <li data-en-html="<strong>capture_const</strong> / <strong>capture_ctx</strong> — Closure capture violations"><strong>capture_const</strong> / <strong>capture_ctx</strong> — 闭包捕获违规</li>
@@ -681,54 +698,6 @@ flowchart TD
         <div class="timeline-content">
           <h3 data-en="Generation-time hardening &amp; diagnostics">生成期加固与诊断</h3>
           <p data-en-html="Providers can no longer declare a <code>context.Context</code> parameter (context injection is Invoke-only); the <code>//go:build digen</code> tag on the DI spec file is now validated at generation time; a post-generation <code>go/types</code> safety net refuses to emit a broken file and prints a one-click, pre-filled GitHub issue link on any internal generator bug; <code>gen_failures/</code> now has automated regression tests. Also fixes a regression introduced in v1.0.17 where closure parameters / local variables were falsely reported as <code>private</code> (&quot;var X is private&quot;) under cross-package module inlining — now allowed; type-name rewriting switched from a fragile regex to a precise AST rewrite; and a new optional stable serializable IR disk cache (<code>-cache</code> / <code>-cachedir</code>, off by default).">provider 不可声明 <code>context.Context</code> 参数（context 注入仅限 Invoke）；DI 规格文件的 <code>//go:build digen</code> 标签现于生成期强制校验；生成后 <code>go/types</code> 安全网在出现内部生成器 bug 时拒绝写出坏文件并输出可点击的预填 GitHub issue 链接；<code>gen_failures/</code> 新增自动化回归测试。并修复 v1.0.17 引入的回归——跨包模块内联时闭包参数/局部变量被误报为 <code>private</code>（"var X is private"），现已放行；类型名改写由脆弱的正则改为 AST 精确改写；新增可选的稳定可序列化 IR 磁盘缓存（<code>-cache</code>/<code>-cachedir</code>，默认关）。</p>
-        </div>
-      </div>
-      <div class="timeline-item">
-        <div class="timeline-version">v1.0.17</div>
-        <div class="timeline-date">2026-08-13</div>
-        <div class="timeline-content">
-          <h3 data-en="Unexported cross-package call interception + examples/docs">未导出跨包调用拦截 + 示例/文档完善</h3>
-          <p data-en-html="The generator now rejects unexported cross-package calls inside lifted closures at generation time (previously emitted illegal <code>pkg.fn</code> silently). Fixed a parameter-shadowing bug in the <code>db</code> example and a wrong duplicate-Supply error message. Added new success/failure examples and this GitHub Pages site with zh/en switching.">生成器现在会在生成期拦截闭包提升中的未导出跨包调用（此前会静默产出非法的 <code>pkg.fn</code>）。修复 <code>db</code> 示例的参数遮蔽 bug 及 Supply 重复绑定的错误消息。新增成功/失败示例，以及本 GitHub Pages 站点（含中英文切换）。</p>
-        </div>
-      </div>
-      <div class="timeline-item">
-        <div class="timeline-version">v1.0.16</div>
-        <div class="timeline-date">2026-08-07</div>
-        <div class="timeline-content">
-          <h3 data-en="ShadowGuard variable-shadowing protection">ShadowGuard 变量名遮蔽保护</h3>
-          <p data-en-html="New shadow-protection mechanism that auto-detects and avoids variable-name shadowing in generated code. Default behavior for unused params changed from <code>drop</code> to <code>error</code>.">新增 shadow protection 机制，自动检测并避免生成代码中的变量名遮蔽问题。未使用参数默认行为从 <code>drop</code> 改为 <code>error</code>。</p>
-        </div>
-      </div>
-      <div class="timeline-item">
-        <div class="timeline-version">v1.0.15</div>
-        <div class="timeline-date">2026-08-03</div>
-        <div class="timeline-content">
-          <h3 data-en="Type-package collection robustness fix">类型包收集核心健壮性修复</h3>
-          <p data-en-html="Correctly handles function signatures, self-referencing types, and nested generics. Removed the <code>-debug-aliases</code> flag (merged into <code>-debug</code>), and lifted the one-<code>dig.Module</code>-per-function limit.">正确处理函数签名、自引用类型、嵌套泛型。移除 <code>-debug-aliases</code> 标志（统一并入 <code>-debug</code>），放开每函数仅一个 <code>dig.Module</code> 限制。</p>
-        </div>
-      </div>
-      <div class="timeline-item">
-        <div class="timeline-version">v1.0.14</div>
-        <div class="timeline-date">2026-08-01</div>
-        <div class="timeline-content">
-          <h3 data-en="Closure inlining + identity-closure optimization">闭包内联 + 身份闭包优化</h3>
-          <p data-en-html="The <code>-inline</code> flag inlines simple closures as IIFEs; identity closures collapse to direct type conversions. Cross-package alias isolation guarantees consistent output between <code>digen ./...</code> and <code>digen ./&amp;lt;pkg&amp;gt;</code>. Every error message carries its source location."><code>-inline</code> 标志将简单闭包内联为 IIFE，身份闭包塌缩为直接类型转换。跨包别名隔离保证 <code>digen ./...</code> 与 <code>digen ./&lt;pkg&gt;</code> 输出一致。所有错误消息含源码位置。</p>
-        </div>
-      </div>
-      <div class="timeline-item">
-        <div class="timeline-version">v1.0.13</div>
-        <div class="timeline-date">2026-07-30</div>
-        <div class="timeline-content">
-          <h3 data-en="Version info + structured errors + Mage build">版本信息 + 结构化错误 + Mage 构建</h3>
-          <p data-en-html="Added the <code>-version</code> flag and the Mage build system. Structured errors replace panics, and every error now includes a <code>💡 Fix:</code> suggestion. New <code>gen_failures/</code> regression cases added.">新增 <code>-version</code> 标志、Mage 构建系统。结构化错误替换 panic，所有错误附带 <code>💡 Fix:</code> 修复建议。新增 <code>gen_failures/</code> 回归用例。</p>
-        </div>
-      </div>
-      <div class="timeline-item">
-        <div class="timeline-version">v1.0.11</div>
-        <div class="timeline-date">2026-07-10</div>
-        <div class="timeline-content">
-          <h3 data-en="Named multi-instance injection">命名多实例注入</h3>
-          <p data-en-html="Distinguish multiple instances of the same type by parameter name — multi-DB connections, multi-Redis clients, and more. Fixed package-alias resolution.">通过参数名区分同一类型的多个实例，支持多 DB 连接、多 Redis 客户端等场景。修复包别名解析问题。</p>
         </div>
       </div>
     </div>

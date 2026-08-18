@@ -21,6 +21,9 @@
 - **黄金文件（golden-file）回归测试**  
   新增 `example/golden/golden_test.go`：运行时发现各 `example/*/dig_gen.go`（含 `//go:build digen` 与 `//go:generate` 指令者），解析其 `//go:generate` 还原精确 flags，重生成到临时 `-out`，`normalize()` 剥离 `//go:generate` 元行后逐字节 diff。任何悄然改变输出（含"能编译但语义漂移"）都会被抓出。覆盖 11 个复杂 example，全部与已提交 golden 逐字节一致；已验证能抓漂移（临时篡改 golden 即 FAIL）。
 
+- **`digen` CLI 子命令**  
+  新增 `init`（生成带 `dig.Build` 入口的 `di.go` 脚手架）、`check`（仅校验 DI 契约、不写文件）、`graph`（以 Mermaid 打印提供者依赖图）、`explain <type>`（解释类型/提供者的解析路径）、`completion <shell>`（bash/zsh/fish 补全脚本）。`init`/`check`/`graph`/`explain` 复用生成管线，所有 flag 对其同样生效；配套的 `digen -h` 帮助文本与补全脚本同步列出全部 flag 与子命令。
+
 ---
 
 ## [v1.0.18] - 2026-08-15

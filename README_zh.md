@@ -1,6 +1,5 @@
 ## LLM 智能助手提示词
-所有大模型专用系统指令文件统一存放在 [`prompts`](./prompts) 目录
-- [`system_prompt_dig.md`](./prompts/system_prompt_dig.md)：适配 github.com/shanjunmei/dig 编译期DI库的专业AI开发技能
+优化过的 dig AI 助手提示词统一存放在 [`prompts`](./prompts) 目录，入口为 [`system_prompt_dig.md`](./prompts/system_prompt_dig.md)，覆盖：核心 API 与 CLI、排错、版本迁移、dig/Wire/Fx 对比。
 
 ### 官方工业级模块化开发规范手册
 一套基于 dig 构建、面向业务微服务的完整标准化生产级编码规范手册：
@@ -13,21 +12,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **当前版本**：v1.0.18
->
-> **关键版本变更**：
-> - **v1.0.18**：生成期加固——provider 不可声明 `context.Context` 参数（context 注入仅限 Invoke）；DI 规格文件的 `//go:build digen` 标签现于生成期强制校验；生成后 `go/types` 安全网在出现内部生成器 bug 时拒绝写出坏文件并输出可点击的预填 GitHub issue 链接；`gen_failures/` 新增自动化回归测试。**修复 v1.0.17 引入的回归**：跨包模块内联时闭包参数 / 局部变量被误报为 `private`（"var X is private"），v1.0.18 已放行。类型名改写由脆弱的正则改为 AST 精确改写；新增可选的稳定可序列化 IR 磁盘缓存（`-cache` / `-cachedir`，默认关）以跳过未改动包的提取 / 类型检查。
-> - **v1.0.17**：闭包可见性加固（提升后的闭包中跨包裸函数/类型调用在生成前以清晰的 `private` 错误拦截，新增 `closure_private_fn` 回归示例）；示例覆盖率扩展（新增成功示例 `app_runtime_err`、`app_xpkg_generic`，新增命名歧义/重复/未使用/未导出等失败示例）；GitHub Pages 站点支持中 / 英文切换；重新生成全部 `dig_gen.go`，统一 `dv` 前缀并默认开启 inline 内联
-> - **v1.0.15**：类型包收集逻辑核心健壮性修复（正确处理函数签名、自引用类型、嵌套泛型）；移除 `-debug-aliases` 标志（统一并入 `-debug`）、放开每函数仅一个 `dig.Module` 限制；完善第三方库对比矩阵
-> - **v1.0.14**: 闭包内联（`-inline`）、身份闭包优化（直接类型转换替代包装函数）、跨包别名隔离（`digen ./...` 与 `digen ./<pkg>` 输出一致）、生成代码正确使用 context 别名、所有错误消息含源码位置（`file:line:col`）、全局 Logger 统一将别名诊断与调试输出归入 `-debug` 参数
-> - **v1.0.13**：版本信息系统（`-version`）、Mage 构建支持、Provide 闭包签名校验、结构化错误替换 panic、带 `💡 Fix:` 的可操作错误消息
-> - **v1.0.11**：新增命名多实例注入，修复包别名解析问题（如 `go-redis/v9`）
-> - **v1.0.5**：`InitApp()` 返回 `func(context.Context) error`，生成的代码零运行时依赖
-> - **v1.0.4**：初始稳定版本
->
-> **从 v1.0.4 升级**：将 `app.Run(ctx)` 替换为 `run := InitApp(); run(ctx)`。
->
-> 完整发版说明请参阅 [CHANGELOG.md](./CHANGELOG.md)（中文） / [CHANGELOG_en.md](./CHANGELOG_en.md)（English）。
+> **当前版本**：v1.0.18 — 完整发版说明见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ---
 
@@ -53,10 +38,11 @@ Go 的依赖注入工具分为两大阵营：
 - **闭包内联**（`-inline`）– 将简单闭包内联为立即调用函数表达式（IIFE），减少生成的函数数量；身份闭包（`func(p T) T { return p }`）塌缩为一次直接类型转换。
 - **泛型支持** – 原生支持泛型函数和类型。
 - **可观测性** – 支持调试日志，运行时可通过 `Logf` 覆盖；启用 `-debug` 时还会打印每个包解析后的导入别名映射。
-- **可操作错误** – 所有错误消息包含源码位置（`file:line:col`）与 `💡 Fix:` 修复建议（v1.0.13 引入，v1.0.14 扩展）。
+- **可操作错误** – 所有错误消息包含源码位置（`file:line:col`）与 `💡 Fix:` 修复建议。
 - **未使用提供者策略** – `error`（默认）、`ignore` 或 `drop`。
 - **模块嵌套** – 支持层次化组合模块，内置重复检测。
 - **命名实例注入** – 通过参数名区分同一类型的多个实例（详见下文）。
+- **ShadowGuard** – 生成器级防护，自动检测并避免生成代码中的变量名遮蔽。
 
 ---
 
@@ -276,13 +262,29 @@ provider（通过 `dig.Provide` / `dig.Supply` / `dig.Module` 注册的构造函
 |------|--------|------|
 | `-out` | `dig_gen.go` | 输出文件名（在 `./...` 模式下忽略） |
 | `-unused` | `error` | 未使用提供者的处理策略 |
-| `-debug` | `false` | 启用调试日志（v1.0.13 起详细错误始终显示） |
+| `-debug` | `false` | 启用调试日志（详细错误始终显示） |
 | `-alias` | `full` | 导入别名策略：`full` / `short` / `obfuscated` / `numeric`；启用 `-debug` 时同时打印别名映射诊断 |
-| `-inline` | `false` | 将简单闭包内联为 IIFE；身份闭包塌缩为类型转换（v1.0.14+） |
+| `-inline` | `false` | 将简单闭包内联为 IIFE；身份闭包塌缩为类型转换 |
 | `-typecheck` | `true` | 生成后类型检查产出代码以捕获内部生成器 bug；大型 `./...` 运行可关闭（`-typecheck=false`）以省去逐文件重载包图 |
 | `-cache` | `false` | 将提取出的 IR 缓存到磁盘，未改动包命中缓存时跳过提取/类型检查 |
 | `-cachedir` | `""` | IR 缓存目录（默认：`os.TempDir()/digen-ir-cache`；仅 `-cache` 设置时生效） |
-| `-version` | `false` | 打印版本信息并退出（v1.0.13+） |
+| `-version` | `false` | 打印版本信息并退出 |
+
+---
+
+## CLI 命令
+
+除默认的生成运行（`digen [packages...]`）外，`digen` 还提供用于脚手架、校验与检视的子命令：
+
+| 命令 | 说明 |
+|------|------|
+| `digen init [path]` | 生成带 `dig.Build` 入口的 `di.go` 脚手架。 |
+| `digen check [pkgs]` | 校验 DI 契约（提取 + 未使用提供者检查），**不写**任何文件。 |
+| `digen graph [pkgs]` | 以 Mermaid 流程图打印提供者依赖图。 |
+| `digen explain <type> [pkgs]` | 解释某类型/提供者如何被解析（按名称或返回类型匹配）。 |
+| `digen completion <shell>` | 输出 shell 补全脚本（`bash`、`zsh`、`fish`）。 |
+
+所有标志（`-out`、`-unused`、`-debug`、`-alias`、`-inline`、`-typecheck`、`-cache`、`-cachedir`、`-version`）对生成运行与 `check` / `graph` / `explain` 子命令同样生效。
 
 ---
 
@@ -332,9 +334,10 @@ provider（通过 `dig.Provide` / `dig.Supply` / `dig.Module` 注册的构造函
 | 错误含源码位置 | ✅ 每条错误均含 `file:line:col` | ⚠️ 仅提供者 / Set 名称 | ⚠️ 运行时堆栈 |
 | 可操作修复建议 | ✅ 每条错误均含 `💡 Fix:` | ❌ | ❌ |
 | 未使用提供者策略 | 3 种模式（`error` / `ignore` / `drop`） | 仅硬错误（无模式） | N/A（惰性；静默跳过） |
-| 不运行即可校验 | ✅（生成即校验） | ✅（生成即校验） | ✅ `fx.ValidateApp(opts)` |
+| 不运行即可校验 | ✅ `digen check` / 生成即校验 | ✅（生成即校验） | ✅ `fx.ValidateApp(opts)` |
 | 调试日志 | ✅ 运行时可覆盖 `Logf` | ❌ 手动 | ✅ `fxevent`（Console / Zap / Slog） |
-| 依赖图可视化 (DOT) | ❌ | ❌ | ✅ `fx.DotGraph` + `fx.VisualizeError` |
+| 依赖图可视化 | ✅ `digen graph`（Mermaid） | ❌ | ✅ `fx.DotGraph` + `fx.VisualizeError`（DOT） |
+| 解析路径解释 | ✅ `digen explain <type>` | ❌（阅读生成代码） | ❌（仅运行时错误） |
 | 测试辅助 | ❌ | ❌ | ✅ `fxtest` 包 |
 
 ### 运行时与运维
@@ -350,12 +353,12 @@ provider（通过 `dig.Provide` / `dig.Supply` / `dig.Module` 注册的构造函
 
 | 特性 | dig | Google Wire | Uber Fx |
 |------|-----|-------------|---------|
-| 维护状态 | ✅ 活跃 | ⚠️ **已归档**（不再维护） | ✅ 活跃 |
+| 维护状态 | ✅ 活跃 | ⚠️ **已归档**（仅修 bug） | ✅ 活跃 |
 | 最新版本 | v1.0.18 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
 | Go 版本要求 | 1.25+ | 标准 | 1.21+（用于 `slog` logger） |
 | 重构友好度 | 高（静态检查 + 源码位置） | 低（错误晦涩） | 中（运行时错误） |
 
-> **Wire 特别说明**：`wire.Build` 需要写一个哑 `return nil, nil`（或 `panic(wire.Build(...))`）；`wire.Value` 禁止函数调用与 channel 接收（不仅是常量，但接近）；`wire.NewSet` 在分析时被扁平化（无作用域 / 可见性边界）；项目自 v0.7.0 起**已归档**——上游不再接受任何新功能或修复；不支持泛型（必须为每个实例化编写具体提供者）。
+> **Wire 特别说明**：`wire.Build` 需要写一个哑 `return nil, nil`（或 `panic(wire.Build(...))`）；`wire.Value` 禁止函数调用与 channel 接收（不仅是常量，但接近）；`wire.NewSet` 在分析时被扁平化（无作用域 / 可见性边界）；项目自 v0.7.0 起**已归档**——上游不再接受新功能，但仍接受 bug 修复；不支持泛型（必须为每个实例化编写具体提供者）。
 >
 > **Fx 特别说明**：功能最丰富——完整的生命周期（`OnStart`/`OnStop` 按依赖顺序执行、逆序销毁）、装饰器（`fx.Decorate`/`fx.Replace`）、支持 `flatten`/`soft` 模式的值组、`fx.Private` 模块作用域、`fxtest` 测试包、`fx.DotGraph` 可视化，以及感知信号的 `app.Run` 与 `fx.Shutdowner`。代价是运行时反射（启动延迟）、依赖错误在运行时 panic（可通过 CI 中的 `fx.ValidateApp` 缓解），以及对 `fx` + `dig` 运行时的硬依赖。
 >
