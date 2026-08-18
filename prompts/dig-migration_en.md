@@ -20,6 +20,7 @@
 | v1.0.16 | ShadowGuard variable-shadowing protection; unused params default to `error` |
 | v1.0.17 | Intercept unexported cross-package calls in closures; added examples and GitHub Pages site |
 | v1.0.18 | Provider `context.Context` ban; `//go:build digen` generation-time check; `go/types` safety net; IR cache |
+| v1.0.19 | `digen` CLI subcommands (init/check/graph/explain/completion); generation-time contract pre-check; type-check safety net (contract-violation vs internal-bug classification); build-constraint checks consolidated into `internal/buildconstraint`; golden-file regression test |
 
 ## 3. Current Key Features (by introduction version, for migration decisions)
 

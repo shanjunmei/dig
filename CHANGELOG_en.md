@@ -4,7 +4,7 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v1.0.19] - 2026-08-18
 
 ## ✨ Generation-time contract pre-check & diagnostics
 

@@ -20,6 +20,7 @@
 | v1.0.16 | ShadowGuard 变量遮蔽保护；未使用参数默认改为 `error` |
 | v1.0.17 | 拦截闭包内未导出跨包调用；新增示例与 GitHub Pages 站点 |
 | v1.0.18 | provider 禁 `context.Context` 参数；`//go:build digen` 生成期校验；`go/types` 安全网；IR 缓存 |
+| v1.0.19 | `digen` CLI 子命令（init/check/graph/explain/completion）；生成期契约预检；类型检查安全网（契约违规 vs 内部 bug 分类）；构建约束收敛到 `internal/buildconstraint`；golden 回归测试 |
 
 ## 3. 当前关键特性（按引入版本，便于迁移判断）
 

@@ -56,7 +56,7 @@
         <img src="https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg" alt="Go Reference">
       </a>
       <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
-      <img src="https://img.shields.io/badge/version-v1.0.18-00ADD8.svg" alt="v1.0.18">
+      <img src="https://img.shields.io/badge/version-v1.0.19-00ADD8.svg" alt="v1.0.19">
       <img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg" alt="Go 1.25+">
     </div>
     <h1 class="hero-title">
@@ -573,7 +573,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
           </thead>
           <tbody>
             <tr><td><strong data-en="Maintenance status">维护状态</strong></td><td class="col-dig" data-en="✅ Active">✅ 活跃</td><td data-en="⚠️ Archived">⚠️ 已归档</td><td data-en="✅ Active">✅ 活跃</td></tr>
-            <tr><td data-en="Latest version">最新版本</td><td class="col-dig">v1.0.18</td><td>v0.7.0 (beta)</td><td>v1.24.0</td></tr>
+            <tr><td data-en="Latest version">最新版本</td><td class="col-dig">v1.0.19</td><td>v0.7.0 (beta)</td><td>v1.24.0</td></tr>
             <tr><td data-en="Go version requirement">Go 版本要求</td><td class="col-dig">1.25+</td><td data-en="Standard">标准</td><td>1.25+</td></tr>
             <tr><td data-en="Refactor friendliness">重构友好度</td><td class="col-dig" data-en="High">高</td><td data-en="Low">低</td><td data-en="Medium">中</td></tr>
           </tbody>
@@ -587,7 +587,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
 <section id="examples" class="section section-alt">
   <div class="container">
     <h2 class="section-title" data-en="Examples">示例</h2>
-    <p class="section-desc" data-en="12 runnable example apps + 35 negative-test fixtures">12 个可运行示例应用 + 35 个负向测试样例</p>
+    <p class="section-desc" data-en="12 runnable example apps + 34 negative-test fixtures">12 个可运行示例应用 + 34 个负向测试样例</p>
 
     <div class="examples-grid">
       <div class="example-category">
@@ -608,7 +608,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
         </ul>
       </div>
       <div class="example-category">
-        <h3 data-en-html="❌ Failure examples (35)">❌ 失败示例（35 个）</h3>
+        <h3 data-en-html="❌ Failure examples (34)">❌ 失败示例（34 个）</h3>
         <ul class="example-list example-list-fail">
           <li data-en-html="<strong>ambiguous</strong> — Named-instance ambiguity"><strong>ambiguous</strong> — 命名实例歧义</li>
           <li data-en-html="<strong>capture_const</strong> / <strong>capture_ctx</strong> — Closure capture violations"><strong>capture_const</strong> / <strong>capture_ctx</strong> — 闭包捕获违规</li>
@@ -692,6 +692,14 @@ flowchart TD
   <div class="container">
     <h2 class="section-title" data-en="Release highlights">版本亮点</h2>
     <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-version">v1.0.19</div>
+        <div class="timeline-date">2026-08-18</div>
+        <div class="timeline-content">
+          <h3 data-en="Generation-time contract pre-check &amp; diagnostics">生成期契约预检与诊断增强</h3>
+          <p data-en-html="Added <code>digen</code> CLI subcommands (init/check/graph/explain/completion); the generation-time contract pre-check ensures <code>di.go</code> holds wiring only and aborts with a <code>💡 Fix:</code> when a symbol defined inside a <code>//go:build digen</code> file is referenced; the post-generation type-check safety net now classifies contract violations versus internal generator bugs; build-constraint checks are consolidated into <code>internal/buildconstraint</code> as the single source of truth; a new golden-file byte-diff regression test covers 11 complex examples.">新增 <code>digen</code> CLI 子命令（init/check/graph/explain/completion）；生成期契约预检确保 <code>di.go</code> 只放接线，一旦引用 <code>//go:build digen</code> 文件内定义的符号即中止生成并给出 <code>💡 Fix:</code>；生成后类型检查安全网区分契约违规与内部生成器 bug；构建约束校验收敛到 <code>internal/buildconstraint</code> 单一真源；新增 golden 文件逐字节回归测试，覆盖 11 个复杂 example。</p>
+        </div>
+      </div>
       <div class="timeline-item">
         <div class="timeline-version">v1.0.18</div>
         <div class="timeline-date">2026-08-15</div>

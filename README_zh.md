@@ -12,7 +12,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **当前版本**：v1.0.18 — 完整发版说明见 [CHANGELOG.md](./CHANGELOG.md)。
+> **当前版本**：v1.0.19 — 完整发版说明见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ---
 
@@ -354,7 +354,7 @@ provider（通过 `dig.Provide` / `dig.Supply` / `dig.Module` 注册的构造函
 | 特性 | dig | Google Wire | Uber Fx |
 |------|-----|-------------|---------|
 | 维护状态 | ✅ 活跃 | ⚠️ **已归档**（仅修 bug） | ✅ 活跃 |
-| 最新版本 | v1.0.18 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
+| 最新版本 | v1.0.19 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
 | Go 版本要求 | 1.25+ | 标准 | 1.21+（用于 `slog` logger） |
 | 重构友好度 | 高（静态检查 + 源码位置） | 低（错误晦涩） | 中（运行时错误） |
 

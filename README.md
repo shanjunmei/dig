@@ -11,7 +11,7 @@ A complete standardized production coding convention skill for business microser
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Current version**: v1.0.18 — full release notes in [CHANGELOG_en.md](./CHANGELOG_en.md).
+> **Current version**: v1.0.19 — full release notes in [CHANGELOG_en.md](./CHANGELOG_en.md).
 
 ---
 
@@ -353,7 +353,7 @@ All flags (`-out`, `-unused`, `-debug`, `-alias`, `-inline`, `-typecheck`, `-cac
 | Feature | dig | Google Wire | Uber Fx |
 |---------|-----|-------------|---------|
 | Maintenance status | ✅ active | ⚠️ **archived** (bug-fix only) | ✅ active |
-| Latest version | v1.0.18 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
+| Latest version | v1.0.19 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
 | Go version requirement | 1.25+ | standard | 1.21+ (for `slog` logger) |
 | Refactoring friendliness | High (static checks + source location) | Low (cryptic errors) | Medium (runtime errors) |
 
