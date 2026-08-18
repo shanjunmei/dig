@@ -13,6 +13,16 @@
   };
 
   function getLang() {
+    // Deep-link language via ?lang=zh|en (so README doc links can open the
+    // matching language). Takes precedence over any stored preference and is
+    // persisted, so later visits without the param keep the chosen language.
+    try {
+      var param = new URLSearchParams(window.location.search).get('lang');
+      if (param === 'en' || param === 'zh') {
+        try { localStorage.setItem(I18N_KEY, param); } catch (e) { /* ignore */ }
+        return param;
+      }
+    } catch (e) { /* ignore */ }
     var stored = null;
     try { stored = localStorage.getItem(I18N_KEY); } catch (e) { /* ignore */ }
     return (stored === 'en' || stored === 'zh') ? stored : 'zh';

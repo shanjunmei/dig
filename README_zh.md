@@ -7,7 +7,7 @@
 
 # dig — 编译期依赖注入 for Go
 
-中文文档 | [English](./README.md)
+中文文档 | [English](./README.md) | [文档站点](https://shanjunmei.github.io/dig/?lang=zh)
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)

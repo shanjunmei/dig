@@ -6,7 +6,7 @@ A complete standardized production coding convention skill for business microser
 
 # dig — Compile‑time Dependency Injection for Go
 
-[中文文档](./README_zh.md) | English
+[中文文档](./README_zh.md) | English | [Documentation site](https://shanjunmei.github.io/dig/?lang=en)
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
