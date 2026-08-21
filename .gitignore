@@ -39,3 +39,7 @@ temp/
 
 # Local AI tool data (WorkBuddy memory / work logs) — keep locally, never commit or push
 .workbuddy/
+
+# AI-generated working artifacts (audit / coverage / UI-UX evaluation reports) —
+# organized under reports/, kept locally as references, never commit or push to remote
+reports/
