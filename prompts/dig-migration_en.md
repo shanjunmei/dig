@@ -21,12 +21,13 @@
 | v1.0.17 | Intercept unexported cross-package calls in closures; added examples and GitHub Pages site |
 | v1.0.18 | Provider `context.Context` ban; `//go:build digen` generation-time check; `go/types` safety net; IR cache |
 | v1.0.19 | `digen` CLI subcommands (init/check/graph/explain/completion); generation-time contract pre-check; type-check safety net (contract-violation vs internal-bug classification); build-constraint checks consolidated into `internal/buildconstraint`; golden-file regression test |
+| v1.0.20 | Decoupled identity-closure collapse from IIFE inlining: identity collapse (direct / address-of / deref / type-conversion / type-assertion) is always applied and independent of `-inline`; `-inline` now gates IIFE inlining only (default off); new type-assertion identity closure `func(p any) T { return p.(T) }` |
 
 ## 3. Current Key Features (by introduction version, for migration decisions)
 
 - Named instance injection (v1.0.11+)
 - Version info system (v1.0.13+): `-version`, Mage, structured errors
-- Closure inlining (v1.0.14+): `-inline`
+- Closure inlining (v1.0.14+): `-inline` (since v1.0.20, IIFE inlining only; identity-closure collapse is always on and independent of this flag)
 - Multi-Module support (v1.0.15+)
 - ShadowGuard (v1.0.16+)
 - Unexported cross-package call interception (v1.0.17+)
@@ -36,7 +37,7 @@
 
 1. Use the comparison table (see `dig-comparison_en.md`) to confirm capability mapping
 2. Rewrite runtime `fx.Provide`/`fx.Invoke` or `wire.NewSet` into `dig.Provide`/`dig.Invoke` inside `dig.Build(...)`
-3. Interface binding: Wire `wire.Bind` / Fx `fx.As` → dig identity closure (inlined to type conversion)
+3. Interface binding: Wire `wire.Bind` / Fx `fx.As` → dig identity closure (always collapsed to type conversion, independent of `-inline`)
 4. Multi-instance: Fx named/value groups → dig named parameters
 5. Drop runtime deps: remove `go.uber.org/fx`, `google/wire` imports and runtime startup code such as `app.Run`
 6. Add `//go:build digen` to di.go and run `digen ./...` to generate `dig_gen.go`

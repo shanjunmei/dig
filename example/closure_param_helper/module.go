@@ -11,6 +11,19 @@ import (
 // 引用它，那是真实的跨包可见性问题，会把测试意图搅混，故此处导出。
 type Config string
 
+// Animal / Dog 用于锁定类型断言恒等闭包（OpAssert）的端到端生成。
+// 关键回归点：断言类型 Dog 与返回类型 Animal 不同，生成器必须输出 d.(Dog)
+// 而非 d.(Animal)，否则语义改变（原闭包断言到具体类型，生成的若断言到接口
+// 则会接受任意实现者而与原 panic 行为不符）。
+type Animal interface{ Speak() string }
+
+type Dog struct{}
+
+func (Dog) Speak() string { return "woof" }
+
+// NewDog 以 any 形式提供 Dog，作为类型断言闭包 d.(Dog) 的注入来源。
+func NewDog() any { return Dog{} }
+
 // NewConfigFactory 提供 func() Config，作为闭包参数 f 的注入来源。
 func NewConfigFactory() func() Config {
 	return func() Config { return "closure-param-value" }
@@ -33,8 +46,16 @@ func NewConfigFactory() func() Config {
 func Module() dig.Option {
 	return dig.Module(
 		dig.Provide(NewConfigFactory),
+		dig.Provide(NewDog),
+		// 类型断言恒等闭包：any -> Animal，但真实塌缩应为 d.(Dog)。
+		// 该例同时被 golden 测试钉住，确保生成器输出 d.(Dog) 而非 d.(Animal)。
+		// 注意：用 Invoke 消费 Animal，避免 unused 丢弃后留下悬空死表达式。
+		dig.Provide(func(d any) Animal { return d.(Dog) }),
 		dig.Invoke(func(f func() Config) {
 			fmt.Println("invoked closure param:", f())
+		}),
+		dig.Invoke(func(a Animal) {
+			_ = a.Speak()
 		}),
 	)
 }

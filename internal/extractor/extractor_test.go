@@ -12,7 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shanjunmei/dig/internal/config"
 	"github.com/shanjunmei/dig/internal/logger"
+	"github.com/shanjunmei/dig/internal/model"
 	"github.com/shanjunmei/dig/pkg/alias"
 	"golang.org/x/tools/go/packages"
 )
@@ -332,6 +334,162 @@ func findClosureBody(pkg *packages.Package, dst **ast.BlockStmt) {
 			}
 		}
 	}
+}
+
+// TestIdentityClosureAlwaysAppliedWithoutInline locks the Option A invariant:
+// identity-closure collapse (Phase 4) must run even when -inline (IIFE, Phase 3)
+// is OFF. A regression that re-couples the two behind the -inline switch would
+// silently stop collapsing identity closures for the default `digen ./...`
+// invocation (no flags). Here we drive the real extractor path (handleFuncLit)
+// with InlineClosures=false and assert the closure is still marked as identity.
+func TestIdentityClosureAlwaysAppliedWithoutInline(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module testmod\n\ngo 1.21\n")
+	writeTestFile(t, dir, "main/main.go", `package main
+
+type T struct{}
+
+var Closure = func(p T) T { return p }
+`)
+
+	cfg := &packages.Config{Mode: packages.LoadAllSyntax, Dir: dir}
+	loaded, err := packages.Load(cfg, "testmod/main")
+	if err != nil {
+		t.Fatalf("packages.Load: %v", err)
+	}
+	if len(loaded) == 0 || loaded[0].PkgPath == "" {
+		t.Fatalf("main package not loaded")
+	}
+	if len(loaded[0].Errors) > 0 {
+		t.Fatalf("load errors for %s: %v", loaded[0].PkgPath, loaded[0].Errors)
+	}
+	pkg := loaded[0]
+
+	pkgMap := map[string]*packages.Package{pkg.PkgPath: pkg}
+	am := NewAliasManager(pkg.PkgPath, alias.SimpleAliasStrategy{}, pkgMap, &logger.Logger{})
+	am.LoadImportAliases()
+
+	e := &Extractor{
+		cfg:               &config.Config{InlineClosures: false}, // IIFE OFF — only identity should apply
+		pkgMap:            pkgMap,
+		mainPkgPath:       pkg.PkgPath,
+		aliasManager:      am,
+		globalProviderMap: make(map[string]int),
+		typeStrCache:      make(map[types.Type]string),
+	}
+
+	funcLit := findClosureFuncLit(pkg, "Closure")
+	if funcLit == nil {
+		t.Fatalf("Closure funcLit not found")
+	}
+
+	if err := e.handleFuncLit(funcLit, pkg, false); err != nil {
+		t.Fatalf("handleFuncLit: %v", err)
+	}
+	if len(e.items) != 1 {
+		t.Fatalf("expected 1 extracted item, got %d", len(e.items))
+	}
+	it := e.items[0]
+	if !it.IsIdentityClosure {
+		t.Fatalf("expected IsIdentityClosure=true even with InlineClosures=false; got false")
+	}
+	if it.ShouldInline {
+		t.Fatalf("expected ShouldInline=false for an identity closure; got true")
+	}
+}
+
+// TestIdentityClosureAssertOpDetected locks the type-assertion identity closure
+// (OpAssert): a closure of the form `func(p any) T { return p.(T) }` must be
+// recognized as an identity closure and collapse to the inline assertion `p.(T)`
+// even when -inline (IIFE, Phase 3) is OFF. This covers the DI-common "narrow
+// interface / any -> concrete type" wrapper that the original identity-closure
+// analysis (only direct / addr / deref / convert) missed.
+func TestIdentityClosureAssertOpDetected(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module testmod\n\ngo 1.21\n")
+	writeTestFile(t, dir, "main/main.go", `package main
+
+type T struct{}
+
+var Closure = func(p any) T { return p.(T) }
+`)
+
+	cfg := &packages.Config{Mode: packages.LoadAllSyntax, Dir: dir}
+	loaded, err := packages.Load(cfg, "testmod/main")
+	if err != nil {
+		t.Fatalf("packages.Load: %v", err)
+	}
+	if len(loaded) == 0 || loaded[0].PkgPath == "" {
+		t.Fatalf("main package not loaded")
+	}
+	if len(loaded[0].Errors) > 0 {
+		t.Fatalf("load errors for %s: %v", loaded[0].PkgPath, loaded[0].Errors)
+	}
+	pkg := loaded[0]
+
+	pkgMap := map[string]*packages.Package{pkg.PkgPath: pkg}
+	am := NewAliasManager(pkg.PkgPath, alias.SimpleAliasStrategy{}, pkgMap, &logger.Logger{})
+	am.LoadImportAliases()
+
+	e := &Extractor{
+		cfg:               &config.Config{InlineClosures: false}, // IIFE OFF — only identity should apply
+		pkgMap:            pkgMap,
+		mainPkgPath:       pkg.PkgPath,
+		aliasManager:      am,
+		globalProviderMap: make(map[string]int),
+		typeStrCache:      make(map[types.Type]string),
+	}
+
+	funcLit := findClosureFuncLit(pkg, "Closure")
+	if funcLit == nil {
+		t.Fatalf("Closure funcLit not found")
+	}
+
+	if err := e.handleFuncLit(funcLit, pkg, false); err != nil {
+		t.Fatalf("handleFuncLit: %v", err)
+	}
+	if len(e.items) != 1 {
+		t.Fatalf("expected 1 extracted item, got %d", len(e.items))
+	}
+	it := e.items[0]
+	if !it.IsIdentityClosure {
+		t.Fatalf("expected IsIdentityClosure=true for type-assertion closure; got false")
+	}
+	if it.ShouldInline {
+		t.Fatalf("expected ShouldInline=false for an identity closure; got true")
+	}
+	if it.IdentityOp != model.OpAssert {
+		t.Fatalf("expected IdentityOp=%q for type-assertion closure, got %q", model.OpAssert, it.IdentityOp)
+	}
+	if it.IdentityTargetType == "" {
+		t.Fatalf("expected non-empty IdentityTargetType for type-assertion closure")
+	}
+}
+
+func findClosureFuncLit(pkg *packages.Package, name string) *ast.FuncLit {
+	for _, f := range pkg.Syntax {
+		for _, decl := range f.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for i, n := range vs.Names {
+					if n.Name != name || i >= len(vs.Values) {
+						continue
+					}
+					if fl, ok := vs.Values[i].(*ast.FuncLit); ok {
+						return fl
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // TestCheckGenerationVisibilityVarScoping verifies that checkGenerationVisibility

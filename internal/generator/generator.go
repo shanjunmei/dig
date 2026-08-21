@@ -603,6 +603,9 @@ func buildIdentityConversion(node model.Node, ctxParamName string) string {
 		return fmt.Sprintf("*%s", ctxParamName)
 	case model.OpConvert:
 		return fmt.Sprintf("%s(%s)", node.IdentityTargetType, ctxParamName)
+	case model.OpAssert:
+		// 类型断言：操作数在前，与 T(x) 顺序相反
+		return fmt.Sprintf("%s.(%s)", ctxParamName, node.IdentityTargetType)
 	default:
 		return ""
 	}

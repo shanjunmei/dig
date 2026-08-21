@@ -36,3 +36,6 @@ Desktop.ini
 # Temp
 tmp/
 temp/
+
+# Local AI tool data (WorkBuddy memory / work logs) — keep locally, never commit or push
+.workbuddy/

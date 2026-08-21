@@ -37,6 +37,7 @@ const (
 	OpAddr    OpKind = "addr"    // 取地址：&x
 	OpDeref   OpKind = "deref"   // 解引用：*x
 	OpConvert OpKind = "convert" // 类型转换：T(x)
+	OpAssert  OpKind = "assert"  // 类型断言：x.(T)
 )
 
 type GenTarget struct {

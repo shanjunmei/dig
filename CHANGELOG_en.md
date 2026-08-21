@@ -4,6 +4,18 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v1.0.20] - 2026-08-21
+
+## 🔧 Decouple identity-closure collapse from IIFE inlining
+
+- **Identity-closure collapse (Phase 4) is now always applied, no longer gated by `-inline`**  
+  Previously identity closures (e.g. `func(p *Impl) Iface { return p }`) were coupled to the same `-inline` switch as IIFE inlining. Now identity closures always collapse to a direct type conversion (`T(p)` / `&p` / `*p` / `U(p)`) regardless of `-inline`. Identity closures are literal-equivalent, zero-semantic-change transforms with a narrow, high-frequency trigger surface (interface/pointer wrapping in DI), so they are applied unconditionally by default.
+- **`-inline` now only controls IIFE inlining (Phase 3); default stays `false`**  
+  The CLI help text, the `README` flag table, `docs/index.html`, and `prompts/dig-core*.md` have been corrected to remove the previous misleading "`-inline` also gates identity closures" wording.
+- The generator's `writeProvider` / `writeInvokes` still handle `IsIdentityClosure` first, so identity-closure priority over IIFE inlining is unchanged.
+- **New type-assertion identity closure (`OpAssert`)**  
+  `func(p any) T { return p.(T) }` is now recognized as an identity closure and collapses to the inline assertion `p.(T)` (new `*ast.TypeAssertExpr` branch in `analyzeIdentityClosure`, new `OpAssert` enum). Key fix: the asserted type (e.g. `ServiceImpl`) may differ from the return type (e.g. `Service`); the generator now emits the **asserted** type, i.e. `p.(Impl)` rather than `p.(Service)`, preserving semantics (the original asserts to the concrete type and panics on mismatch, whereas asserting to the interface would accept any implementer). Covers the common DI "narrow interface / any → concrete type" wrapper; applied unconditionally alongside Option A, independent of `-inline`.
+
 ## [v1.0.19] - 2026-08-18
 
 ## ✨ Generation-time contract pre-check & diagnostics

@@ -56,7 +56,7 @@
         <img src="https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg" alt="Go Reference">
       </a>
       <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
-      <img src="https://img.shields.io/badge/version-v1.0.19-00ADD8.svg" alt="v1.0.19">
+      <img src="https://img.shields.io/badge/version-v1.0.20-00ADD8.svg" alt="v1.0.20">
       <img src="https://img.shields.io/badge/Go-1.25+-00ADD8.svg" alt="Go 1.25+">
     </div>
     <h1 class="hero-title">
@@ -199,7 +199,7 @@
       <div class="feature-card">
         <div class="feature-icon">🔄</div>
         <h3 data-en="Closure inlining">闭包内联</h3>
-        <p data-en-html="The <code>-inline</code> flag inlines simple closures as IIFEs; identity closures collapse to direct type conversions."><code>-inline</code> 将简单闭包内联为 IIFE，身份闭包塌缩为直接类型转换。</p>
+        <p data-en-html="The <code>-inline</code> flag inlines simple closures as IIFEs. Identity closures are ALWAYS collapsed to direct type conversions, regardless of this flag."><code>-inline</code> 仅将简单闭包内联为 IIFE。身份闭包无论是否传 <code>-inline</code> 都会塌缩为直接类型转换。</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🧬</div>
@@ -449,7 +449,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
           <tr><td><code>-unused</code></td><td><code>error</code></td><td data-en-html="Policy for unused providers: <code>error</code> / <code>ignore</code> / <code>drop</code>">未使用提供者的处理策略：<code>error</code> / <code>ignore</code> / <code>drop</code></td></tr>
           <tr><td><code>-debug</code></td><td><code>false</code></td><td data-en="Enable debug logging (detailed errors always shown)">启用调试日志（详细错误始终显示）</td></tr>
           <tr><td><code>-alias</code></td><td><code>full</code></td><td data-en-html="Import-alias strategy: <code>full</code> / <code>short</code> / <code>obfuscated</code> / <code>numeric</code>">导入别名策略：<code>full</code> / <code>short</code> / <code>obfuscated</code> / <code>numeric</code></td></tr>
-          <tr><td><code>-inline</code></td><td><code>false</code></td><td data-en="Inline simple closures as IIFEs; identity closures collapse to type conversions">将简单闭包内联为 IIFE；身份闭包塌缩为类型转换</td></tr>
+          <tr><td><code>-inline</code></td><td><code>false</code></td><td data-en="Inline simple closures as IIFEs only; identity closures are ALWAYS collapsed to type conversions regardless of this flag">仅将简单闭包内联为 IIFE；身份闭包始终塌缩为类型转换（与本 flag 无关）</td></tr>
           <tr><td><code>-typecheck</code></td><td><code>true</code></td><td data-en="Type-check generated code after emission to catch internal generator bugs. Disable (-typecheck=false) for large ./... runs.">生成后类型检查产出代码以捕获内部生成器 bug；大型 ./... 运行可关闭（-typecheck=false）以省去逐文件重载包图。</td></tr>
           <tr><td><code>-cache</code></td><td><code>false</code></td><td data-en="Cache the extracted IR to disk and reuse it for unchanged packages (skips extraction on cache hit).">将提取出的 IR 缓存到磁盘，未改动包命中缓存时跳过提取/类型检查。</td></tr>
           <tr><td><code>-cachedir</code></td><td><code>""</code></td><td data-en-html='IR cache directory (default: <code>os.TempDir()/digen-ir-cache</code>); ignored unless <code>-cache</code> is set.'>IR 缓存目录（默认：<code>os.TempDir()/digen-ir-cache</code>；仅 -cache 设置时生效）。</td></tr>
@@ -573,7 +573,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
           </thead>
           <tbody>
             <tr><td><strong data-en="Maintenance status">维护状态</strong></td><td class="col-dig" data-en="✅ Active">✅ 活跃</td><td data-en="⚠️ Archived">⚠️ 已归档</td><td data-en="✅ Active">✅ 活跃</td></tr>
-            <tr><td data-en="Latest version">最新版本</td><td class="col-dig">v1.0.19</td><td>v0.7.0 (beta)</td><td>v1.24.0</td></tr>
+            <tr><td data-en="Latest version">最新版本</td><td class="col-dig">v1.0.20</td><td>v0.7.0 (beta)</td><td>v1.24.0</td></tr>
             <tr><td data-en="Go version requirement">Go 版本要求</td><td class="col-dig">1.25+</td><td data-en="Standard">标准</td><td>1.25+</td></tr>
             <tr><td data-en="Refactor friendliness">重构友好度</td><td class="col-dig" data-en="High">高</td><td data-en="Low">低</td><td data-en="Medium">中</td></tr>
           </tbody>
@@ -692,6 +692,14 @@ flowchart TD
   <div class="container">
     <h2 class="section-title" data-en="Release highlights">版本亮点</h2>
     <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-version">v1.0.20</div>
+        <div class="timeline-date">2026-08-21</div>
+        <div class="timeline-content">
+          <h3 data-en="Identity-closure collapse decoupled from IIFE inlining">恒等闭包塌缩与 IIFE 内联解耦</h3>
+          <p data-en-html="Identity-closure collapse (direct / address-of / deref / type-conversion / type-assertion) is now always applied and independent of <code>-inline</code>; <code>-inline</code> now controls IIFE inlining only (default off). Adds the type-assertion identity closure <code>func(p any) T { return p.(T) }</code>.">恒等闭包（直接返回 / 取地址 / 解引用 / 类型转换 / 类型断言五种）现始终塌缩为内联表达式，与 <code>-inline</code> 无关；<code>-inline</code> 现仅控制 IIFE 内联（默认关）。新增类型断言恒等闭包 <code>func(p any) T { return p.(T) }</code>。</p>
+        </div>
+      </div>
       <div class="timeline-item">
         <div class="timeline-version">v1.0.19</div>
         <div class="timeline-date">2026-08-18</div>

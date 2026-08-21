@@ -46,7 +46,7 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 | `-unused` | error | 未使用构造器策略：error / ignore / drop |
 | `-debug` | false | 调试日志（含别名映射诊断） |
 | `-alias` | full | 别名策略：full / short / obfuscated / numeric |
-| `-inline` | false | 简单闭包内联为 IIFE，身份闭包塌缩为类型转换 |
+| `-inline` | false | 简单闭包内联为 IIFE（身份闭包始终塌缩为类型转换，与本 flag 无关） |
 | `-version` | false | 打印版本信息 |
 | `-typecheck` | true | 生成后类型检查产出代码以捕获内部生成器 bug（大型 `./...` 可关） |
 | `-cache` | false | 缓存提取出的 IR 到磁盘，未改动包跳过提取/类型检查 |

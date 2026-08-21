@@ -8,6 +8,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this p
 
 ---
 
+## [v1.0.20] - 2026-08-21
+
+### 🔧 Changed
+
+- **Identity-closure collapse is now always applied, independent of `-inline`** — closures such as `func(p *Impl) Iface { return p }`, `func(p *T) T { return *p }`, `func(p T) *T { return &p }`, direct type conversion `func(p T) U { return U(p) }`, and type assertion `func(p any) T { return p.(T) }` all collapse to a single inline expression (`T(p)` / `*p` / `&p` / `p.(T)`). Previously this was coupled to the same `-inline` switch as IIFE inlining; now it is unconditional.
+- **`-inline` now controls IIFE inlining only** (default `false`). It no longer affects identity closures. If you relied on `-inline=false` to disable identity-closure collapsing, that no longer works — identity collapse is always on (it is a literal-equivalent, zero-semantic-change transform).
+
+---
+
 ## [v1.0.19] - 2026-08-18
 
 > `digen` CLI subcommands + generation-time contract pre-check

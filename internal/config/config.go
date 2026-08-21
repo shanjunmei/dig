@@ -8,7 +8,7 @@ type Config struct {
 	Debug          bool
 	AliasType      string // 例如 "full", "short", "obfuscated", "numeric"
 	Paths          []string
-	InlineClosures bool // Phase 3: inline simple closures as IIFE
+	InlineClosures bool // Phase 3: inline simple closures as IIFEs. Identity-closure collapse (Phase 4) is ALWAYS applied and NOT gated by this flag.
 	// TypeCheckNet enables the post-generation type-check safety net that
 	// reloads the package (packages.Load) to catch internal generator bugs.
 	// It is on by default (safe), but can be disabled for large `./...`

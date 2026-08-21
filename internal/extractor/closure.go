@@ -222,7 +222,10 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 		return err
 	}
 
-	// Phase 3: Analyze inlinability
+	// Phase 3: Analyze inlinability (IIFE inlining) — gated by the -inline flag
+	// (default off). This ONLY controls the "inline as IIFE" optimization; it
+	// does NOT gate identity-closure collapse (Phase 4), which is applied
+	// unconditionally below regardless of -inline.
 	if e.cfg.InlineClosures {
 		// Build isConst slice from params (after closure params, these are free vars)
 		// Invariant: len(params) == len(closureParams) + len(freeVars) (guaranteed by buildClosureArgumentLists)
@@ -232,25 +235,28 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 			freeVarIsConst[i] = params[startIdx+i].IsConst
 		}
 		item.ShouldInline = analyzeClosureInlinability(funcLit, freeVars, freeVarIsConst)
+	}
 
-		// Phase 4: Analyze identity closure (takes priority over regular inlining)
-		if retTypeExpr, opType := analyzeIdentityClosure(funcLit, freeVars); retTypeExpr != nil {
-			typeObj := curPkg.TypesInfo.TypeOf(retTypeExpr)
-			// 先确保返回类型所在包的别名已生成（buildClosureDef 中的 EnsureAlias 此时未执行），
-			// 否则 replacePkgPathWithAlias 找不到匹配项，会把包路径原样保留，
-			// 生成代码时 "hermes/internal/types.Agent" 会被解析为除法运算符序列
-			var retPkgPath string
-			if retPkg := e.typePkg(typeObj); retPkg != nil && retPkg.Path() != e.mainPkgPath {
-				retPkgPath = retPkg.Path()
-				e.aliasManager.EnsureAlias(retPkgPath)
-			}
-			targetType := e.replacePkgPathWithAlias(e.getTypeFullName(typeObj))
-			item.IsIdentityClosure = true
-			item.IdentityTargetType = targetType
-			item.IdentityTargetPkg = retPkgPath
-			item.IdentityOp = opType
-			item.ShouldInline = false // Will use direct type conversion instead of IIFE
+	// Phase 4: Analyze identity closure — ALWAYS applied (not gated by -inline).
+	// Identity closures are literal-equivalent type conversions (T(p), &p, *p,
+	// U(p)) with zero runtime semantic change, so collapsing them unconditionally
+	// is safe. Takes priority over regular IIFE inlining when both apply.
+	if retTypeExpr, opType := analyzeIdentityClosure(funcLit, freeVars); retTypeExpr != nil {
+		typeObj := curPkg.TypesInfo.TypeOf(retTypeExpr)
+		// 先确保返回类型所在包的别名已生成（buildClosureDef 中的 EnsureAlias 此时未执行），
+		// 否则 replacePkgPathWithAlias 找不到匹配项，会把包路径原样保留，
+		// 生成代码时 "hermes/internal/types.Agent" 会被解析为除法运算符序列
+		var retPkgPath string
+		if retPkg := e.typePkg(typeObj); retPkg != nil && retPkg.Path() != e.mainPkgPath {
+			retPkgPath = retPkg.Path()
+			e.aliasManager.EnsureAlias(retPkgPath)
 		}
+		targetType := e.replacePkgPathWithAlias(e.getTypeFullName(typeObj))
+		item.IsIdentityClosure = true
+		item.IdentityTargetType = targetType
+		item.IdentityTargetPkg = retPkgPath
+		item.IdentityOp = opType
+		item.ShouldInline = false // identity collapse takes priority over IIFE
 	}
 
 	if retType != "" {
@@ -433,6 +439,9 @@ func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident) (ast.Ex
 	// 6. 分析返回表达式，确定操作类型
 	expr := retStmt.Results[0]
 	var op model.OpKind
+	// 目标类型表达式：默认取返回类型；类型断言 p.(T) 的真实目标类型是断言类型 T，
+	// 可能不同于返回类型（如 func(p any) Service { return p.(ServiceImpl) }），必须取 e.Type。
+	targetTypeExpr := retTypeField.Type
 
 	switch e := expr.(type) {
 	case *ast.Ident:
@@ -462,6 +471,15 @@ func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident) (ast.Ex
 				op = model.OpConvert
 			}
 		}
+	case *ast.TypeAssertExpr:
+		// 类型断言：x.(T) — 必须是单返回值的断言（e.Type 非 nil，排除 type switch 形），
+		// 操作数为参数名。塌缩为内联断言 x.(T)，单次求值、断言失败同样 panic，与原闭包等价。
+		if e.Type != nil {
+			if ident, ok := e.X.(*ast.Ident); ok && ident.Name == paramName {
+				op = model.OpAssert
+				targetTypeExpr = e.Type // 断言类型 T，可能与返回类型不同
+			}
+		}
 	}
 	if op == "" {
 		return nil, ""
@@ -473,7 +491,7 @@ func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident) (ast.Ex
 	}
 
 	// 8. 匹配成功，返回类型表达式和操作类型
-	return retTypeField.Type, op
+	return targetTypeExpr, op
 }
 
 func (e *Extractor) checkMethodVisibilityInClosure(body *ast.BlockStmt, pkg *packages.Package) error {

@@ -11,7 +11,7 @@ A complete standardized production coding convention skill for business microser
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Current version**: v1.0.19 — full release notes in [CHANGELOG_en.md](./CHANGELOG_en.md).
+> **Current version**: v1.0.20 — full release notes in [CHANGELOG_en.md](./CHANGELOG_en.md).
 
 ---
 
@@ -34,7 +34,8 @@ Go DI tools fall into two camps:
 - **Zero runtime reflection & zero runtime dependency** – generated code is plain Go with no third-party runtime dependency (only the standard library, e.g. `context`).
 - **Minimal API** – just `Build`, `Provide`, `Supply`, `Invoke`, `Module`.
 - **Closure capture safety** – inline closures cannot capture locals from `InitApp`; enforced by generator.
-- **Closure inlining (`-inline`)** – inline simple closures as immediately-invoked function expressions (IIFE), reducing generated function count; identity closures (`func(p T) T { return p }`) collapse to a direct type conversion.
+- **Identity-closure collapse (always on)** – closures of the form `func(p T) T { return p }`, `func(p *T) T { return *p }`, `func(p T) *T { return &p }`, direct type-conversion `func(p T) U { return U(p) }`, and type assertion `func(p any) T { return p.(T) }` collapse to a single inline expression (e.g. `T(p)`, `*p`, `&p`, `p.(T)`). Independent of `-inline`.
+- **Closure inlining (`-inline`)** – inline simple non-identity closures as immediately-invoked function expressions (IIFE), reducing generated function count. Off by default.
 - **Generic‑aware** – supports generic functions and types natively.
 - **Observability** – debug logging with runtime‑overridable `Logf`; `-debug` also prints resolved per-package import alias mappings.
 - **Actionable errors** – all error messages include source location (`file:line:col`) and `💡 Fix:` suggestions.
@@ -240,7 +241,7 @@ func main() { Logf = myLogger.Printf }
 `-alias=full|short|obfuscated|numeric` controls generated import aliases. Resolved per-package alias mappings are printed as debug output when `-debug` is enabled.
 
 ### 9. Closure Inlining
-`-inline` inlines simple provider/invoke closures as IIFEs instead of generating named package-level functions. Identity closures (`func(p T) T { return p }`, `func(p *T) T { return *p }`, `func(p T) *T { return &p }`, and direct type-conversion closures) collapse to a single inline expression.
+`-inline` inlines simple provider/invoke closures as IIFEs instead of generating named package-level functions. Identity closures (`func(p T) T { return p }`, `func(p *T) T { return *p }`, `func(p T) *T { return &p }`, `func(p any) T { return p.(T) }` (type assertion), and direct type-conversion closures) collapse to a single inline expression.
 
 ### 10. Mandatory `//go:build digen` on the DI spec file
 Every file that contains a `dig.Build(...)` call **must** carry the `//go:build digen` constraint. digen hard-codes `//go:build !digen` on the generated `dig_gen.go`; without the matching tag on your source, a normal `go build` compiles both files and fails with `InitApp redeclared`. digen now enforces this at generation time — if the tag is missing it prints a clear error with a `💡 Fix:` instead of letting a confusing redeclaration surface later.
@@ -263,7 +264,7 @@ The `di.go` file (with `//go:build digen`) may **only** contain the `dig.Build(.
 | `-unused` | `error` | Policy for unused providers |
 | `-debug` | `false` | Enable debug logging (detailed errors are always shown) |
 | `-alias` | `full` | Import alias strategy: `full` / `short` / `obfuscated` / `numeric`. When `-debug` is enabled, resolved per-package alias mappings are also printed. |
-| `-inline` | `false` | Inline simple closures as IIFEs; identity closures collapse to a type conversion |
+| `-inline` | `false` | Inline simple closures as IIFEs only; identity closures are ALWAYS collapsed to a type conversion (independent of this flag) |
 | `-typecheck` | `true` | Type-check generated code after emission to catch internal generator bugs. Disable (`-typecheck=false`) for large `./...` runs where reloading the package graph per file is expensive. |
 | `-cache` | `false` | Cache the extracted IR to disk and reuse it for unchanged packages (skips extraction on cache hit). |
 | `-cachedir` | `""` | IR cache directory (default: `os.TempDir()/digen-ir-cache`); ignored unless `-cache` is set. |
@@ -312,7 +313,7 @@ All flags (`-out`, `-unused`, `-debug`, `-alias`, `-inline`, `-typecheck`, `-cac
 | Module nesting | ✅ explicit | ⚠️ flat set composition | ✅ explicit, named |
 | Module naming required | ❌ | N/A | ✅ |
 | Module scoping (private providers) | ❌ | ❌ | ✅ `fx.Private` |
-| Interface binding | via identity closure (e.g. `func(p *Impl) Iface { return p }`, inlined to a conversion) | ✅ explicit `wire.Bind(new(Iface), new(*Impl))` | ✅ `fx.Annotate(NewImpl, fx.As(new(Iface)))` |
+| Interface binding | via identity closure (e.g. `func(p *Impl) Iface { return p }`, always collapsed to a conversion, independent of `-inline`) | ✅ explicit `wire.Bind(new(Iface), new(*Impl))` | ✅ `fx.Annotate(NewImpl, fx.As(new(Iface)))` |
 | Struct field injection | ❌ | ✅ `wire.Struct` | ❌ (use a constructor) |
 | Struct field extraction | ❌ | ✅ `wire.FieldsOf` | ❌ |
 | **Multiple instances of same type** | ✅ **Named parameters** | ❌ (must use wrapper types) | ✅ **Named + Value Groups** |
@@ -353,7 +354,7 @@ All flags (`-out`, `-unused`, `-debug`, `-alias`, `-inline`, `-typecheck`, `-cac
 | Feature | dig | Google Wire | Uber Fx |
 |---------|-----|-------------|---------|
 | Maintenance status | ✅ active | ⚠️ **archived** (bug-fix only) | ✅ active |
-| Latest version | v1.0.19 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
+| Latest version | v1.0.20 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
 | Go version requirement | 1.25+ | standard | 1.21+ (for `slog` logger) |
 | Refactoring friendliness | High (static checks + source location) | Low (cryptic errors) | Medium (runtime errors) |
 

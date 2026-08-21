@@ -4,6 +4,18 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.20] - 2026-08-21
+
+## 🔧 恒等闭包塌缩与闭包 IIFE 内联解耦
+
+- **恒等闭包塌缩（Phase 4）改为始终应用，不再受 `-inline` 控制**  
+  此前恒等闭包（如 `func(p *Impl) Iface { return p }`）与 IIFE 内联被同一个 `-inline` 开关耦合；现恒等闭包无论是否传 `-inline` 都会塌缩为直接类型转换（`T(p)` / `&p` / `*p` / `U(p)`）。恒等闭包是字面等价的零语义变化转换、触发面窄且高频（DI 中大量接口/指针包装），故无条件默认开启。
+- **`-inline` 现在仅控制 IIFE 内联（Phase 3），默认仍为 `false`**  
+  CLI 帮助文本、`README` 标志表、`docs/index.html`、`prompts/dig-core*.md` 已同步更正此前「`-inline` 同时管恒等」的误导性描述。
+- 生成侧 `writeProvider` / `writeInvokes` 始终优先处理 `IsIdentityClosure`，恒等优先于 IIFE 的语义不变。
+- **新增类型断言恒等闭包（`OpAssert`）**  
+  `func(p any) T { return p.(T) }` 现被识别为恒等闭包并塌缩为内联断言 `p.(T)`（`analyzeIdentityClosure` 新增 `*ast.TypeAssertExpr` 分支，新增 `OpAssert` 枚举）。关键修正：断言类型（如 `ServiceImpl`）可能与返回类型（如 `Service`）不同，生成器现以**断言类型**为准输出 `p.(Impl)` 而非 `p.(Service)`，避免语义改变（原闭包断言到具体类型、断言失败 panic，生成的若断言到接口则会接受任意实现者而偏离原行为）。覆盖 DI 中常见的「窄接口 / any → 具体类型」包装场景；随方案 A 一并常开，不受 `-inline` 影响。
+
 ## [v1.0.19] - 2026-08-18
 
 ## ✨ 生成期契约预检与诊断增强

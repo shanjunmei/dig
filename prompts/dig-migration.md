@@ -21,12 +21,13 @@
 | v1.0.17 | 拦截闭包内未导出跨包调用；新增示例与 GitHub Pages 站点 |
 | v1.0.18 | provider 禁 `context.Context` 参数；`//go:build digen` 生成期校验；`go/types` 安全网；IR 缓存 |
 | v1.0.19 | `digen` CLI 子命令（init/check/graph/explain/completion）；生成期契约预检；类型检查安全网（契约违规 vs 内部 bug 分类）；构建约束收敛到 `internal/buildconstraint`；golden 回归测试 |
+| v1.0.20 | 恒等闭包塌缩与 IIFE 内联解耦：恒等闭包（直接返回 / 取地址 / 解引用 / 类型转换 / 类型断言五种）始终塌缩为内联表达式，与 `-inline` 无关；`-inline` 仅管 IIFE 内联，默认关；新增类型断言恒等闭包 `func(p any) T { return p.(T) }` |
 
 ## 3. 当前关键特性（按引入版本，便于迁移判断）
 
 - 命名多实例注入（v1.0.11+）
 - 版本信息系统（v1.0.13+）：`-version`、Mage、结构化错误
-- 闭包内联（v1.0.14+）：`-inline`
+- 闭包内联（v1.0.14+）：`-inline`（自 v1.0.20 起仅做 IIFE 内联；恒等闭包塌缩始终开启、与此 flag 无关）
 - 多 Module 支持（v1.0.15+）
 - ShadowGuard（v1.0.16+）
 - 闭包未导出跨包调用拦截（v1.0.17+）
@@ -36,7 +37,7 @@
 
 1. 用对照表（见 `dig-comparison.md`）确认能力映射
 2. 将运行时 `fx.Provide`/`fx.Invoke` 或 `wire.NewSet` 改写为 `dig.Build(...)` 内的 `dig.Provide`/`dig.Invoke`
-3. 接口绑定：Wire `wire.Bind` / Fx `fx.As` → dig 身份闭包（内联为类型转换）
+3. 接口绑定：Wire `wire.Bind` / Fx `fx.As` → dig 身份闭包（始终塌缩为类型转换，与 `-inline` 无关）
 4. 多实例：Fx 命名/值组 → dig 命名参数
 5. 删除运行时依赖：移除 `go.uber.org/fx`、`google/wire` 导入与 `app.Run` 等运行时启动代码
 6. 在 di.go 加 `//go:build digen`，运行 `digen ./...` 生成 `dig_gen.go`

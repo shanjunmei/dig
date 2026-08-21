@@ -46,7 +46,7 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 | `-unused` | error | Unused constructor policy: error / ignore / drop |
 | `-debug` | false | Debug logs (includes alias mapping diagnostics) |
 | `-alias` | full | Alias strategy: full / short / obfuscated / numeric |
-| `-inline` | false | Inline simple closures as IIFEs, identity closures collapse to type conversion |
+| `-inline` | false | Inline simple closures as IIFEs only; identity closures are ALWAYS collapsed to type conversions regardless of this flag |
 | `-version` | false | Print version information |
 | `-typecheck` | true | Type-check generated code after emission to catch internal generator bugs (disable for large `./...` runs) |
 | `-cache` | false | Cache the extracted IR to disk; unchanged packages skip extraction / type-checking |

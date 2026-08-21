@@ -12,7 +12,7 @@ dig 的 AI 助手提示词统一存放在 [`prompts`](./prompts) 目录，入口
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **当前版本**：v1.0.19 — 完整发版说明见 [CHANGELOG.md](./CHANGELOG.md)。
+> **当前版本**：v1.0.20 — 完整发版说明见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ---
 
@@ -35,7 +35,8 @@ Go 的依赖注入工具分为两大阵营：
 - **零运行时反射与零运行时依赖** – 生成的代码是纯 Go，不导入任何第三方运行时依赖（仅标准库，如 `context`）。
 - **极简 API** – 仅需 `Build`、`Provide`、`Supply`、`Invoke`、`Module`。
 - **闭包捕获安全** – 内联闭包不能捕获 `InitApp` 中的局部变量，由生成器强制检查。
-- **闭包内联**（`-inline`）– 将简单闭包内联为立即调用函数表达式（IIFE），减少生成的函数数量；身份闭包（`func(p T) T { return p }`）塌缩为一次直接类型转换。
+- **恒等闭包塌缩（始终开启）** – 形如 `func(p T) T { return p }`、`func(p *T) T { return *p }`、`func(p T) *T { return &p }`、直接类型转换 `func(p T) U { return U(p) }` 以及类型断言 `func(p any) T { return p.(T) }` 的闭包，会塌缩为单行内联表达式（如 `T(p)`、`*p`、`&p`、`p.(T)`），与 `-inline` 无关。
+- **闭包 IIFE 内联**（`-inline`）– 将简单的「非恒等」闭包内联为立即调用函数表达式（IIFE），减少生成的函数数量，默认关闭。
 - **泛型支持** – 原生支持泛型函数和类型。
 - **可观测性** – 支持调试日志，运行时可通过 `Logf` 覆盖；启用 `-debug` 时还会打印每个包解析后的导入别名映射。
 - **可操作错误** – 所有错误消息包含源码位置（`file:line:col`）与 `💡 Fix:` 修复建议。
@@ -241,7 +242,7 @@ func main() { Logf = myLogger.Printf }
 `-alias=full|short|obfuscated|numeric` 控制生成的导入别名。启用 `-debug` 时会在生成日志中同时打印每个包解析后的别名映射。
 
 ### 9. 闭包内联
-`-inline` 将简单的 Provide/Invoke 闭包内联为 IIFE，而不是生成包级命名函数。身份闭包（`func(p T) T { return p }`、`func(p *T) T { return *p }`、`func(p T) *T { return &p }` 以及直接类型转换闭包）会塌缩为单行内联表达式。
+`-inline` 将简单的 Provide/Invoke 闭包内联为 IIFE，而不是生成包级命名函数。身份闭包（`func(p T) T { return p }`、`func(p *T) T { return *p }`、`func(p T) *T { return &p }`、`func(p any) T { return p.(T) }`（类型断言）以及直接类型转换闭包）会塌缩为单行内联表达式。
 
 ### 10. DI 规格文件必须带 `//go:build digen`
 每个包含 `dig.Build(...)` 调用的文件**必须**带有 `//go:build digen` 构建标签。digen 在生成的 `dig_gen.go` 上写死 `//go:build !digen`；若源文件不带对应标签，正常 `go build` 会同时编译两个文件并报 `InitApp redeclared`。digen 现在在生成期强制校验——缺标签时直接给出清晰错误与 `💡 Fix:`，而不是让晦涩的重声明错误推迟暴露。
@@ -264,7 +265,7 @@ provider（通过 `dig.Provide` / `dig.Supply` / `dig.Module` 注册的构造函
 | `-unused` | `error` | 未使用提供者的处理策略 |
 | `-debug` | `false` | 启用调试日志（详细错误始终显示） |
 | `-alias` | `full` | 导入别名策略：`full` / `short` / `obfuscated` / `numeric`；启用 `-debug` 时同时打印别名映射诊断 |
-| `-inline` | `false` | 将简单闭包内联为 IIFE；身份闭包塌缩为类型转换 |
+| `-inline` | `false` | 将简单的非恒等闭包内联为 IIFE；身份闭包始终塌缩为类型转换（与本 flag 无关） |
 | `-typecheck` | `true` | 生成后类型检查产出代码以捕获内部生成器 bug；大型 `./...` 运行可关闭（`-typecheck=false`）以省去逐文件重载包图 |
 | `-cache` | `false` | 将提取出的 IR 缓存到磁盘，未改动包命中缓存时跳过提取/类型检查 |
 | `-cachedir` | `""` | IR 缓存目录（默认：`os.TempDir()/digen-ir-cache`；仅 `-cache` 设置时生效） |
@@ -313,7 +314,7 @@ provider（通过 `dig.Provide` / `dig.Supply` / `dig.Module` 注册的构造函
 | 模块嵌套 | ✅ 显式支持 | ⚠️ Set 组合（扁平） | ✅ 显式支持，带命名 |
 | 模块是否必须命名 | ❌ | N/A | ✅ |
 | 模块作用域（私有提供者） | ❌ | ❌ | ✅ `fx.Private` |
-| 接口绑定 | 通过身份闭包（如 `func(p *Impl) Iface { return p }`，内联为类型转换） | ✅ 显式 `wire.Bind(new(Iface), new(*Impl))` | ✅ `fx.Annotate(NewImpl, fx.As(new(Iface)))` |
+| 接口绑定 | 通过身份闭包（如 `func(p *Impl) Iface { return p }`，始终塌缩为类型转换，与 `-inline` 无关） | ✅ 显式 `wire.Bind(new(Iface), new(*Impl))` | ✅ `fx.Annotate(NewImpl, fx.As(new(Iface)))` |
 | 结构体字段注入 | ❌ | ✅ `wire.Struct` | ❌（用构造函数） |
 | 结构体字段提取 | ❌ | ✅ `wire.FieldsOf` | ❌ |
 | **相同类型的多个实例** | ✅ **命名参数** | ❌（需用包装类型） | ✅ **命名 + 值组 (Value Groups)** |
@@ -354,7 +355,7 @@ provider（通过 `dig.Provide` / `dig.Supply` / `dig.Module` 注册的构造函
 | 特性 | dig | Google Wire | Uber Fx |
 |------|-----|-------------|---------|
 | 维护状态 | ✅ 活跃 | ⚠️ **已归档**（仅修 bug） | ✅ 活跃 |
-| 最新版本 | v1.0.19 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
+| 最新版本 | v1.0.20 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
 | Go 版本要求 | 1.25+ | 标准 | 1.21+（用于 `slog` logger） |
 | 重构友好度 | 高（静态检查 + 源码位置） | 低（错误晦涩） | 中（运行时错误） |
 

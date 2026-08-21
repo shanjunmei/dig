@@ -42,6 +42,7 @@ func TestBuildIdentityConversion(t *testing.T) {
 		{model.OpAddr, "&x"},
 		{model.OpDeref, "*x"},
 		{model.OpConvert, "T(x)"},
+		{model.OpAssert, "x.(T)"},
 	}
 	for _, c := range cases {
 		got := buildIdentityConversion(model.Node{IsIdentityClosure: true, IdentityOp: c.op, IdentityTargetType: "T"}, "x")

@@ -14,10 +14,15 @@ import (
 
 func InitClosureParam() func(context.Context) error {
 	dv0 := closure_param_helper.NewConfigFactory()
+	dv1 := closure_param_helper.NewDog()
+	dv2 := dv1.(closure_param_helper.Dog)
 	return func(ctx context.Context) error {
 		func(f func() closure_param_helper.Config) {
 			fmt.Println("invoked closure param:", f())
 		}(dv0)
+		func(a closure_param_helper.Animal) {
+			_ = a.Speak()
+		}(dv2)
 		return nil
 	}
 }
