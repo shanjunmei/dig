@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/format"
+	"go/parser"
 	"go/printer"
 	"go/token"
 	"net/url"
@@ -496,7 +497,9 @@ func (g *Generator) GenerateCode(nodes []model.Node, refCount map[string]int, pk
 	}
 
 	writeClosureDefs(buf, nodes, refCount, g.cfg.UnusedMode)
-	g.writeMainFunc(buf, nodes, originFuncName, g.cfg.UnusedMode, refCount, params, fset, importAliasMap, pkgAliasMap, pkgNameMap)
+	if err := g.writeMainFunc(buf, nodes, originFuncName, g.cfg.UnusedMode, refCount, params, fset, importAliasMap, pkgAliasMap, pkgNameMap); err != nil {
+		return "", err
+	}
 
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
@@ -506,9 +509,9 @@ func (g *Generator) GenerateCode(nodes []model.Node, refCount map[string]int, pk
 }
 
 // formatParams formats the function parameters for the generated function signature.
-func formatParams(params *ast.FieldList, fset *token.FileSet) string {
+func formatParams(params *ast.FieldList, fset *token.FileSet) (string, error) {
 	if params == nil || len(params.List) == 0 {
-		return ""
+		return "", nil
 	}
 	var buf bytes.Buffer
 	for i, field := range params.List {
@@ -523,10 +526,10 @@ func formatParams(params *ast.FieldList, fset *token.FileSet) string {
 		}
 		buf.WriteString(" ")
 		if err := printer.Fprint(&buf, fset, field.Type); err != nil {
-			panic(err) // should never happen
+			return "", fmt.Errorf("printing parameter types: %w", err)
 		}
 	}
-	return buf.String()
+	return buf.String(), nil
 }
 
 // isLiteral 判断字符串是否为 Go 字面量（数字、字符串、布尔、nil）
@@ -562,30 +565,46 @@ func (g *Generator) emitLog(buf *bytes.Buffer, format string, args ...string) {
 	buf.WriteString(")\n")
 }
 
-// buildIIFECall converts a ClosureDef to an IIFE form.
-// ClosureDef: "func name(params) returns body"
-// Returns:    "func(params) returns body(args)"
+// buildIIFECall converts a ClosureDef into an immediately-invoked function
+// expression (IIFE) literal:
+//
+//	ClosureDef: "func name(params) returns body"
+//	Returns:    "func(params) returns body"
+//
+// It parses the definition as a Go function declaration and re-emits it as a
+// function literal, so it is robust to receivers, type parameters and complex
+// signatures — unlike the previous ad-hoc string slicing on the source text,
+// which assumed the first "(" always marked the parameter list and could
+// mis-handle method values (receiver paren) or unusual spacing.
 func buildIIFECall(node model.Node) string {
 	if !node.ShouldInline || node.ClosureDef == "" {
 		return ""
 	}
-	// Strip the function name: "func name(params)..." -> "func(params)..."
-	def := node.ClosureDef
-	// Find the opening paren ( after the function name
-	idx := strings.Index(def, "(")
-	if idx < 0 {
-		return def
+
+	// Parse the closure definition as a function declaration. A leading
+	// "package p" wrapper makes it a valid compilation unit for the parser.
+	fset := token.NewFileSet()
+	src := "package p\n" + node.ClosureDef
+	f, err := parser.ParseFile(fset, "", src, parser.SkipObjectResolution)
+	if err != nil {
+		// Defensive: malformed source should never reach here. Fall back to the
+		// original definition rather than crashing the generator.
+		return node.ClosureDef
 	}
-	// Find "func " prefix to skip the name
-	funcPrefix := strings.Index(def, "func ")
-	if funcPrefix < 0 {
-		return def
+	for _, decl := range f.Decls {
+		fd, ok := decl.(*ast.FuncDecl)
+		if !ok || fd.Name == nil {
+			continue
+		}
+		// Re-emit as a function literal, dropping the (now meaningless) name.
+		lit := &ast.FuncLit{Type: fd.Type, Body: fd.Body}
+		var buf bytes.Buffer
+		if err := printer.Fprint(&buf, fset, lit); err != nil {
+			return node.ClosureDef
+		}
+		return buf.String()
 	}
-	// "func name" length is the distance from "func " to the opening paren
-	// Replace "func name" with "func"
-	paramsStart := idx
-	// Skip everything from "func " to "("
-	return "func" + def[paramsStart:]
+	return node.ClosureDef
 }
 
 // buildIdentityConversion 根据 node 中的信息生成内联表达式字符串
@@ -787,8 +806,11 @@ func (g *Generator) writeInvokes(buf *bytes.Buffer, nodes []model.Node, ctxParam
 }
 
 // writeMainFunc writes the main generated function.
-func (g *Generator) writeMainFunc(buf *bytes.Buffer, nodes []model.Node, originFuncName string, unusedMode model.UnusedMode, refCount map[string]int, params *ast.FieldList, fset *token.FileSet, importAliasMap, pkgAliasMap, pkgNameMap map[string]string) {
-	paramStr := formatParams(params, fset)
+func (g *Generator) writeMainFunc(buf *bytes.Buffer, nodes []model.Node, originFuncName string, unusedMode model.UnusedMode, refCount map[string]int, params *ast.FieldList, fset *token.FileSet, importAliasMap, pkgAliasMap, pkgNameMap map[string]string) error {
+	paramStr, err := formatParams(params, fset)
+	if err != nil {
+		return err
+	}
 	if paramStr != "" {
 		paramStr = " " + paramStr
 	}
@@ -803,4 +825,5 @@ func (g *Generator) writeMainFunc(buf *bytes.Buffer, nodes []model.Node, originF
 	fmt.Fprintf(buf, "\treturn func(%s %s.Context) error {\n", ctxParam, ctxAlias)
 	g.writeInvokes(buf, nodes, ctxParam, errName)
 	buf.WriteString("\t\treturn nil\n\t}\n}\n\n")
+	return nil
 }

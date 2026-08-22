@@ -25,7 +25,7 @@ func (m UnusedMode) String() string {
 	case UnusedModeDrop:
 		return "drop"
 	default:
-		panic("Unknown Unused Mode")
+		return "unknown"
 	}
 }
 
@@ -62,14 +62,14 @@ const SchemaVersion = 1
 // of primitives, so a Node can be (de)serialized (JSON / gob) without any live
 // go/ast or go/types state — which is what enables caching and cross-process use.
 type Node struct {
-	Name      string `json:"name"`
-	Func      string `json:"func"`
-	FuncPkg   string `json:"func_pkg"`
-	RetType   string `json:"ret_type"`
-	Args      []Arg  `json:"args"`
-	IsInvoke  bool   `json:"is_invoke"`
-	IsSupply  bool   `json:"is_supply"`
-	Value     string `json:"value"`
+	Name     string `json:"name"`
+	Func     string `json:"func"`
+	FuncPkg  string `json:"func_pkg"`
+	RetType  string `json:"ret_type"`
+	Args     []Arg  `json:"args"`
+	IsInvoke bool   `json:"is_invoke"`
+	IsSupply bool   `json:"is_supply"`
+	Value    string `json:"value"`
 	// ValueIsPkgSymbol records whether the Supply value expression names a
 	// package-level symbol (var/func/const/type) in its defining package. When a
 	// dig.Supply(value) is inlined into the generation target package, only such
@@ -79,8 +79,8 @@ type Node struct {
 	// own scope and referenced directly. A false value means the value is a free
 	// variable and must be emitted verbatim.
 	ValueIsPkgSymbol bool `json:"value_is_pkg_symbol"`
-	HasError  bool   `json:"has_error"`
-	IsClosure bool   `json:"is_closure"`
+	HasError         bool `json:"has_error"`
+	IsClosure        bool `json:"is_closure"`
 
 	ClosureDef string   `json:"closure_def"`
 	UsedPkgs   []string `json:"used_pkgs"`

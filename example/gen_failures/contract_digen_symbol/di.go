@@ -15,8 +15,9 @@ import (
 // Repo / NewRepo，会报 "undefined: Repo" / "undefined: NewRepo"。
 //
 // 预期错误（internal/extractor/contract.go checkContractVisibility）：
-//   digen contract violation
-//   ... defined inside a //go:build digen file
+//
+//	digen contract violation
+//	... defined inside a //go:build digen file
 //
 // 这是生成器在写文件之前就给出的清晰预检，而非事后由类型检查兜底并误导为
 // "internal generator bug"。

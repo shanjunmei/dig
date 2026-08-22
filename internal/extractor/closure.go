@@ -69,6 +69,19 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 
 		switch o := obj.(type) {
 		case *types.Var:
+			// Skip the capture check ONLY for cross-package exported symbols
+			// (e.g. pkg.ExportedVar). A same-package exported variable already
+			// has o.Parent() == pkgScope, so it falls through to the
+			// o.Parent() != pkgScope test below and is naturally treated as a
+			// legitimate package-level reference — it never triggers a false
+			// "cannot capture local variable" error. Restricting this guard to
+			// o.Pkg().Path() != e.mainPkgPath makes the intent explicit: this
+			// branch exists solely to whitelist cross-package exported symbols
+			// whose Parent() lives in a *different* package scope than the
+			// current one.
+			if o.Exported() && o.Pkg() != nil && o.Pkg().Path() != e.mainPkgPath {
+				return true
+			}
 			if o.Parent() != pkgScope {
 				if o.Pkg() == nil || o.Parent() == nil {
 					return true
@@ -88,6 +101,16 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 			return true
 
 		case *types.Const:
+			// Same reasoning as the *types.Var branch above: only cross-package
+			// exported constants (e.g. pkg.ExportedConst) are whitelisted here.
+			// A same-package exported constant has o.Parent() == pkgScope and is
+			// handled correctly by the o.Parent() != pkgScope test below, so it
+			// never produces a false "cannot capture local constant" error. The
+			// o.Pkg().Path() != e.mainPkgPath guard makes it explicit that this
+			// branch targets cross-package exported symbols only.
+			if o.Exported() && o.Pkg() != nil && o.Pkg().Path() != e.mainPkgPath {
+				return true
+			}
 			if o.Parent() != pkgScope {
 				if o.Pkg() == nil || o.Parent() == nil {
 					return true
@@ -696,6 +719,45 @@ func (e *Extractor) collectTypeNameAndUsedPkgs(body *ast.BlockStmt, pkg *package
 			pkgPath := pkgName.Imported().Path()
 			if pkgPath != "" && pkgPath != e.mainPkgPath {
 				usedPkgs[pkgPath] = true
+			}
+			return true
+		}
+
+		// 处理跨包导出变量/常量（如 mcp.TransportStdio）。
+		// 这些符号在闭包体内以裸标识符出现（Var/Const 不像 Func/TypeName 走
+		// selector 路径），当其定义包非主包时，闭包被提升到主包后裸写会触发
+		// "undefined: <Name>"。此处与 TypeName/Func 同理记录其源位置与目标
+		// 别名选择器，由 applyTypeAliasReplacements 在 AST 克隆上精确改写为
+		// <alias>.<Name>。注意：同包导出的裸标识符无需限定（pkgPath == mainPkgPath，
+		// 跳过）；已带限定符的 SelectorExpr.Sel 已被 qualifiedSel 排除。
+		// 关键闸门：仅覆盖**包级**符号（obj.Parent() == obj.Pkg().Scope()）。
+		// *types.Var / *types.Const 既可是包级也可是局部（闭包参数、闭包内
+		// 局部变量/常量），局部符号必须交由 free-var 通道处理，绝不在此限定，
+		// 否则会出现 "supply_param_helper.c" 这类把闭包参数误限定为包符号的
+		// 回归。
+		if v, ok := obj.(*types.Var); ok {
+			if v.Parent() == v.Pkg().Scope() {
+				vPkg := v.Pkg()
+				if vPkg != nil && vPkg.Path() != e.mainPkgPath {
+					alias := e.aliasManager.EnsureAlias(vPkg.Path())
+					if alias != "" {
+						typeNameMap[ident.Pos()] = alias + "." + ident.Name
+						usedPkgs[vPkg.Path()] = true
+					}
+				}
+			}
+			return true
+		}
+		if c, ok := obj.(*types.Const); ok {
+			if c.Parent() == c.Pkg().Scope() {
+				cPkg := c.Pkg()
+				if cPkg != nil && cPkg.Path() != e.mainPkgPath {
+					alias := e.aliasManager.EnsureAlias(cPkg.Path())
+					if alias != "" {
+						typeNameMap[ident.Pos()] = alias + "." + ident.Name
+						usedPkgs[cPkg.Path()] = true
+					}
+				}
 			}
 			return true
 		}

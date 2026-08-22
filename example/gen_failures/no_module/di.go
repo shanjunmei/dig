@@ -13,7 +13,8 @@ import (
 // 提取器在 extractOptionsFromFuncCall 中校验辅助函数体必须包含 dig.Module，
 // 否则在 internal/extractor/extractor.go:291 报错。
 // 预期错误（internal/extractor/extractor.go:291）：
-//   function ... does not contain dig.Module
+//
+//	function ... does not contain dig.Module
 func helperWithoutModule() dig.Option {
 	return dig.Provide(func() string { return "x" })
 }

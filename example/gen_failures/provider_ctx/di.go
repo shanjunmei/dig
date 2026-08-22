@@ -1,7 +1,8 @@
 // 场景：provider（构造函数）声明了 context.Context 参数
 // 预期错误：provider "..." declares a context.Context parameter "ctx",
-//           but providers are resolved eagerly inside InitApp before the runtime
-//           context.Context is available
+//
+//	but providers are resolved eagerly inside InitApp before the runtime
+//	context.Context is available
 //
 // 说明：provider 在 InitApp 内被急切解析，早于运行时 context.Context（即返回给
 // func(context.Context) error 的那个 ctx）的产生，因此 provider 永远拿不到 ctx。
