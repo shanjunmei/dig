@@ -8,6 +8,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this p
 
 ---
 
+## [Unreleased]
+
+### 🐛 Bug Fixes
+
+- **Closures can now reference cross-package exported variables/constants** (e.g. `pkg.ExportedVar`, `pkg.ExportedConst`, `time.Hour`) without a false "capturing a local variable" error — the extractor whitelists cross-package exported symbols and applies the correct import-alias replacement.
+- **More robust IIFE inlining** — `buildIIFECall` now parses the closure signature instead of string-cutting `ClosureDef`.
+- **Generator error-handling chain fixed** — `formatParams` / `writeMainFunc` now propagate errors correctly instead of swallowing them.
+- New closure-capture examples `example/closure_capture_exported` and `example/closure_capture_timehour`, plus regression tests.
+
+---
+
 ## [v1.0.20] - 2026-08-21
 
 ### 🔧 Changed

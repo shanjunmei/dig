@@ -4,6 +4,19 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+## 🐛 修复
+
+- **闭包捕获跨包导出符号的误报**  
+  修复提取器把闭包内引用跨包导出变量/常量（如 `pkg.ExportedVar`、`pkg.ExportedConst`、`time.Hour`）误判为「捕获局部变量」而报错的问题；新增跨包导出符号放行逻辑，`collectTypeNameAndUsedPkgs` 现对跨包导出的变量/常量走裸标识符路径并正确做别名替换。
+- **`buildIIFECall` 改用 AST 解析而非字符串截取**  
+  IIFE 内联的代码生成改为解析闭包签名，取代对 `ClosureDef` 的字符串截取，处理更稳健。
+- **生成器错误处理链路修复**  
+  `formatParams` 与 `writeMainFunc` 现正确返回错误，补上此前被吞掉的错误传播路径。
+- **`internal/model` 字段缩进与 panic 处理优化**。
+- 新增闭包捕获相关示例 `example/closure_capture_exported`、`example/closure_capture_timehour` 及对应回归测试；校正此前误以局部常量触发捕获报错的测试场景。
+
 ## [v1.0.20] - 2026-08-21
 
 ## 🔧 恒等闭包塌缩与闭包 IIFE 内联解耦

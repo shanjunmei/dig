@@ -4,6 +4,19 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## 🐛 Bug Fixes
+
+- **False-positive capture errors for cross-package exported symbols**  
+  Fixed the extractor falsely reporting closures that reference cross-package exported variables/constants (e.g. `pkg.ExportedVar`, `pkg.ExportedConst`, `time.Hour`) as "capturing a local variable". Added a whitelist for cross-package exported symbols; `collectTypeNameAndUsedPkgs` now handles bare identifiers for cross-package exported vars/consts and applies the correct alias replacement.
+- **`buildIIFECall` now parses instead of string-cutting**  
+  IIFE inlining code generation now parses the closure signature instead of string-cutting `ClosureDef`, making it more robust.
+- **Generator error-handling chain fixed**  
+  `formatParams` and `writeMainFunc` now return errors correctly, restoring error-propagation paths that were previously swallowed.
+- **`internal/model` field indentation and panic-handling optimized**.
+- Added closure-capture examples `example/closure_capture_exported` and `example/closure_capture_timehour` with regression tests; corrected test scenarios that previously triggered capture errors on local constants.
+
 ## [v1.0.20] - 2026-08-21
 
 ## 🔧 Decouple identity-closure collapse from IIFE inlining
