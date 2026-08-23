@@ -83,27 +83,3 @@ func TestCachedExtractionSchemaMismatch(t *testing.T) {
 		t.Fatal("expected schema version mismatch error, got nil")
 	}
 }
-
-func TestCachedExtractionGobRoundTrip(t *testing.T) {
-	c := sampleExtraction()
-	data, err := c.EncodeGob()
-	if err != nil {
-		t.Fatalf("encode gob: %v", err)
-	}
-	var got CachedExtraction
-	if err := got.DecodeGob(data); err != nil {
-		t.Fatalf("decode gob: %v", err)
-	}
-	if got.SchemaVer != SchemaVersion {
-		t.Fatalf("gob schema_ver = %d, want %d", got.SchemaVer, SchemaVersion)
-	}
-	if len(got.Nodes) != 1 || got.Nodes[0].Name != "provideFoo" {
-		t.Fatalf("gob nodes round trip failed: %+v", got.Nodes)
-	}
-	if got.ImportAliasMap["fmt"] != "fmt" {
-		t.Fatalf("gob import map failed: %v", got.ImportAliasMap)
-	}
-	if got.PkgAliasMap["example/app"] != "app" {
-		t.Fatalf("gob pkg alias map failed: %v", got.PkgAliasMap)
-	}
-}

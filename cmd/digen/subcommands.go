@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -43,7 +44,7 @@ func mustLoad(l *loader.PackageLoader, paths []string) ([]*packages.Package, map
 }
 
 // runInit scaffolds a di.go with the dig.Build entry point.
-func runInit(args []string) {
+func runInit(args []string) error {
 	name := "di.go"
 	for i, a := range args {
 		if !strings.HasPrefix(a, "-") {
@@ -53,12 +54,13 @@ func runInit(args []string) {
 		}
 	}
 	if _, err := os.Stat(name); err == nil {
-		fail("file %s already exists (refusing to overwrite)", name)
+		return fmt.Errorf("file %s already exists (refusing to overwrite)", name)
 	}
 	if err := os.WriteFile(name, []byte(initTemplate), 0644); err != nil {
-		fail("failed to write %s: %v", name, err)
+		return fmt.Errorf("failed to write %s: %v", name, err)
 	}
 	fmt.Printf("[digen] created %s\n  run `digen` to generate wiring, or `go generate ./...`\n", name)
+	return nil
 }
 
 const initTemplate = `//go:build digen
@@ -86,7 +88,7 @@ func InitApp() func(context.Context) error {
 `
 
 // runCheck validates DI contracts without writing any file.
-func runCheck(f cliFlags, remaining []string) {
+func runCheck(f cliFlags, remaining []string) error {
 	cfg := buildConfig(f, remaining)
 	p, l := buildProcessor(cfg)
 	pkgs, pkgMap := mustLoad(l, cfg.Paths)
@@ -94,7 +96,7 @@ func runCheck(f cliFlags, remaining []string) {
 	var failed []string
 	for _, pkg := range pkgs {
 		if err := p.CheckPackage(pkg, pkgMap, aliasStrategyFor(cfg)); err != nil {
-			if strings.Contains(err.Error(), "no function containing dig.Build call found") {
+			if errors.Is(err, loader.ErrNoDigBuildCall) {
 				continue
 			}
 			failed = append(failed, fmt.Sprintf("  Package %s:\n    %s", pkg.PkgPath, err.Error()))
@@ -104,18 +106,19 @@ func runCheck(f cliFlags, remaining []string) {
 	}
 	if checked == 0 {
 		if len(failed) > 0 {
-			fail("%d package(s) found but failed validation:\n%s", len(failed), strings.Join(failed, "\n"))
+			return fmt.Errorf("%d package(s) found but failed validation:\n%s", len(failed), strings.Join(failed, "\n"))
 		}
-		fail("no packages with dig.Build found\n  💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error")
+		return fmt.Errorf("no packages with dig.Build found\n  💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error")
 	}
 	if len(failed) > 0 {
 		fmt.Printf("[digen] packages with issues:\n%s\n", strings.Join(failed, "\n"))
 	}
 	fmt.Printf("[digen] check passed: %d package(s)\n", checked)
+	return nil
 }
 
 // runGraph prints a Mermaid dependency graph per package.
-func runGraph(f cliFlags, remaining []string) {
+func runGraph(f cliFlags, remaining []string) error {
 	cfg := buildConfig(f, remaining)
 	p, l := buildProcessor(cfg)
 	pkgs, pkgMap := mustLoad(l, cfg.Paths)
@@ -123,10 +126,10 @@ func runGraph(f cliFlags, remaining []string) {
 	for _, pkg := range pkgs {
 		nodes, err := p.ExtractNodes(pkg, pkgMap, strat)
 		if err != nil {
-			if strings.Contains(err.Error(), "no function containing dig.Build call found") {
+			if errors.Is(err, loader.ErrNoDigBuildCall) {
 				continue
 			}
-			fail("package %s: %v", pkg.PkgPath, err)
+			return fmt.Errorf("package %s: %v", pkg.PkgPath, err)
 		}
 		if len(nodes) == 0 {
 			continue
@@ -134,6 +137,7 @@ func runGraph(f cliFlags, remaining []string) {
 		fmt.Printf("# package %s\n", pkg.PkgPath)
 		fmt.Println(renderMermaid(nodes))
 	}
+	return nil
 }
 
 // renderMermaid renders the provider dependency graph as a Mermaid flowchart.
@@ -175,9 +179,9 @@ func escapeMermaid(s string) string {
 }
 
 // runExplain prints how a type/provider is resolved.
-func runExplain(f cliFlags, remaining []string) {
+func runExplain(f cliFlags, remaining []string) error {
 	if len(remaining) == 0 {
-		fail("explain requires a type or provider name, e.g. `digen explain DB ./...`")
+		return fmt.Errorf("explain requires a type or provider name, e.g. `digen explain DB ./...`")
 	}
 	query := remaining[0]
 	paths := remaining[1:]
@@ -193,15 +197,15 @@ func runExplain(f cliFlags, remaining []string) {
 	for _, pkg := range pkgs {
 		nodes, err := p.ExtractNodes(pkg, pkgMap, strat)
 		if err != nil {
-			if strings.Contains(err.Error(), "no function containing dig.Build call found") {
+			if errors.Is(err, loader.ErrNoDigBuildCall) {
 				continue
 			}
-			fail("package %s: %v", pkg.PkgPath, err)
+			return fmt.Errorf("package %s: %v", pkg.PkgPath, err)
 		}
 		all = append(all, nodes...)
 	}
 	if len(all) == 0 {
-		fail("no packages with dig.Build found\n  💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error")
+		return fmt.Errorf("no packages with dig.Build found\n  💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error")
 	}
 
 	var roots []model.Node
@@ -211,12 +215,13 @@ func runExplain(f cliFlags, remaining []string) {
 		}
 	}
 	if len(roots) == 0 {
-		fail("no provider found for %q\n  💡 Tip: match by provider name or return type; try a shorter suffix", query)
+		return fmt.Errorf("no provider found for %q\n  💡 Tip: match by provider name or return type; try a shorter suffix", query)
 	}
 	for _, r := range roots {
 		fmt.Printf("Resolution of %s (%s):\n", r.Name, r.RetType)
 		printResolution(r, all, map[string]bool{}, 0)
 	}
+	return nil
 }
 
 func matchesQuery(n model.Node, query string) bool {

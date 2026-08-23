@@ -46,7 +46,7 @@ func (a *App) Run() error {
 	var failedErrors []string
 	for _, pkg := range pkgs {
 		if err := a.processor.Process(pkg, pkgMap, a.aliasStrategy); err != nil {
-			if strings.Contains(err.Error(), "no function containing dig.Build call found") {
+			if errors.Is(err, loader.ErrNoDigBuildCall) {
 				continue
 			}
 			a.logger.Debugf("failed to process package %s: %v", pkg.PkgPath, err)

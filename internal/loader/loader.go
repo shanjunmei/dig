@@ -1,6 +1,7 @@
 package loader
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"strings"
@@ -11,6 +12,11 @@ import (
 )
 
 const tagBuild = model.TagBuild
+
+// ErrNoDigBuildCall indicates a package has no function containing a dig.Build
+// call. It lets callers distinguish "this package is not a DI entry point" from
+// real extraction errors without fragile string matching.
+var ErrNoDigBuildCall = errors.New("no function containing dig.Build call found")
 
 // 为了简化，我们不在此处导入 logger，而是将日志功能通过参数传递，或直接在函数内使用全局？
 // 更好的方式是让 loader 不依赖 logger，而是由上层处理错误和日志。
@@ -103,7 +109,7 @@ func FindInjectorFunctions(pkg *packages.Package) (*model.GenTarget, error) {
 		}
 	}
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("no function containing dig.Build call found in package %s\n  💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error", pkg.PkgPath)
+		return nil, fmt.Errorf("%w: in package %s\n  💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error", ErrNoDigBuildCall, pkg.PkgPath)
 	}
 	if len(targets) > 1 {
 		var locations []string

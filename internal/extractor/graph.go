@@ -81,7 +81,9 @@ func (e *Extractor) describeItemByIt(it extractedItem) string {
 			kind += fmt.Sprintf(": argument '%s'", it.FuncName)
 		} else if it.Expr != nil {
 			var buf strings.Builder
-			_ = printer.Fprint(&buf, it.Pkg.Fset, it.Expr)
+			if err := printer.Fprint(&buf, it.Pkg.Fset, it.Expr); err != nil {
+				buf.WriteString("<unprintable expression>")
+			}
 			kind += ": " + buf.String()
 		} else {
 			kind += ": <anonymous>"

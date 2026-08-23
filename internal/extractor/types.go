@@ -370,7 +370,9 @@ func getFuncMeta(expr ast.Expr, curPkg *packages.Package, pkgMap map[string]*pac
 	obj := resolveFunctionObject(&ast.CallExpr{Fun: expr}, curPkg)
 	if obj == nil {
 		var buf strings.Builder
-		_ = printer.Fprint(&buf, curPkg.Fset, expr)
+		if err := printer.Fprint(&buf, curPkg.Fset, expr); err != nil {
+			buf.WriteString("<unprintable expression>")
+		}
 		return "", nil, nil, fmt.Errorf("at %s: resolve object failed for expression: %s", pos, buf.String())
 	}
 	fn, ok := obj.(*types.Func)

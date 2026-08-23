@@ -1,8 +1,6 @@
 package model
 
 import (
-	"bytes"
-	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -59,7 +57,7 @@ const SchemaVersion = 1
 
 // Node is the stable, self-contained intermediate representation produced by the
 // extractor and consumed by the generator. Every field is a primitive or a slice
-// of primitives, so a Node can be (de)serialized (JSON / gob) without any live
+// of primitives, so a Node can be (de)serialized as JSON without any live
 // go/ast or go/types state — which is what enables caching and cross-process use.
 type Node struct {
 	Name     string `json:"name"`
@@ -105,7 +103,7 @@ type Node struct {
 // CachedExtraction is the serializable bundle produced by the extractor and
 // consumed (after a cache hit) by the generator. Because every field is a
 // primitive, a slice of primitives, or a string→string map, it can be written
-// to disk / sent over the wire (JSON or gob) without any live go/ast or
+// to disk / sent over the wire as JSON without any live go/ast or
 // go/types state. SchemaVer lets us invalidate stale cache files instead of
 // silently misinterpreting them when the Node layout changes.
 type CachedExtraction struct {
@@ -149,39 +147,6 @@ func (c *CachedExtraction) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ir: cache schema version mismatch: got %d, want %d (clear the cache directory to regenerate)", c.SchemaVer, SchemaVersion)
 	}
 	return nil
-}
-
-// EncodeGob gob-encodes the extraction, stamping the schema version. It mutates
-// the receiver's node SchemaVer fields (idempotent, harmless) since the caller
-// is about to discard or persist them.
-func (c *CachedExtraction) EncodeGob() ([]byte, error) {
-	c.SchemaVer = SchemaVersion
-	for i := range c.Nodes {
-		c.Nodes[i].SchemaVer = SchemaVersion
-	}
-	var buf bytes.Buffer
-	if err := gob.NewEncoder(&buf).Encode(c); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// DecodeGob gob-decodes the extraction and validates the schema version.
-func (c *CachedExtraction) DecodeGob(data []byte) error {
-	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(c); err != nil {
-		return err
-	}
-	if c.SchemaVer != SchemaVersion {
-		return fmt.Errorf("ir: gob cache schema version mismatch: got %d, want %d (clear the cache directory to regenerate)", c.SchemaVer, SchemaVersion)
-	}
-	return nil
-}
-
-func init() {
-	gob.Register(CachedExtraction{})
-	gob.Register(Node{})
-	gob.Register(Arg{})
-	gob.Register([]Node{})
 }
 
 // fullFuncName 返回 包别名.函数名

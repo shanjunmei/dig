@@ -187,8 +187,8 @@ func (p *Processor) cacheKey(pkg *packages.Package) (string, error) {
 	// Transitive dependencies: hashing their source content (and their import
 	// paths) makes a dependency API change invalidate the cache entry.
 	seen := map[string]bool{pkg.PkgPath: true}
-	var walk func(pk *packages.Package)
-	walk = func(pk *packages.Package) {
+	var walk func(pk *packages.Package) error
+	walk = func(pk *packages.Package) error {
 		for _, imp := range pk.Imports {
 			if imp.PkgPath == "" || seen[imp.PkgPath] {
 				continue
@@ -197,11 +197,21 @@ func (p *Processor) cacheKey(pkg *packages.Package) (string, error) {
 			io.WriteString(h, "\x00dep:")
 			io.WriteString(h, imp.PkgPath)
 			io.WriteString(h, "\x00")
-			_ = hashPackageFiles(h, imp)
-			walk(imp)
+			// A dependency whose sources cannot be hashed must fail closed:
+			// skipping it would let the cache key omit that dependency's content
+			// and serve stale IR generated against an old dependency API.
+			if err := hashPackageFiles(h, imp); err != nil {
+				return err
+			}
+			if err := walk(imp); err != nil {
+				return err
+			}
 		}
+		return nil
 	}
-	walk(pkg)
+	if err := walk(pkg); err != nil {
+		return "", err
+	}
 
 	io.WriteString(h, "\x00")
 	io.WriteString(h, pkg.PkgPath)

@@ -85,16 +85,24 @@ func main() {
 	if len(args) > 0 {
 		switch args[0] {
 		case "init":
-			runInit(args[1:])
+			if err := runInit(args[1:]); err != nil {
+				fail("%v", err)
+			}
 			return
 		case "check":
-			runCheck(f, args[1:])
+			if err := runCheck(f, args[1:]); err != nil {
+				fail("%v", err)
+			}
 			return
 		case "graph":
-			runGraph(f, args[1:])
+			if err := runGraph(f, args[1:]); err != nil {
+				fail("%v", err)
+			}
 			return
 		case "explain":
-			runExplain(f, args[1:])
+			if err := runExplain(f, args[1:]); err != nil {
+				fail("%v", err)
+			}
 			return
 		case "completion":
 			runCompletion(args[1:])
