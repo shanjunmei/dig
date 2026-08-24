@@ -163,7 +163,6 @@ func TestGenFailures(t *testing.T) {
 	sort.Strings(names)
 
 	for _, name := range names {
-		name := name
 		cfg := fixtures[name]
 		t.Run(name, func(t *testing.T) {
 			dir := filepath.Join(failuresDir, name)

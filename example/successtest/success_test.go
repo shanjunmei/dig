@@ -156,7 +156,6 @@ func TestSuccessGen(t *testing.T) {
 	sort.Strings(names)
 
 	for _, name := range names {
-		name := name
 		t.Run(name, func(t *testing.T) {
 			dir := filepath.Join(root, name)
 			genPath := filepath.Join(dir, "dig_gen.go")

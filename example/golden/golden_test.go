@@ -44,7 +44,6 @@ func TestGoldenFiles(t *testing.T) {
 	sort.Strings(targets)
 
 	for _, rel := range targets {
-		rel := rel
 		t.Run(rel, func(t *testing.T) {
 			dir := filepath.Join(root, rel)
 			goldenPath := filepath.Join(dir, "dig_gen.go")
@@ -132,17 +131,17 @@ func parseGenFlags(goldenPath string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "//go:generate") {
 			continue
 		}
 		body := strings.TrimSpace(strings.TrimPrefix(trimmed, "//go:generate"))
-		idx := strings.Index(body, "cmd/digen")
-		if idx < 0 {
+		_, after, ok := strings.Cut(body, "cmd/digen")
+		if !ok {
 			return nil, fmt.Errorf("//go:generate line does not reference cmd/digen: %q", body)
 		}
-		rest := body[idx+len("cmd/digen"):]
+		rest := after
 		fields := strings.Fields(rest)
 		if len(fields) == 0 {
 			return nil, fmt.Errorf("//go:generate line has no digen flags: %q", body)
@@ -177,7 +176,7 @@ func rewriteOut(flags []string, out string) []string {
 // compared.
 func normalize(src string) string {
 	var kept []string
-	for _, line := range strings.Split(src, "\n") {
+	for line := range strings.SplitSeq(src, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "//go:generate") {
 			continue
 		}
@@ -195,10 +194,7 @@ func normalize(src string) string {
 func firstDiff(a, b string) string {
 	la := strings.Split(a, "\n")
 	lb := strings.Split(b, "\n")
-	n := len(la)
-	if len(lb) < n {
-		n = len(lb)
-	}
+	n := min(len(lb), len(la))
 	var b2 strings.Builder
 	for i := 0; i < n; i++ {
 		if la[i] != lb[i] {

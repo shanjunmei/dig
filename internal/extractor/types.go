@@ -202,16 +202,16 @@ func (e *Extractor) collectUsedPkgsFromType(typ types.Type) []string {
 			if recv := t.Recv(); recv != nil {
 				walk(recv.Type())
 			}
-			for i := 0; i < t.Params().Len(); i++ {
-				walk(t.Params().At(i).Type())
+			for v := range t.Params().Variables() {
+				walk(v.Type())
 			}
-			for i := 0; i < t.Results().Len(); i++ {
-				walk(t.Results().At(i).Type())
+			for v := range t.Results().Variables() {
+				walk(v.Type())
 			}
 			// 泛型方法/函数的类型参数约束里可能引用跨包类型
 			if tparams := t.TypeParams(); tparams != nil {
-				for i := 0; i < tparams.Len(); i++ {
-					walk(tparams.At(i).Constraint())
+				for tparam := range tparams.TypeParams() {
+					walk(tparam.Constraint())
 				}
 			}
 		case *types.Struct:

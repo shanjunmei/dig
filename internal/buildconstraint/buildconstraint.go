@@ -11,6 +11,7 @@ package buildconstraint
 
 import (
 	"go/ast"
+	"slices"
 	"strings"
 )
 
@@ -28,12 +29,7 @@ func RequiresDigen(expr string) bool {
 	tokens := strings.FieldsFunc(expr, func(r rune) bool {
 		return r == ' ' || r == '\t' || r == '(' || r == ')' || r == '&' || r == '|'
 	})
-	for _, t := range tokens {
-		if t == "digen" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(tokens, "digen")
 }
 
 // FileHasDigenConstraint reports whether f carries a //go:build (or +build)

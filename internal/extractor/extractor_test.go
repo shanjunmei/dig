@@ -30,7 +30,7 @@ func validTopoOrder(n int, adj [][]int, order []int) bool {
 	for i, u := range order {
 		pos[u] = i
 	}
-	for u := 0; u < n; u++ {
+	for u := range n {
 		for _, v := range adj[u] {
 			if pos[u] >= pos[v] {
 				return false

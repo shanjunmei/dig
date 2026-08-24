@@ -153,8 +153,8 @@ func cleanVersion(v *resolvedVersion) string {
 		return v.tag
 	}
 	s := v.version
-	if idx := strings.Index(s, "-0."); idx >= 0 {
-		return s[:idx]
+	if before, _, ok := strings.Cut(s, "-0."); ok {
+		return before
 	}
 	return s
 }

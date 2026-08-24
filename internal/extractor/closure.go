@@ -238,7 +238,7 @@ func deepCloneAST(n ast.Node) ast.Node {
 // appear via *ast.Object back-references, and also dedupes shared sub-nodes.
 func cloneValue(v reflect.Value, seen map[uintptr]reflect.Value) reflect.Value {
 	switch v.Kind() {
-	case reflect.Ptr:
+	case reflect.Pointer:
 		if v.IsNil() {
 			return reflect.Zero(v.Type())
 		}

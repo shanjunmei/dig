@@ -192,8 +192,8 @@ func walkTypeMainPkgNamed(t types.Type, mainPkgPath string, visit func(*types.Na
 			visit(t)
 		}
 		if args := t.TypeArgs(); args != nil {
-			for i := 0; i < args.Len(); i++ {
-				walkTypeMainPkgNamed(args.At(i), mainPkgPath, visit)
+			for t := range args.Types() {
+				walkTypeMainPkgNamed(t, mainPkgPath, visit)
 			}
 		}
 	case *types.Pointer:
@@ -213,11 +213,11 @@ func walkTypeMainPkgNamed(t types.Type, mainPkgPath string, visit func(*types.Na
 // walkSignatureTypes invokes visit for every main-package Named type appearing
 // in a function signature's parameters, results, and receiver.
 func walkSignatureTypes(sig *types.Signature, mainPkgPath string, visit func(*types.Named)) {
-	for i := 0; i < sig.Params().Len(); i++ {
-		walkTypeMainPkgNamed(sig.Params().At(i).Type(), mainPkgPath, visit)
+	for v := range sig.Params().Variables() {
+		walkTypeMainPkgNamed(v.Type(), mainPkgPath, visit)
 	}
-	for i := 0; i < sig.Results().Len(); i++ {
-		walkTypeMainPkgNamed(sig.Results().At(i).Type(), mainPkgPath, visit)
+	for v := range sig.Results().Variables() {
+		walkTypeMainPkgNamed(v.Type(), mainPkgPath, visit)
 	}
 	if recv := sig.Recv(); recv != nil {
 		walkTypeMainPkgNamed(recv.Type(), mainPkgPath, visit)
