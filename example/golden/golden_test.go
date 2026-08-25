@@ -196,17 +196,27 @@ func firstDiff(a, b string) string {
 	lb := strings.Split(b, "\n")
 	n := min(len(lb), len(la))
 	var b2 strings.Builder
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if la[i] != lb[i] {
-			b2.WriteString("@@ line " + itoa(i+1) + " @@\n")
-			b2.WriteString("- generated: " + la[i] + "\n")
-			b2.WriteString("+ golden:    " + lb[i] + "\n")
+			b2.WriteString("@@ line ")
+			b2.WriteString(itoa(i + 1))
+			b2.WriteString(" @@\n")
+			b2.WriteString("- generated: ")
+			b2.WriteString(la[i])
+			b2.WriteString("\n")
+			b2.WriteString("+ golden:    ")
+			b2.WriteString(lb[i])
+			b2.WriteString("\n")
 			// Show a little context.
 			if i+1 < len(la) {
-				b2.WriteString("  generated(next): " + la[i+1] + "\n")
+				b2.WriteString("  generated(next): ")
+				b2.WriteString(la[i+1])
+				b2.WriteString("\n")
 			}
 			if i+1 < len(lb) {
-				b2.WriteString("  golden(next):    " + lb[i+1] + "\n")
+				b2.WriteString("  golden(next):    ")
+				b2.WriteString(lb[i+1])
+				b2.WriteString("\n")
 			}
 			break
 		}
