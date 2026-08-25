@@ -22,6 +22,7 @@
 | v1.0.18 | provider 禁 `context.Context` 参数；`//go:build digen` 生成期校验；`go/types` 安全网；IR 缓存 |
 | v1.0.19 | `digen` CLI 子命令（init/check/graph/explain/completion）；生成期契约预检；类型检查安全网（契约违规 vs 内部 bug 分类）；构建约束收敛到 `internal/buildconstraint`；golden 回归测试 |
 | v1.0.20 | 恒等闭包塌缩与 IIFE 内联解耦：恒等闭包（直接返回 / 取地址 / 解引用 / 类型转换 / 类型断言五种）始终塌缩为内联表达式，与 `-inline` 无关；`-inline` 仅管 IIFE 内联，默认关；新增类型断言恒等闭包 `func(p any) T { return p.(T) }` |
+| v1.0.21 | 缺陷修复与文档修正：闭包捕获跨包导出符号误报修复；`buildIIFECall` 改为 AST 解析；生成器错误链修复；文档站左侧 TOC 随语言切换实时跟随；订正 `-cache` 文档（只跳过提取，类型检查仍每次执行）；闭包提取代码拆分为 closure.go / closure_analysis.go / closure_emission.go |
 
 ## 3. 当前关键特性（按引入版本，便于迁移判断）
 

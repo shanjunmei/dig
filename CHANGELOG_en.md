@@ -4,7 +4,7 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v1.0.21] - 2026-08-25
 
 ## 🐛 Bug Fixes
 
@@ -16,6 +16,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
   `formatParams` and `writeMainFunc` now return errors correctly, restoring error-propagation paths that were previously swallowed.
 - **`internal/model` field indentation and panic-handling optimized**.
 - Added closure-capture examples `example/closure_capture_exported` and `example/closure_capture_timehour` with regression tests; corrected test scenarios that previously triggered capture errors on local constants.
+- **Docs site left-nav (TOC) now follows language switches in real time**  
+  `applyLang` in `docs/assets/js/main.js` now re-derives each TOC link label from its target section's title per the active language (updated in place, no node rebuild, so scrollspy references stay valid) and keeps the search-box placeholder in sync; fixes the previous bug where switching language in-page left the left TOC stuck in the initial language.
+
+## 📝 Documentation
+
+- **Corrected the `-cache` documentation**  
+  Docs previously said `-cache` "skips extraction / type-checking"; in fact type-checking (`packages.Load`) was never cached and still runs every time. All references now say "skips extraction only (type-checking still runs every time)", with a note that enabling `-cache` for the common "edit then run `digen ./...` once" flow is actually slower, and only pays off for large DI graphs or repeated read-only subcommands (`check`/`graph`/`explain`).
+
+## ♻️ Refactor & Optimisation (internals)
+
+- **Closure-extraction code restructured**  
+  `internal/extractor/closure.go` split into `closure.go` / `closure_analysis.go` / `closure_emission.go` with clearer responsibilities and improved error handling; generation semantics unchanged.
 
 ## [v1.0.20] - 2026-08-21
 

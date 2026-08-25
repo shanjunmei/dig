@@ -22,6 +22,7 @@
 | v1.0.18 | Provider `context.Context` ban; `//go:build digen` generation-time check; `go/types` safety net; IR cache |
 | v1.0.19 | `digen` CLI subcommands (init/check/graph/explain/completion); generation-time contract pre-check; type-check safety net (contract-violation vs internal-bug classification); build-constraint checks consolidated into `internal/buildconstraint`; golden-file regression test |
 | v1.0.20 | Decoupled identity-closure collapse from IIFE inlining: identity collapse (direct / address-of / deref / type-conversion / type-assertion) is always applied and independent of `-inline`; `-inline` now gates IIFE inlining only (default off); new type-assertion identity closure `func(p any) T { return p.(T) }` |
+| v1.0.21 | Bug fixes & docs: cross-package exported-symbol false-positive capture fix; `buildIIFECall` now AST-parses; generator error-chain fix; docs-site left TOC follows language switches in real time; corrected `-cache` docs (extraction-only skip, type-check still runs every time); closure-extraction code split into closure.go / closure_analysis.go / closure_emission.go |
 
 ## 3. Current Key Features (by introduction version, for migration decisions)
 

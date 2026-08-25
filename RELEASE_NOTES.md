@@ -8,7 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this p
 
 ---
 
-## [Unreleased]
+## [v1.0.21] - 2026-08-25
 
 ### 🐛 Bug Fixes
 
@@ -16,6 +16,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this p
 - **More robust IIFE inlining** — `buildIIFECall` now parses the closure signature instead of string-cutting `ClosureDef`.
 - **Generator error-handling chain fixed** — `formatParams` / `writeMainFunc` now propagate errors correctly instead of swallowing them.
 - New closure-capture examples `example/closure_capture_exported` and `example/closure_capture_timehour`, plus regression tests.
+- **Docs site left-nav (TOC) follows language switches in real time** — `applyLang` now re-derives each TOC link label per the active language (in place, no node rebuild) and keeps the search placeholder in sync; fixes the in-page language switch leaving the left TOC stuck.
+
+### 📝 Documentation
+
+- **Corrected the `-cache` docs** — they previously claimed `-cache` "skips extraction / type-checking"; type-checking (`packages.Load`) was never cached and still runs every time. Docs now say "skips extraction only (type-checking still runs every time)", noting that `-cache` is actually slower for the common "edit then `digen ./...`" flow and only pays off for large DI graphs or repeated read-only subcommands.
+
+### ♻️ Internals
+
+- **Closure-extraction code restructured** — `internal/extractor/closure.go` split into `closure.go` / `closure_analysis.go` / `closure_emission.go`; generation semantics unchanged.
 
 ---
 

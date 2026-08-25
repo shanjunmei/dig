@@ -4,7 +4,7 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [v1.0.21] - 2026-08-25
 
 ## 🐛 修复
 
@@ -16,6 +16,18 @@
   `formatParams` 与 `writeMainFunc` 现正确返回错误，补上此前被吞掉的错误传播路径。
 - **`internal/model` 字段缩进与 panic 处理优化**。
 - 新增闭包捕获相关示例 `example/closure_capture_exported`、`example/closure_capture_timehour` 及对应回归测试；校正此前误以局部常量触发捕获报错的测试场景。
+- **文档站左侧导航（TOC）随语言切换实时跟随**  
+  `docs/assets/js/main.js` 的 `applyLang` 现按当前语言从各 section 标题重派生 TOC 链接文本（原地更新、不重建节点，scrollspy 引用不受影响），并同步搜索框占位符；修复此前在页面内切换语言时左侧目录卡在初始语言的问题。
+
+## 📝 文档
+
+- **订正 `-cache` 文档表述**  
+  此前文档称 `-cache`「跳过提取/类型检查」，实测类型检查（`packages.Load`）从未被缓存、仍每次执行。现已统一改为「只跳过提取（类型检查仍每次执行）」，并补充说明：常见「改完跑一次 `digen ./...`」流程开启 `-cache` 反而更慢，仅大 DI 图或反复跑只读子命令（`check`/`graph`/`explain`）才有净收益。
+
+## ♻️ 重构与优化（内部）
+
+- **闭包提取逻辑重构**  
+  `internal/extractor/closure.go` 拆分为 `closure.go` / `closure_analysis.go` / `closure_emission.go` 三个职责清晰的子文件，并优化错误处理；生成语义不变。
 
 ## [v1.0.20] - 2026-08-21
 
