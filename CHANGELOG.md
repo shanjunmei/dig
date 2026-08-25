@@ -72,7 +72,7 @@
   废弃脆弱的 `replaceTypeNames` 正则字符串改写（word-boundary 正则会误改写字符串字面量 / 注释内的同名 token，且按裸名匹配可能误伤同名局部变量），改用基于 `go/ast` + `astutil.Apply` 的精确改写：先以 `token.Pos` 为 key 收集 `Pos -> "alias.Name"` 重写计划（显式跳过 `SelectorExpr.Sel`），在克隆体上对命中的标识符做替换，绝不触碰字符串字面量、注释或同名局部变量。类型字符串路径 → 别名的 `replacePkgPathWithAlias` 保留以向后兼容。生成产物行为零变化。
 
 - **稳定可序列化 IR 与可选磁盘缓存**  
-  将 extractor→generator 的中间表示 `[]model.Node` 正式化为可序列化、带 schema 版本的稳定 IR：`internal/model` 新增 `CachedExtraction`（Nodes + ImportAliasMap/PkgAliasMap/PkgNameMap + `SchemaVersion`），`Node` / `Arg` 补全 JSON tag；`UnmarshalJSON` 在 `SchemaVer` 不匹配时直接报错而非静默误读。新增 `internal/ir` 包负责磁盘读写（默认 JSON、原子写），并由 `cmd/digen` 的 `-cache`（默认关）/ `-cachedir` 开关启用。开启后未改动的包可跳过昂贵的提取 / 类型检查步骤直接复用缓存；cache key 覆盖配置旋钮、`runtime.Version()` 与（递归）本包及传递依赖的源文件内容哈希，依赖 API 变化会自动使缓存失效，无需手动清理。缓存路径任何失败都优雅回退到重新提取，且默认关闭不影响生成语义。
+  将 extractor→generator 的中间表示 `[]model.Node` 正式化为可序列化、带 schema 版本的稳定 IR：`internal/model` 新增 `CachedExtraction`（Nodes + ImportAliasMap/PkgAliasMap/PkgNameMap + `SchemaVersion`），`Node` / `Arg` 补全 JSON tag；`UnmarshalJSON` 在 `SchemaVer` 不匹配时直接报错而非静默误读。新增 `internal/ir` 包负责磁盘读写（默认 JSON、原子写），并由 `cmd/digen` 的 `-cache`（默认关）/ `-cachedir` 开关启用。开启后未改动的包可跳过提取步骤、直接复用缓存（注意：占大头的类型检查 `packages.Load` 每次仍执行，未被缓存）。cache key 覆盖配置旋钮、`runtime.Version()` 与（递归）本包及传递依赖的源文件内容哈希，依赖 API 变化会自动使缓存失效，无需手动清理。实测在常见「改完跑一次 `digen ./...`」流程里，因每次需重算依赖源码哈希、且类型检查未缓存，开启 `-cache` 端到端常更慢；它只在极大 DI 图或反复跑只读子命令（`check`/`graph`/`explain`）等窄场景净赚。缓存路径任何失败都优雅回退到重新提取，且默认关闭不影响生成语义。
 
 ## 🐛 修复 v1.0.17 引入的回归
 

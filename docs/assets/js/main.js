@@ -54,6 +54,30 @@
       b.classList.toggle('active', active);
       b.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
+
+    // Keep the left TOC (table of contents) in sync with the active language.
+    // TOC links are generated ONCE from section titles (buildToc) and carry no
+    // data-en of their own, so the [data-en] swap above never touches them.
+    // Re-derive each link's label from its target section's title, which holds
+    // both data-en and the captureOriginal()-snapshotted data-zh. Update in
+    // place (no node rebuild) so the scrollspy's captured link references stay
+    // valid.
+    var tocNav = document.getElementById('toc-nav');
+    if (tocNav) {
+      tocNav.querySelectorAll('a.toc-link').forEach(function(a) {
+        var id = a.getAttribute('href');
+        if (!id || id.charAt(0) !== '#') return;
+        var sec = document.getElementById(id.slice(1));
+        if (!sec) return;
+        var t = sec.querySelector('.section-title') || sec.querySelector('h2') || sec.querySelector('h1');
+        if (!t) return;
+        var label = isEn ? (t.dataset.en || t.textContent) : (t.dataset.zh || t.textContent);
+        a.textContent = label;
+        a.dataset.label = label.toLowerCase(); // keep search filter aligned
+      });
+    }
+    var tocSearch = document.getElementById('toc-search');
+    if (tocSearch) tocSearch.placeholder = isEn ? (tocSearch.dataset.enPh || 'Search…') : '搜索目录…';
   }
 
   // ===== i18n bootstrap =====

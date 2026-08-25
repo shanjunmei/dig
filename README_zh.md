@@ -267,7 +267,7 @@ provider（通过 `dig.Provide` / `dig.Supply` / `dig.Module` 注册的构造函
 | `-alias` | `full` | 导入别名策略：`full` / `short` / `obfuscated` / `numeric`；启用 `-debug` 时同时打印别名映射诊断 |
 | `-inline` | `false` | 将简单的非恒等闭包内联为 IIFE；身份闭包始终塌缩为类型转换（与本 flag 无关） |
 | `-typecheck` | `true` | 生成后类型检查产出代码以捕获内部生成器 bug；大型 `./...` 运行可关闭（`-typecheck=false`）以省去逐文件重载包图 |
-| `-cache` | `false` | 将提取出的 IR 缓存到磁盘，未改动包命中缓存时跳过提取/类型检查 |
+| `-cache` | `false` | 将提取出的 IR 缓存到磁盘；命中缓存时跳过提取步骤（类型检查 `packages.Load` 仍每次执行，未被缓存） |
 | `-cachedir` | `""` | IR 缓存目录（默认：`os.TempDir()/digen-ir-cache`；仅 `-cache` 设置时生效） |
 | `-version` | `false` | 打印版本信息并退出 |
 

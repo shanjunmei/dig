@@ -49,7 +49,7 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 | `-inline` | false | 简单闭包内联为 IIFE（身份闭包始终塌缩为类型转换，与本 flag 无关） |
 | `-version` | false | 打印版本信息 |
 | `-typecheck` | true | 生成后类型检查产出代码以捕获内部生成器 bug（大型 `./...` 可关） |
-| `-cache` | false | 缓存提取出的 IR 到磁盘，未改动包跳过提取/类型检查 |
+| `-cache` | false | 缓存提取出的 IR 到磁盘；命中时跳过提取（类型检查仍每次执行，未被缓存） |
 | `-cachedir` | "" | IR 缓存目录（默认 `os.TempDir()/digen-ir-cache`；仅 `-cache` 生效） |
 
 子命令：`init`（脚手架 di.go）、`check`（仅校验不写文件）、`graph`（Mermaid 依赖图）、`explain <type>`（解析路径）、`completion <shell>`（bash/zsh/fish 补全脚本）。

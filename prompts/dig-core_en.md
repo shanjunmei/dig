@@ -49,7 +49,7 @@ go install github.com/shanjunmei/dig/cmd/digen@latest
 | `-inline` | false | Inline simple closures as IIFEs only; identity closures are ALWAYS collapsed to type conversions regardless of this flag |
 | `-version` | false | Print version information |
 | `-typecheck` | true | Type-check generated code after emission to catch internal generator bugs (disable for large `./...` runs) |
-| `-cache` | false | Cache the extracted IR to disk; unchanged packages skip extraction / type-checking |
+| `-cache` | false | Cache the extracted IR to disk; on hit, skip extraction only (type-checking still runs every time, uncached) |
 | `-cachedir` | "" | IR cache directory (default `os.TempDir()/digen-ir-cache`; only with `-cache`) |
 
 Subcommands: `init` (scaffold di.go), `check` (validate without writing), `graph` (Mermaid dependency graph), `explain <type>` (resolution path), `completion <shell>` (bash/zsh/fish completion script).
