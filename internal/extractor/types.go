@@ -6,12 +6,10 @@ import (
 	"github.com/shanjunmei/dig/internal/model"
 	"github.com/shanjunmei/dig/pkg/functional"
 	"go/ast"
-	"go/constant"
 	"go/printer"
 	"go/types"
 	"golang.org/x/tools/go/packages"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -28,14 +26,12 @@ func newExtractedArg(name string, typ types.Type, typeStr string, isConst bool, 
 	}
 }
 
+// extractConstLiteral 返回常量的 Go 表达式形式，供闭包内联时替换常量引用。
+// constant.Value.String() 对字符串常量已返回带引号形式（如 "font:cjk"），
+// 对其它类型返回合法字面量，因此直接返回即可；再套 strconv.Quote 会产生
+// 二次转义（"\"font:cjk\""），导致内联后的字符串多出一层引号。
 func (e *Extractor) extractConstLiteral(c *types.Const) string {
-	val := c.Val()
-	switch val.Kind() {
-	case constant.String:
-		return strconv.Quote(val.String())
-	default:
-		return val.String()
-	}
+	return c.Val().String()
 }
 
 func (e *Extractor) addPkgToUsed(typ types.Type, usedPkgs map[string]bool) {

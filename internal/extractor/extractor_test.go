@@ -3,12 +3,14 @@ package extractor
 import (
 	"bytes"
 	"go/ast"
+	"go/constant"
 	"go/parser"
 	"go/printer"
 	"go/token"
 	"go/types"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -529,5 +531,49 @@ func TestCheckGenerationVisibilityVarScoping(t *testing.T) {
 	nested.Insert(localVar)
 	if err := e.checkGenerationVisibility(localVar, curPkg); err != nil {
 		t.Errorf("case 3: unexpected error for local variable (should be skipped): %v", err)
+	}
+}
+
+// TestExtractConstLiteralStringNoDoubleQuote locks the string-constant
+// double-quoting fix in extractConstLiteral.
+//
+// Regression: constant.Value.String() already returns a QUOTED Go string
+// literal (e.g. "font:cjk"). extractConstLiteral used to call strconv.Quote on
+// top of it, producing "\"font:cjk\""; when the closure inliner later replaced
+// the constant reference via strToExpr, the parsed value carried literal quote
+// characters, so a package-level string constant referenced in a dig.Invoke
+// closure inlined to the wrong string (with stray quotes).
+func TestExtractConstLiteralStringNoDoubleQuote(t *testing.T) {
+	e := &Extractor{}
+	strType := types.Typ[types.String]
+
+	c := types.NewConst(token.NoPos, nil, "fontName", strType, constant.MakeString("font:cjk"))
+	got := e.extractConstLiteral(c)
+	want := `"font:cjk"`
+	if got != want {
+		t.Fatalf("extractConstLiteral(string) = %s, want %s", got, want)
+	}
+
+	// The emitted literal must parse back to exactly "font:cjk" (no extra quotes).
+	expr, err := strToExpr(got)
+	if err != nil {
+		t.Fatalf("strToExpr(%s) failed: %v", got, err)
+	}
+	lit, ok := expr.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		t.Fatalf("strToExpr(%s) = %T, want string BasicLit", got, expr)
+	}
+	val, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		t.Fatalf("unquote %q: %v", lit.Value, err)
+	}
+	if val != "font:cjk" {
+		t.Fatalf("parsed value = %q, want %q", val, "font:cjk")
+	}
+
+	// Non-string constants keep working (raw literal, no quoting).
+	intC := types.NewConst(token.NoPos, nil, "limit", types.Typ[types.Int], constant.MakeInt64(42))
+	if got := e.extractConstLiteral(intC); got != "42" {
+		t.Fatalf("extractConstLiteral(int) = %q, want 42", got)
 	}
 }
