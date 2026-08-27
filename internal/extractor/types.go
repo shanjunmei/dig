@@ -381,7 +381,14 @@ func getFuncMeta(expr ast.Expr, curPkg *packages.Package, pkgMap map[string]*pac
 	}
 	realPkg, ok = pkgMap[fnPkg.Path()]
 	if !ok {
-		return "", nil, nil, fmt.Errorf("at %s: package %s not found in pkgMap", pos, fnPkg.Path())
+		// A provider function whose defining package is missing from the loaded
+		// graph. The most common cause is a dependency that does not compile:
+		// go/packages does not fully load a package with compile errors, so its
+		// exported symbols (and this provider) are invisible here. Make the fix
+		// actionable instead of dumping a bare "not found".
+		return "", nil, nil, fmt.Errorf(
+			"at %s: package %s is not available in the loaded package graph\n  💡 Fix: ensure %s is required in go.mod and that `go build ./...` compiles it cleanly (packages with compile errors are not fully loaded, so their providers cannot be extracted)",
+			pos, fnPkg.Path(), fnPkg.Path())
 	}
 	instFuncType := curPkg.TypesInfo.TypeOf(expr)
 	instSig, ok := instFuncType.(*types.Signature)

@@ -43,21 +43,31 @@ func mustLoad(l *loader.PackageLoader, paths []string) ([]*packages.Package, map
 	return pkgs, pkgMap
 }
 
-// runInit scaffolds a di.go with the dig.Build entry point.
+// runInit scaffolds a di.go with the dig.Build entry point. The output file
+// name is the single positional argument; it defaults to "di.go" when omitted.
 func runInit(args []string) error {
-	name := "di.go"
-	for i, a := range args {
-		if !strings.HasPrefix(a, "-") {
-			name = a
-			args = append(args[:i], args[i+1:]...)
-			break
+	var positional []string
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			return fmt.Errorf("unknown flag or unexpected argument %q\n  💡 Usage: digen init [<output-file>]  (default: di.go)", a)
 		}
+		positional = append(positional, a)
+	}
+	if len(positional) > 1 {
+		return fmt.Errorf("expected at most one output file name, got %d: %s\n  💡 Usage: digen init [<output-file>]  (default: di.go)", len(positional), strings.Join(positional, " "))
+	}
+	name := "di.go"
+	if len(positional) == 1 {
+		name = positional[0]
+	}
+	if info, err := os.Stat(name); err == nil && info.IsDir() {
+		return fmt.Errorf("%q is a directory, not a file\n  💡 Usage: digen init [<output-file>]  (default: di.go)", name)
 	}
 	if _, err := os.Stat(name); err == nil {
-		return fmt.Errorf("file %s already exists (refusing to overwrite)", name)
+		return fmt.Errorf("file %s already exists (refusing to overwrite)\n  💡 Fix: choose a different name with `digen init <output-file>`", name)
 	}
 	if err := os.WriteFile(name, []byte(initTemplate), 0644); err != nil {
-		return fmt.Errorf("failed to write %s: %v", name, err)
+		return fmt.Errorf("failed to write %s: %v\n  💡 Fix: ensure the parent directory exists and is writable", name, err)
 	}
 	fmt.Printf("[digen] created %s\n  run `digen` to generate wiring, or `go generate ./...`\n", name)
 	return nil
@@ -111,7 +121,9 @@ func runCheck(f cliFlags, remaining []string) error {
 		return fmt.Errorf("no packages with dig.Build found\n  💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error")
 	}
 	if len(failed) > 0 {
-		fmt.Printf("[digen] packages with issues:\n%s\n", strings.Join(failed, "\n"))
+		// Partial validation failure must exit non-zero, mirroring `digen`
+		// generation: CI must not go green while some packages are invalid.
+		return fmt.Errorf("%d package(s) failed validation:\n%s", len(failed), strings.Join(failed, "\n"))
 	}
 	fmt.Printf("[digen] check passed: %d package(s)\n", checked)
 	return nil
@@ -180,8 +192,8 @@ func escapeMermaid(s string) string {
 
 // runExplain prints how a type/provider is resolved.
 func runExplain(f cliFlags, remaining []string) error {
-	if len(remaining) == 0 {
-		return fmt.Errorf("explain requires a type or provider name, e.g. `digen explain DB ./...`")
+	if len(remaining) == 0 || strings.TrimSpace(remaining[0]) == "" {
+		return fmt.Errorf("explain requires a type or provider name\n  💡 Usage: digen explain <type-or-provider> [packages...]\n  Example: digen explain DB ./...")
 	}
 	query := remaining[0]
 	paths := remaining[1:]

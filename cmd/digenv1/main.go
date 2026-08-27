@@ -1,3 +1,9 @@
+// Deprecated: cmd/digenv1 is the legacy single-file implementation of the
+// digen code generator. It is kept only for historical reference and is NOT
+// maintained. Use cmd/digen (the current, layered implementation) instead —
+// it is strictly more capable and fixes many v1 bugs (cross-package closure
+// capture, visibility checks, IR caching, deterministic aliasing, batch
+// type-check net, etc.). This command may be removed in a future release.
 package main
 
 import (

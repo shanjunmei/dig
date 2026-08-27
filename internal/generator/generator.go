@@ -79,6 +79,14 @@ func (g *Generator) WriteGeneratedCode(pkg *packages.Package, target *model.GenT
 	return os.WriteFile(target.File, []byte(code), 0644)
 }
 
+// GeneratedArtifact pairs a pending generated file with the package that
+// produced it, so a batch type-check can attribute errors per artifact.
+type GeneratedArtifact struct {
+	Pkg     *packages.Package
+	File    string
+	Content []byte
+}
+
 // typeCheckGenerated is a best-effort post-generation "safety net".
 //
 // It type-checks the freshly formatted generated file inside its owning package
@@ -150,14 +158,15 @@ func (g *Generator) typeCheckGenerated(genFile string, content []byte, mainPkg *
 	if len(genErrors) == 0 {
 		return nil
 	}
+	return g.classifyAndFormatNetError(genFile, absGenFile, genErrors, mainPkg)
+}
 
-	// Classify the errors. A "undefined: X" error where X is a main-package
-	// symbol DEFINED inside a //go:build digen file is a DIGEN-CONTRACT
-	// VIOLATION (user error) — the extractor's checkContractVisibility pre-check
-	// normally catches these, but it is skipped on IR-cache hits, so the net is
-	// the backstop. Everything else is a genuine INTERNAL generator bug.
+// classifyGenErrors splits a generated file's type-check errors into digen
+// contract violations (the generated file references a symbol the main package
+// defines ONLY inside a //go:build digen file) and genuine internal generator
+// bugs (everything else).
+func (g *Generator) classifyGenErrors(genErrors []packages.Error, mainPkg *packages.Package) (contractErrs, internalErrs []packages.Error) {
 	digenNames := collectDigenDefinedMainNames(mainPkg)
-	var contractErrs, internalErrs []packages.Error
 	for _, e := range genErrors {
 		if name, ok := undefinedMainPkgSymbol(e.Msg); ok && digenNames[name] {
 			contractErrs = append(contractErrs, e)
@@ -165,6 +174,14 @@ func (g *Generator) typeCheckGenerated(genFile string, content []byte, mainPkg *
 			internalErrs = append(internalErrs, e)
 		}
 	}
+	return
+}
+
+// classifyAndFormatNetError turns a generated file's type-check failures into an
+// actionable error, preferring a digen contract violation (the root cause the
+// user must fix) over an internal-bug escalation.
+func (g *Generator) classifyAndFormatNetError(genFile, absGenFile string, genErrors []packages.Error, mainPkg *packages.Package) error {
+	contractErrs, internalErrs := g.classifyGenErrors(genErrors, mainPkg)
 
 	// Prefer reporting a contract violation: it is the root cause the user must
 	// fix, and any other errors in the same broken file are almost always
@@ -209,6 +226,74 @@ func (g *Generator) typeCheckGenerated(genFile string, content []byte, mainPkg *
 	b.WriteString(issueBody)
 	b.WriteString("\n==== end of template ====\n")
 	return fmt.Errorf("%s", b.String())
+}
+
+// VerifyGeneratedBatch type-checks all pending generated files in a single
+// packages.Load pass (using one Overlay that injects every generated file),
+// instead of the old per-package approach that re-loaded the whole dependency
+// graph once per generated package. On `digen ./...` that is the difference
+// between O(packages) full type-checks and exactly one.
+//
+// It returns a map keyed by PkgPath with the actionable error for each artifact
+// whose generated file failed type-checking; artifacts that type-check cleanly
+// are absent. Best-effort, mirroring typeCheckGenerated: if the infrastructure
+// itself fails to load, it returns nil (the net is skipped, files are written
+// normally).
+func (g *Generator) VerifyGeneratedBatch(artifacts []GeneratedArtifact) map[string]error {
+	if len(artifacts) == 0 {
+		return nil
+	}
+	overlay := make(map[string][]byte, len(artifacts))
+	dirs := make([]string, 0, len(artifacts))
+	absByPkg := make(map[string]string, len(artifacts))
+	for _, a := range artifacts {
+		abs, err := filepath.Abs(a.File)
+		if err != nil {
+			g.logger.Debugf("type-check safety net skipped (abs path failed for %s): %v", a.File, err)
+			return nil
+		}
+		overlay[abs] = a.Content
+		dirs = append(dirs, filepath.Dir(abs))
+		absByPkg[a.Pkg.PkgPath] = abs
+	}
+	cfg := &packages.Config{
+		Mode:    packages.NeedTypes | packages.NeedTypesInfo,
+		Overlay: overlay,
+	}
+	pkgs, err := packages.Load(cfg, dirs...)
+	if err != nil {
+		g.logger.Debugf("type-check safety net skipped (packages.Load failed): %v", err)
+		return nil
+	}
+
+	// Attribute type-check errors to the artifact whose generated file they
+	// land on. We match by error POSITION rather than package identity: with
+	// Mode = NeedTypes|NeedTypesInfo the loaded Package's PkgPath/Name are not
+	// populated (only ID and Types are), so keying by p.PkgPath would silently
+	// drop every error. Each error carries the real path of the (overlay)
+	// generated file it refers to, which we compare against each artifact's
+	// absolute file path.
+	genErrsByPkg := make(map[string][]packages.Error, len(artifacts))
+	for _, p := range pkgs {
+		for _, e := range p.Errors {
+			for _, a := range artifacts {
+				if errorInGeneratedFile(e, absByPkg[a.Pkg.PkgPath]) {
+					genErrsByPkg[a.Pkg.PkgPath] = append(genErrsByPkg[a.Pkg.PkgPath], e)
+					break
+				}
+			}
+		}
+	}
+
+	result := make(map[string]error)
+	for _, a := range artifacts {
+		genErrors := genErrsByPkg[a.Pkg.PkgPath]
+		if len(genErrors) == 0 {
+			continue
+		}
+		result[a.Pkg.PkgPath] = g.classifyAndFormatNetError(a.File, absByPkg[a.Pkg.PkgPath], genErrors, a.Pkg)
+	}
+	return result
 }
 
 // digenIssueBaseURL is where internal generator bugs should be reported.
@@ -742,7 +827,14 @@ func (g *Generator) writeProviders(buf *bytes.Buffer, nodes []model.Node, refCou
 			continue
 		}
 		blank := false
-		if !node.HasError && refCount[node.Name] == 0 && unusedMode == model.UnusedModeIgnore {
+		// In ignore mode, an unconsumed provider without error is invoked for its
+		// side effect and discarded. In drop mode, the same must hold for an
+		// unconsumed provider that RETURNS an error: it is still generated (to
+		// validate construction), but its value is unused, so it must be discarded
+		// (blank) — otherwise `dvN, err := F(...)` leaves dvN "declared and not
+		// used", and the generated file fails to compile. Error-bearing providers
+		// keep their error checked either way (see writeProvider's blank branch).
+		if refCount[node.Name] == 0 && (unusedMode == model.UnusedModeIgnore || unusedMode == model.UnusedModeDrop) {
 			blank = true
 		}
 		g.writeProvider(buf, node, blank, ctxParamName, errName)

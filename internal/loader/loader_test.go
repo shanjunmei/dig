@@ -2,10 +2,43 @@ package loader
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/packages"
 )
+
+// TestHintForLoadFailure verifies the actionable hint is attached exactly when
+// a package pattern could not be resolved (the raw go toolchain message would
+// otherwise leave users guessing about the correct ./ prefix or import path),
+// and is absent for unrelated errors.
+func TestHintForLoadFailure(t *testing.T) {
+	cases := []struct {
+		err      string
+		wantHint bool
+	}{
+		{`package example/app is not in std (C:\Go\src\example\app)`, true},
+		{`cannot find package "foo" in any of:`, true},
+		{`no required module provides package bar`, true},
+		{`package ./nonexistent is not in std`, true},
+		{`malformed import path "x:y"`, true},
+		{"go.mod file not found", false},
+		{"some other compile error", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		got := hintForLoadFailure([]string{"example/app"}, c.err)
+		if c.wantHint != (got != "") {
+			t.Fatalf("hintForLoadFailure(%q) = %q, want-hint=%v", c.err, got, c.wantHint)
+		}
+	}
+	// The hint must teach both accepted forms: ./-prefixed directories and
+	// full import paths.
+	h := hintForLoadFailure([]string{"example/app"}, "package example/app is not in std")
+	if !strings.Contains(h, "./") || !strings.Contains(h, "module path") {
+		t.Fatalf("hint should mention both ./ and import-path forms, got: %q", h)
+	}
+}
 
 // TestCollectAllPackages covers the recursive package collector: it must visit
 // every reachable package exactly once (terminating on import cycles) and skip

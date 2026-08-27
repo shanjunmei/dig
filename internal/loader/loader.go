@@ -42,7 +42,7 @@ func (l *PackageLoader) Load(paths []string) ([]*packages.Package, map[string]*p
 	}
 	pkgs, err := packages.Load(cfg, paths...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("packages.Load failed: %w", err)
+		return nil, nil, fmt.Errorf("packages.Load failed: %w%s", err, hintForLoadFailure(paths, err.Error()))
 	}
 	if len(pkgs) == 0 {
 		return nil, nil, fmt.Errorf("no packages loaded")
@@ -59,10 +59,35 @@ func (l *PackageLoader) Load(paths []string) ([]*packages.Package, map[string]*p
 		}
 	}
 	if len(errs) > 0 {
-		return nil, nil, fmt.Errorf("compilation errors found in packages:\n%s", strings.Join(errs, "\n"))
+		joined := strings.Join(errs, "\n")
+		return nil, nil, fmt.Errorf("compilation errors found in packages:\n%s%s", joined, hintForLoadFailure(paths, joined))
 	}
 
 	return pkgs, pkgMap, nil
+}
+
+// hintForLoadFailure appends an actionable hint when a package pattern could not
+// be resolved. The raw go toolchain message (e.g. "package example/app is not in
+// std") is not actionable on its own — users often omit the ./ prefix for a
+// directory or mistype an import path. The hint explains the two accepted forms
+// so the fix is obvious. Only triggers on resolution-style failures to avoid
+// noise on unrelated errors (e.g. missing go.mod).
+func hintForLoadFailure(paths []string, errMsg string) string {
+	lower := strings.ToLower(errMsg)
+	unresolved := strings.Contains(lower, "is not in std") ||
+		strings.Contains(lower, "cannot find package") ||
+		strings.Contains(lower, "no required module provides package") ||
+		strings.Contains(lower, "not in goroot") ||
+		strings.Contains(lower, "no such package") ||
+		strings.Contains(lower, "malformed import path") ||
+		strings.Contains(lower, "directory not found") ||
+		strings.Contains(lower, "no such file or directory")
+	if !unresolved {
+		return ""
+	}
+	return "\n\n  💡 digen accepts Go package patterns. To target a directory, prefix it with ./ " +
+		"(e.g. `digen ./example/app` or `digen ./...`); to target an import path, use the full " +
+		"module path (e.g. `digen github.com/you/module/pkg`)."
 }
 
 func collectAllPackages(rootPkgs []*packages.Package) map[string]*packages.Package {

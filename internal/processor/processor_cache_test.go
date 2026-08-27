@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/shanjunmei/dig/internal/config"
 	"github.com/shanjunmei/dig/internal/generator"
@@ -131,15 +132,21 @@ func assertNodesEquivalent(t *testing.T, a, b []model.Node) {
 }
 
 // TestCacheKeyIncludesDependencyChanges proves the cache key is sensitive to a
-// dependency's source content (so a dep API change invalidates the cache) and
-// is deterministic (restoring the source restores the key). It builds an
-// in-memory package graph so it needs no real module on disk.
+// dependency's size/mtime fingerprint (so a dep API/impl change invalidates the
+// cache) and is deterministic (restoring the source restores the key). It builds
+// an in-memory package graph so it needs no real module on disk.
+//
+// The key is (path, size, mtime), not content bytes, so the test pins mtimes to
+// a fixed instant via fixMtime and relies on size changes to model a content
+// change — mirroring the real-world contract: a change that alters neither size
+// nor mtime is not detected (the documented trade-off of the fingerprint).
 func TestCacheKeyIncludesDependencyChanges(t *testing.T) {
 	dir := t.TempDir()
 	mainFile := filepath.Join(dir, "main.go")
 	depFile := filepath.Join(dir, "dep.go")
 	mustWrite(t, mainFile, "package main\n")
 	mustWrite(t, depFile, "package dep\n")
+	fixMtime(t, mainFile, depFile)
 
 	dep := &packages.Package{PkgPath: "example.com/dep", GoFiles: []string{depFile}}
 	main := &packages.Package{
@@ -154,8 +161,9 @@ func TestCacheKeyIncludesDependencyChanges(t *testing.T) {
 		t.Fatalf("cacheKey: %v", err)
 	}
 
-	// A dependency's source change must change the key.
+	// A dependency's source change (here: a size change) must change the key.
 	mustWrite(t, depFile, "package dep\n\nfunc Changed() {}\n")
+	fixMtime(t, depFile)
 	key2, err := p.cacheKey(main)
 	if err != nil {
 		t.Fatalf("cacheKey after dep change: %v", err)
@@ -164,8 +172,10 @@ func TestCacheKeyIncludesDependencyChanges(t *testing.T) {
 		t.Fatal("cache key did not change when a dependency's source changed")
 	}
 
-	// Restoring the dependency must restore the key (deterministic).
+	// Restoring the dependency (same content, same size, same mtime) must
+	// restore the key (deterministic).
 	mustWrite(t, depFile, "package dep\n")
+	fixMtime(t, depFile)
 	key3, err := p.cacheKey(main)
 	if err != nil {
 		t.Fatalf("cacheKey after dep restore: %v", err)
@@ -176,6 +186,7 @@ func TestCacheKeyIncludesDependencyChanges(t *testing.T) {
 
 	// The package's own source change must also change the key.
 	mustWrite(t, mainFile, "package main\n\nfunc Own() {}\n")
+	fixMtime(t, mainFile)
 	key4, err := p.cacheKey(main)
 	if err != nil {
 		t.Fatalf("cacheKey after own change: %v", err)
@@ -189,5 +200,18 @@ func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// fixMtime pins the mtime of the given files to a fixed instant so tests that
+// write then restore identical-size content see a deterministic key (with the
+// size+mtime fingerprint, a live mtime would differ between writes).
+func fixMtime(t *testing.T, paths ...string) {
+	t.Helper()
+	fixed := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	for _, p := range paths {
+		if err := os.Chtimes(p, fixed, fixed); err != nil {
+			t.Fatalf("chtimes %s: %v", p, err)
+		}
 	}
 }

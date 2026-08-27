@@ -38,18 +38,33 @@ func NewProcessor(loader *loader.PackageLoader, generator *generator.Generator, 
 	}
 }
 
-// Process 处理单个包
-func (p *Processor) Process(pkg *packages.Package, pkgMap map[string]*packages.Package, strategy alias.AliasStrategy) error {
+// Artifact is a package's freshly generated file held in memory, pending the
+// batch type-check net and the final write. Returning it (instead of writing
+// inside Process) lets App.Run verify every generated file with a single
+// packages.Load pass and skip writing the ones that fail the net.
+type Artifact struct {
+	Pkg     *packages.Package
+	Src     string // the digen-tagged source file (for the progress log)
+	File    string
+	Content []byte
+}
+
+// Process extracts a single package's injector function and returns the pending
+// generated file as an Artifact. It does NOT type-check or write to disk — the
+// caller (App.Run) performs one batched type-check over all artifacts and then
+// writes the clean ones. Packages without a dig.Build call return
+// loader.ErrNoDigBuildCall.
+func (p *Processor) Process(pkg *packages.Package, pkgMap map[string]*packages.Package, strategy alias.AliasStrategy) (*Artifact, error) {
 	target, err := loader.FindInjectorFunctions(pkg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 确定输出路径
 	outputPath := p.cfg.OutputFile
 	if len(p.cfg.Paths) != 1 || p.cfg.Paths[0] != "." {
 		if len(pkg.GoFiles) == 0 {
-			return fmt.Errorf("package %s has no Go files", pkg.PkgPath)
+			return nil, fmt.Errorf("package %s has no Go files", pkg.PkgPath)
 		}
 		dir := filepath.Dir(pkg.GoFiles[0])
 		outputPath = filepath.Join(dir, "dig_gen.go")
@@ -61,7 +76,7 @@ func (p *Processor) Process(pkg *packages.Package, pkgMap map[string]*packages.P
 
 	nodes, importAliasMap, pkgAliasMap, pkgNameMap, err := p.buildNodes(pkg, target, pkgMap, strategy)
 	if err != nil {
-		return fmt.Errorf("extract and build nodes: %w", err)
+		return nil, fmt.Errorf("extract and build nodes: %w", err)
 	}
 
 	refCount := make(map[string]int)
@@ -73,16 +88,42 @@ func (p *Processor) Process(pkg *packages.Package, pkgMap map[string]*packages.P
 
 	if p.cfg.UnusedMode == model.UnusedModeError {
 		if err := p.checkUnusedProviders(nodes, refCount); err != nil {
-			return fmt.Errorf("unused provider check: %w", err)
+			return nil, fmt.Errorf("unused provider check: %w", err)
 		}
 	}
 
-	if err := p.generator.WriteGeneratedCode(pkg, target, nodes, refCount, importAliasMap, pkgAliasMap, pkgNameMap, pkg.Fset); err != nil {
-		return fmt.Errorf("write generated code: %w", err)
+	// The output file name embedded in the //go:generate directive must stay
+	// RELATIVE (dig_gen.go) even though outputPath is absolute in ./... mode:
+	// an absolute path here would bake the machine's directory layout into the
+	// committed generated file and break `go generate` for other checkouts.
+	code, err := p.generator.GenerateCode(nodes, refCount, pkg.Name, target.FuncName, pkg.PkgPath, importAliasMap, pkgAliasMap, pkgNameMap, pkg.Fset, target.Node.Type.Params, filepath.Base(outputPath))
+	if err != nil {
+		return nil, fmt.Errorf("write generated code: %w", err)
 	}
 
-	fmt.Printf("[digen] generated: %s -> %s\n", srcFile, outputPath)
-	return nil
+	return &Artifact{Pkg: pkg, Src: srcFile, File: outputPath, Content: []byte(code)}, nil
+}
+
+// BatchVerify type-checks all pending artifacts in a single packages.Load pass
+// (see generator.VerifyGeneratedBatch). It returns a map keyed by PkgPath with
+// the actionable error for each artifact whose generated file failed the net;
+// clean artifacts are absent.
+func (p *Processor) BatchVerify(artifacts []*Artifact) map[string]error {
+	if len(artifacts) == 0 {
+		return nil
+	}
+	gas := make([]generator.GeneratedArtifact, len(artifacts))
+	for i, a := range artifacts {
+		gas[i] = generator.GeneratedArtifact{Pkg: a.Pkg, File: a.File, Content: a.Content}
+	}
+	return p.generator.VerifyGeneratedBatch(gas)
+}
+
+// WriteArtifact writes a verified artifact's generated file to disk and logs the
+// per-package progress line.
+func (p *Processor) WriteArtifact(a *Artifact) error {
+	fmt.Printf("[digen] generated: %s -> %s\n", a.Src, a.File)
+	return os.WriteFile(a.File, a.Content, 0o644)
 }
 
 // extractAndBuildNodes 原 extractAndBuildNodes 逻辑
@@ -162,14 +203,27 @@ func (p *Processor) buildNodes(pkg *packages.Package, target *model.GenTarget, p
 //   - the config knobs that affect the IR (alias style, closure inlining);
 //   - the Go toolchain version (covers stdlib API changes, whose sources are
 //     not hashed here);
-//   - the byte content of the package's own source files;
-//   - the byte content of every transitively imported package's source files.
+//   - a fingerprint of the package's own source files;
+//   - a fingerprint of every transitively imported package's source files.
 //
 // Including dependency sources means a breaking change in an imported package
 // invalidates this package's cache entry, so the cache can never serve stale IR
 // that would generate code against an old dependency API. The trade-off is that
-// every cache-enabled run (hit or miss) hashes all reachable dependency sources;
-// that is still cheaper than re-extracting + type-checking, and the cache is opt-in.
+// every cache-enabled run (hit or miss) fingerprints all reachable dependency
+// sources; that is still cheaper than re-extracting + type-checking, and the
+// cache is opt-in.
+//
+// The per-file fingerprint is (path, size, mtime) rather than content bytes.
+// Closure bodies are extracted from dependency sources, so a dependency's
+// *implementation* change must invalidate the cache — a plain export-data hash
+// would miss that. Hashing file content would be precise but forces a full read
+// of every reachable source on every run, which dominates the cost the cache is
+// meant to save on large modules. mtime+size is the same trade-off the Go build
+// cache and most incremental tools make: a file whose content changed in place
+// without a size or mtime change (e.g. `touch -r` copying an old timestamp) is
+// the one case that can yield a stale hit — acceptable for a developer-local,
+// opt-in cache, and never a correctness bug (stale IR still type-checks against
+// whatever is on disk when the generated file is built).
 func (p *Processor) cacheKey(pkg *packages.Package) (string, error) {
 	h := sha256.New()
 	io.WriteString(h, p.cfg.AliasType)
@@ -184,8 +238,9 @@ func (p *Processor) cacheKey(pkg *packages.Package) (string, error) {
 		return "", err
 	}
 
-	// Transitive dependencies: hashing their source content (and their import
-	// paths) makes a dependency API change invalidate the cache entry.
+	// Transitive dependencies: fingerprinting their source files (and their
+	// import paths) makes a dependency API/implementation change invalidate the
+	// cache entry.
 	seen := map[string]bool{pkg.PkgPath: true}
 	var walk func(pk *packages.Package) error
 	walk = func(pk *packages.Package) error {
@@ -197,7 +252,7 @@ func (p *Processor) cacheKey(pkg *packages.Package) (string, error) {
 			io.WriteString(h, "\x00dep:")
 			io.WriteString(h, imp.PkgPath)
 			io.WriteString(h, "\x00")
-			// A dependency whose sources cannot be hashed must fail closed:
+			// A dependency whose sources cannot be fingerprinted must fail closed:
 			// skipping it would let the cache key omit that dependency's content
 			// and serve stale IR generated against an old dependency API.
 			if err := hashPackageFiles(h, imp); err != nil {
@@ -218,9 +273,12 @@ func (p *Processor) cacheKey(pkg *packages.Package) (string, error) {
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-// hashPackageFiles folds the sorted source file paths and their byte content
-// into h. Archive-only packages (e.g. stdlib) have no GoFiles and only
-// contribute their import path elsewhere; their API is covered by
+// hashPackageFiles folds the sorted source file paths and their (size, mtime)
+// fingerprint into h. It deliberately does NOT read file content: on a
+// cache-enabled run every reachable dependency is fingerprinted, and content
+// hashing would make that step the dominant cost instead of the extraction it
+// is meant to skip. Archive-only packages (e.g. stdlib) have no GoFiles and
+// only contribute their import path elsewhere; their API is covered by
 // runtime.Version() in the cache key, so not hashing their sources is fine.
 func hashPackageFiles(h io.Writer, pkg *packages.Package) error {
 	files := append([]string{}, pkg.GoFiles...)
@@ -229,11 +287,14 @@ func hashPackageFiles(h io.Writer, pkg *packages.Package) error {
 	for _, f := range files {
 		io.WriteString(h, f)
 		io.WriteString(h, "\x00")
-		b, err := os.ReadFile(f)
+		info, err := os.Stat(f)
 		if err != nil {
 			return err
 		}
-		h.Write(b)
+		io.WriteString(h, strconv.FormatInt(info.Size(), 10))
+		io.WriteString(h, "\x00")
+		io.WriteString(h, strconv.FormatInt(info.ModTime().UnixNano(), 10))
+		io.WriteString(h, "\x00")
 	}
 	return nil
 }
