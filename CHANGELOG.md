@@ -4,6 +4,42 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+## 🐛 修复
+
+- **提取器字符串常量双重转义修复**  
+  `extractConstLiteral` 中 `constant.Value.String()` 已返回带正确引号的字面量，移除了多余的 `strconv.Quote` 调用，避免字符串常量被二次转义。新增回归示例 `example/closure_capture_string_const` 及配套测试锁定该修复。
+- **生成器未使用 provider 判定修复**  
+  修正未使用模式（unused pattern）处理逻辑，正确处理带有返回 error 的未使用 provider。
+- **`init` 子命令参数校验与错误提示增强**  
+  `digen init [<output-file>]` 现默认输出 `di.go`，并对未知 flag、输出名为目录、文件已存在等情形给出明确的 `💡 Fix:` 指引。
+
+## ✨ 改进
+
+- **包加载失败提示优化**  
+  提供可操作的排查指引，便于定位 `packages.Load` 失败根因。
+- **数字别名策略重构为确定性生成**  
+  重构数字别名（digit alias）策略，消除对解析顺序的依赖，生成结果可复现。
+- **批处理类型检查网络**  
+  显著提升 `digen ./...` 批量生成的效率。
+- **生成流程拆分为提取 / 校验 / 写入三阶段**  
+  写入阶段支持跳过失败包，部分包出错不再中断整轮生成。
+- **缓存键逻辑重构**  
+  缓存键由 content hash 改为「文件大小 + 修改时间」，在精度与性能之间取得平衡。
+- **`digen check` 部分失败改为非零退出**  
+  当存在校验失败的包时，`check` 子命令现在返回非零退出码（与 `digen` 生成行为一致），避免 CI 在部分包无效时误判通过。
+
+## ♻️ 重构与优化（内部）
+
+- **`cmd/digenv1` 标记 `// Deprecated:`**  
+  在文件头新增弃用注释，明确其为历史实现、不再维护，推荐改用 `cmd/digen`（能力更全且修复了众多 v1 缺陷）。属只读归档，仅新增文档注释，零逻辑改动。
+
+## 🧪 测试
+
+- 新增部分失败、批校验等场景的测试用例。
+- 黄金文件（golden）测试 diff 输出由字符串拼接改为逐步 builder 写入，并用 `range` 替代 `for` 循环，提升可读性与可维护性。
+
 ## [v1.0.21] - 2026-08-25
 
 ## 🐛 修复

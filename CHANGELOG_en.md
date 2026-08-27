@@ -4,6 +4,42 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## 🐛 Bug Fixes
+
+- **Extractor: double-escaping of string constants fixed**  
+  In `extractConstLiteral`, `constant.Value.String()` already returns a properly quoted literal, so the redundant `strconv.Quote` call was removed, eliminating double-escaping of string constants. Added regression example `example/closure_capture_string_const` and tests to lock in the fix.
+- **Generator: unused-provider detection fixed**  
+  Corrected the unused-pattern logic so unused providers that return an error are handled properly.
+- **`init` subcommand: argument validation and error messages improved**  
+  `digen init [<output-file>]` now defaults the output file to `di.go` and gives clear `💡 Fix:` guidance for unknown flags, a directory output name, or an existing file.
+
+## ✨ Improvements
+
+- **Package-loading failure prompts optimized**  
+  Actionable troubleshooting guidance is now provided to locate the root cause of `packages.Load` failures.
+- **Deterministic digit-alias strategy**  
+  The digit-alias strategy was restructured to remove reliance on parsing order, making generated aliases reproducible.
+- **Batch type-checking network**  
+  Significantly improves the generation throughput of `digen ./...`.
+- **Generation split into three stages: extract / validate / write**  
+  The write stage now skips failed packages, so one failing package no longer aborts the whole run.
+- **Cache-key logic refactored**  
+  Cache keys switched from content hashes to file size + modification time, balancing precision against performance.
+- **`digen check` exits non-zero on partial failure**  
+  When any package fails validation, `check` now returns a non-zero exit code (matching `digen` generation behavior) so CI cannot go green while some packages are invalid.
+
+## ♻️ Refactor & Optimisation (internals)
+
+- **`cmd/digenv1` marked `// Deprecated:`**  
+  Added a deprecation notice stating it is the legacy, unmaintained implementation and recommending `cmd/digen`. Read-only archive change: documentation comment only, zero logic change.
+
+## 🧪 Tests
+
+- Added test cases covering partial-failure and batch-verification scenarios.
+- Golden-file test diff output switched from string concatenation to a step-by-step builder with `range`, improving readability and maintainability.
+
 ## [v1.0.21] - 2026-08-25
 
 ## 🐛 Bug Fixes
