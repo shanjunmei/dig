@@ -52,7 +52,7 @@ Go DI tools fall into two camps:
 go get github.com/shanjunmei/dig@latest
 go install github.com/shanjunmei/dig/cmd/digen@latest
 ```
-Requires Go 1.25+.
+Requires Go 1.22+.
 
 Build with [Mage](https://magefile.org) (optional, auto-injects version info):
 ```bash
@@ -355,7 +355,7 @@ All flags (`-out`, `-unused`, `-debug`, `-alias`, `-inline`, `-typecheck`, `-cac
 |---------|-----|-------------|---------|
 | Maintenance status | ✅ active | ⚠️ **archived** (bug-fix only) | ✅ active |
 | Latest version | v1.0.21 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
-| Go version requirement | 1.25+ | standard | 1.21+ (for `slog` logger) |
+| Go version requirement | 1.22+ | standard | 1.21+ (for `slog` logger) |
 | Refactoring friendliness | High (static checks + source location) | Low (cryptic errors) | Medium (runtime errors) |
 
 > **Wire specifics**: `wire.Build` requires a dummy `return nil, nil` (or `panic(wire.Build(...))`); `wire.Value` forbids function calls and channel receives (not just constants, but close); `wire.NewSet` composition is flattened during analysis (no scoping / visibility barriers); the project is **archived** as of v0.7.0 — upstream no longer accepts new features, though bug fixes are still accepted; generics are not supported (must write a concrete provider for each instantiation).

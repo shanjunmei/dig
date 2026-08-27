@@ -193,7 +193,9 @@ func escapeMermaid(s string) string {
 // runExplain prints how a type/provider is resolved.
 func runExplain(f cliFlags, remaining []string) error {
 	if len(remaining) == 0 || strings.TrimSpace(remaining[0]) == "" {
-		return fmt.Errorf("explain requires a type or provider name\n  💡 Usage: digen explain <type-or-provider> [packages...]\n  Example: digen explain DB ./...")
+		fmt.Fprintln(os.Stderr, "💡 Usage: digen explain <type-or-provider> [packages...]")
+		fmt.Fprintln(os.Stderr, "   Example: digen explain DB ./...")
+		return errors.New("explain requires a type or provider name")
 	}
 	query := remaining[0]
 	paths := remaining[1:]
@@ -217,7 +219,8 @@ func runExplain(f cliFlags, remaining []string) error {
 		all = append(all, nodes...)
 	}
 	if len(all) == 0 {
-		return fmt.Errorf("no packages with dig.Build found\n  💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error")
+		fmt.Fprintln(os.Stderr, "💡 Fix: create a function with dig.Build(...) that returns func(context.Context) error")
+		return errors.New("no packages with dig.Build found")
 	}
 
 	var roots []model.Node

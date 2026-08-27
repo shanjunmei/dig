@@ -29,6 +29,8 @@
   缓存键由 content hash 改为「文件大小 + 修改时间」，在精度与性能之间取得平衡。
 - **`digen check` 部分失败改为非零退出**  
   当存在校验失败的包时，`check` 子命令现在返回非零退出码（与 `digen` 生成行为一致），避免 CI 在部分包无效时误判通过。
+- **最低 Go 版本由 1.25 下调至 1.22**  
+  将 `go.mod` 的 `go` 指令由 `1.25.0` 降为 `1.22.0`，`golang.org/x/tools` 由 `v0.46.0` 降到 `v0.30.0`（go 1.22.0 约束下的最高版本），联动 `golang.org/x/mod v0.23.0`、`golang.org/x/sync v0.11.0`。源码中使用的 range-over-func（`internal/extractor/types.go`、`contract.go`）与测试中的 `strings.SplitSeq` 已改写为 1.22 兼容的索引循环，语义等价、能力无丢失。
 
 ## ♻️ 重构与优化（内部）
 

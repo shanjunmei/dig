@@ -29,6 +29,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
   Cache keys switched from content hashes to file size + modification time, balancing precision against performance.
 - **`digen check` exits non-zero on partial failure**  
   When any package fails validation, `check` now returns a non-zero exit code (matching `digen` generation behavior) so CI cannot go green while some packages are invalid.
+- **Minimum Go version lowered from 1.25 to 1.22**  
+  The `go` directive in `go.mod` was lowered from `1.25.0` to `1.22.0`, and `golang.org/x/tools` from `v0.46.0` to `v0.30.0` (the highest x/tools release still on the go 1.22.0 floor), pulling `golang.org/x/mod v0.23.0` and `golang.org/x/sync v0.11.0`. Source uses of range-over-func (`internal/extractor/types.go`, `contract.go`) and `strings.SplitSeq` (tests) were rewritten into 1.22-compatible index loops with equivalent semantics and no loss of capability.
 
 ## ♻️ Refactor & Optimisation (internals)
 

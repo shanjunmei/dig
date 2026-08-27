@@ -6,7 +6,7 @@
 ## 1. Basic Info
 
 - Positioning: compile-time IoC container based on code generation, zero runtime reflection, zero runtime dependency on dig after generation
-- Go version: 1.25+
+- Go version: 1.22+
 - Default generated filename: `dig_gen.go` (not `di_gen.go`)
 - License: MIT
 
