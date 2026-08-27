@@ -11,7 +11,7 @@ A complete standardized production coding convention skill for business microser
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Current version**: v1.0.21 — full release notes in [CHANGELOG_en.md](./CHANGELOG_en.md).
+> **Current version**: v1.0.22 — full release notes in [CHANGELOG_en.md](./CHANGELOG_en.md).
 
 ---
 
@@ -354,8 +354,8 @@ All flags (`-out`, `-unused`, `-debug`, `-alias`, `-inline`, `-typecheck`, `-cac
 | Feature | dig | Google Wire | Uber Fx |
 |---------|-----|-------------|---------|
 | Maintenance status | ✅ active | ⚠️ **archived** (bug-fix only) | ✅ active |
-| Latest version | v1.0.21 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
-| Go version requirement | 1.22+ | standard | 1.21+ (for `slog` logger) |
+| Latest version | v1.0.22 | v0.7.0 (Aug 2025, beta) | v1.24.0 (May 2025) |
+| Go version requirement | 1.22+ | standard | 1.22+ |
 | Refactoring friendliness | High (static checks + source location) | Low (cryptic errors) | Medium (runtime errors) |
 
 > **Wire specifics**: `wire.Build` requires a dummy `return nil, nil` (or `panic(wire.Build(...))`); `wire.Value` forbids function calls and channel receives (not just constants, but close); `wire.NewSet` composition is flattened during analysis (no scoping / visibility barriers); the project is **archived** as of v0.7.0 — upstream no longer accepts new features, though bug fixes are still accepted; generics are not supported (must write a concrete provider for each instantiation).

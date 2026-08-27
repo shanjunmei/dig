@@ -12,7 +12,7 @@ dig 的 AI 助手提示词统一存放在 [`prompts`](./prompts) 目录，入口
 [![Go Reference](https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg)](https://pkg.go.dev/github.com/shanjunmei/dig)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **当前版本**：v1.0.21 — 完整发版说明见 [CHANGELOG.md](./CHANGELOG.md)。
+> **当前版本**：v1.0.22 — 完整发版说明见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ---
 
@@ -355,8 +355,8 @@ provider（通过 `dig.Provide` / `dig.Supply` / `dig.Module` 注册的构造函
 | 特性 | dig | Google Wire | Uber Fx |
 |------|-----|-------------|---------|
 | 维护状态 | ✅ 活跃 | ⚠️ **已归档**（仅修 bug） | ✅ 活跃 |
-| 最新版本 | v1.0.21 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
-| Go 版本要求 | 1.22+ | 标准 | 1.21+（用于 `slog` logger） |
+| 最新版本 | v1.0.22 | v0.7.0（2025 年 8 月，beta） | v1.24.0（2025 年 5 月） |
+| Go 版本要求 | 1.22+ | 标准 | 1.22+ |
 | 重构友好度 | 高（静态检查 + 源码位置） | 低（错误晦涩） | 中（运行时错误） |
 
 > **Wire 特别说明**：`wire.Build` 需要写一个哑 `return nil, nil`（或 `panic(wire.Build(...))`）；`wire.Value` 禁止函数调用与 channel 接收（不仅是常量，但接近）；`wire.NewSet` 在分析时被扁平化（无作用域 / 可见性边界）；项目自 v0.7.0 起**已归档**——上游不再接受新功能，但仍接受 bug 修复；不支持泛型（必须为每个实例化编写具体提供者）。

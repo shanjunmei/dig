@@ -4,7 +4,7 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [v1.0.22] - 2026-08-27
 
 ## 🐛 修复
 
@@ -36,6 +36,8 @@
 
 - **`cmd/digenv1` 标记 `// Deprecated:`**  
   在文件头新增弃用注释，明确其为历史实现、不再维护，推荐改用 `cmd/digen`（能力更全且修复了众多 v1 缺陷）。属只读归档，仅新增文档注释，零逻辑改动。
+- **`digen explain` 错误字符串规范化**  
+  错误值不再内嵌多行用法提示（消除 staticcheck ST1005），用法/修复提示改为输出到 stderr。
 
 ## 🧪 测试
 

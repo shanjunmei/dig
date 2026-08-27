@@ -8,6 +8,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this p
 
 ---
 
+## [v1.0.22] - 2026-08-27
+
+### 🔧 Changed
+
+- **Minimum Go version lowered to 1.22** — `go.mod` now requires Go 1.22.0 (down from 1.25.0) and `golang.org/x/tools` is pinned to v0.30.0. digen now builds and runs on a much wider range of Go toolchains with no loss of capability.
+
+### 🐛 Bug Fixes
+
+- **String-constant double-escaping fixed** — closures capturing a string constant are no longer double-quoted; the generated literal is now correct. Added regression example `example/closure_capture_string_const`.
+- **Unused-provider detection fixed** — unused providers that return an error are now handled correctly.
+
+### ⚡ Improved
+
+- **Batch generation is much faster** — `digen ./...` now uses a batch type-checking pass.
+- **Resilient generation** — the pipeline is split into extract / validate / write; a failing package is skipped at write time instead of aborting the whole run.
+- **Deterministic digit aliases** — alias generation no longer depends on parsing order.
+- **Better diagnostics** — `packages.Load` failures and `digen init` now print actionable `💡 Fix:` guidance; `digen check` exits non-zero when any package is invalid.
+
+### ♻️ Internals
+
+- Cache keys switched from content hashes to file size + mtime; `cmd/digenv1` marked `// Deprecated:`; `digen explain` error strings normalized (clears staticcheck ST1005).
+
+---
+
 ## [v1.0.21] - 2026-08-25
 
 ### 🐛 Bug Fixes

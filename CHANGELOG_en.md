@@ -4,7 +4,7 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v1.0.22] - 2026-08-27
 
 ## 🐛 Bug Fixes
 
@@ -36,6 +36,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 
 - **`cmd/digenv1` marked `// Deprecated:`**  
   Added a deprecation notice stating it is the legacy, unmaintained implementation and recommending `cmd/digen`. Read-only archive change: documentation comment only, zero logic change.
+- **`digen explain` error strings normalized**  
+  Error values no longer embed multi-line usage text (clears staticcheck ST1005); usage/fix hints now go to stderr.
 
 ## 🧪 Tests
 
