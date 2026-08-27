@@ -173,14 +173,14 @@ func (e *Extractor) collectUsedPkgsFromType(typ types.Type) []string {
 			}
 			// 实例化级：遍历类型实参（Cache[*common.Config] → 遍历 *common.Config）
 			if args := t.TypeArgs(); args != nil {
-				for t := range args.Types() {
-					walk(t)
+				for i := 0; i < args.Len(); i++ {
+					walk(args.At(i))
 				}
 			}
 			// 声明级：遍历类型参数约束（泛型定义本身的约束里可能引用跨包）
 			if params := t.TypeParams(); params != nil {
-				for tparam := range params.TypeParams() {
-					walk(tparam)
+				for i := 0; i < params.Len(); i++ {
+					walk(params.At(i))
 				}
 			}
 			// 注意：不调用 walk(t.Underlying())，因为自引用类型（如 type Node struct{ Next *Node }）
@@ -198,25 +198,25 @@ func (e *Extractor) collectUsedPkgsFromType(typ types.Type) []string {
 			if recv := t.Recv(); recv != nil {
 				walk(recv.Type())
 			}
-			for v := range t.Params().Variables() {
-				walk(v.Type())
+			for i := 0; i < t.Params().Len(); i++ {
+				walk(t.Params().At(i).Type())
 			}
-			for v := range t.Results().Variables() {
-				walk(v.Type())
+			for i := 0; i < t.Results().Len(); i++ {
+				walk(t.Results().At(i).Type())
 			}
 			// 泛型方法/函数的类型参数约束里可能引用跨包类型
 			if tparams := t.TypeParams(); tparams != nil {
-				for tparam := range tparams.TypeParams() {
-					walk(tparam.Constraint())
+				for i := 0; i < tparams.Len(); i++ {
+					walk(tparams.At(i).Constraint())
 				}
 			}
 		case *types.Struct:
-			for field := range t.Fields() {
-				walk(field.Type())
+			for i := 0; i < t.NumFields(); i++ {
+				walk(t.Field(i).Type())
 			}
 		case *types.Interface:
-			for method := range t.Methods() {
-				walk(method.Type())
+			for i := 0; i < t.NumMethods(); i++ {
+				walk(t.Method(i).Type())
 			}
 		}
 	}

@@ -131,7 +131,7 @@ func parseGenFlags(goldenPath string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	for line := range strings.SplitSeq(string(data), "\n") {
+	for _, line := range strings.Split(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "//go:generate") {
 			continue
@@ -176,7 +176,7 @@ func rewriteOut(flags []string, out string) []string {
 // compared.
 func normalize(src string) string {
 	var kept []string
-	for line := range strings.SplitSeq(src, "\n") {
+	for _, line := range strings.Split(src, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "//go:generate") {
 			continue
 		}
