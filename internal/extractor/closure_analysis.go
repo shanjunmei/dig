@@ -492,16 +492,23 @@ func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident, typeInf
 				if funIdent == nil {
 					return nil, ""
 				}
-				if obj := typeInfo.ObjectOf(funIdent); obj != nil {
-					if _, ok := obj.(*types.TypeName); ok {
-						op = model.OpConvert
-						// 目标类型必须是转换目标 T（Fun 的类型），而非返回类型：
-						// func(p A) I { return B(p) } 中返回类型是接口 I、转换目标是 B，
-						// 若用 I 作目标会生成 I(dvM)（A 不实现 I 时编译失败）；
-						// 用 Fun 的类型 B 生成 B(dvM)，再由 Go 隐式转换到 I。
-						targetTypeExpr = e.Fun
-					}
+				obj := typeInfo.ObjectOf(funIdent)
+				if obj == nil {
+					// Fun 未解析到对象：无法证明是类型转换，保守不折叠。
+					return nil, ""
 				}
+				if _, ok := obj.(*types.TypeName); !ok {
+					// Fun 是函数/方法等其他对象（如 NewFoo(x)）：显式返回，
+					// op 保持未赋值。不依赖函数末尾的通用 op=="" 检查，
+					// 让本分支自洽（防御未来重构移动或删除该检查）。
+					return nil, ""
+				}
+				op = model.OpConvert
+				// 目标类型必须是转换目标 T（Fun 的类型），而非返回类型：
+				// func(p A) I { return B(p) } 中返回类型是接口 I、转换目标是 B，
+				// 若用 I 作目标会生成 I(dvM)（A 不实现 I 时编译失败）；
+				// 用 Fun 的类型 B 生成 B(dvM)，再由 Go 隐式转换到 I。
+				targetTypeExpr = e.Fun
 			}
 		}
 	case *ast.TypeAssertExpr:
