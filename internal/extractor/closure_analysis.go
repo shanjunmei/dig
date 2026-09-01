@@ -483,25 +483,24 @@ func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident, typeInf
 				// Only treat `T(param)` as a conversion when Fun resolves to a TYPE.
 				// A function call like `return NewFoo(param)` has Fun resolving to a
 				// *types.Func and is NOT an identity conversion — collapsing it would
-				// emit `Foo(dvN)` and break compilation. (TypeInfo may be nil in some
-				// unit-test call paths; fall back to the previous lenient behavior.)
-				if typeInfo != nil {
-					var funIdent *ast.Ident
-					switch f := e.Fun.(type) {
-					case *ast.Ident:
-						funIdent = f
-					case *ast.SelectorExpr:
-						funIdent = f.Sel
+				// emit `Foo(dvN)` and break compilation. When TypeInfo is unavailable
+				// we conservatively do NOT collapse (safer than guessing).
+				if typeInfo == nil {
+					return nil, ""
+				}
+				funIdent := identityFunIdent(e.Fun)
+				if funIdent == nil {
+					return nil, ""
+				}
+				if obj := typeInfo.ObjectOf(funIdent); obj != nil {
+					if _, ok := obj.(*types.TypeName); ok {
+						op = model.OpConvert
+						// 目标类型必须是转换目标 T（Fun 的类型），而非返回类型：
+						// func(p A) I { return B(p) } 中返回类型是接口 I、转换目标是 B，
+						// 若用 I 作目标会生成 I(dvM)（A 不实现 I 时编译失败）；
+						// 用 Fun 的类型 B 生成 B(dvM)，再由 Go 隐式转换到 I。
+						targetTypeExpr = e.Fun
 					}
-					if funIdent != nil {
-						if obj := typeInfo.ObjectOf(funIdent); obj != nil {
-							if _, ok := obj.(*types.TypeName); ok {
-								op = model.OpConvert
-							}
-						}
-					}
-				} else {
-					op = model.OpConvert
 				}
 			}
 		}
@@ -526,6 +525,26 @@ func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident, typeInf
 
 	// 8. 匹配成功，返回类型表达式和操作类型
 	return targetTypeExpr, op
+}
+
+// identityFunIdent extracts the terminal *ast.Ident of a conversion/call target,
+// unwrapping parenthesized expressions ((T)(x)) and selector expressions
+// (pkg.T(x)). Returns nil when Fun is not an identifier-shaped expression
+// (e.g. generic instantiation T[int](x)), in which case we conservatively do not
+// treat the call as an identity conversion.
+func identityFunIdent(fun ast.Expr) *ast.Ident {
+	for {
+		switch f := fun.(type) {
+		case *ast.Ident:
+			return f
+		case *ast.SelectorExpr:
+			return f.Sel
+		case *ast.ParenExpr:
+			fun = f.X
+		default:
+			return nil
+		}
+	}
 }
 
 func (e *Extractor) checkMethodVisibilityInClosure(body *ast.BlockStmt, pkg *packages.Package) error {

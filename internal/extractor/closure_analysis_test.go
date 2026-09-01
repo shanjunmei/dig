@@ -107,3 +107,87 @@ var f1 = func(x *Other) *Alias { return NewAlias(x) }
 		t.Fatalf("qualified function call should NOT be an identity conversion, got op=%q", op)
 	}
 }
+
+// TestAnalyzeIdentityClosure_ConvertTargetUsesFunType verifies that for a
+// conversion whose result type differs from the conversion target (here the
+// declared return type is interface I, the target is concrete B), the returned
+// target expression is the Fun (B), NOT the return type (I). Emitting I(x)
+// instead of B(x) would fail to compile when the parameter type does not
+// implement I.
+func TestAnalyzeIdentityClosure_ConvertTargetUsesFunType(t *testing.T) {
+	src := `package test
+
+type A struct{}
+type B struct{}
+type I interface{ M() }
+
+func (B) M() {}
+
+var f1 = func(p A) I { return B(p) }
+`
+	_, info, lits := typeInfoForClosure(t, src)
+	if len(lits) != 1 {
+		t.Fatalf("expected 1 func literal, got %d", len(lits))
+	}
+	retExpr, op := analyzeIdentityClosure(lits[0], nil, info)
+	if retExpr == nil {
+		t.Fatalf("type-conversion closure should be an identity conversion, got nil")
+	}
+	if op != model.OpConvert {
+		t.Fatalf("expected OpConvert, got %q", op)
+	}
+	ident, ok := retExpr.(*ast.Ident)
+	if !ok || ident.Name != "B" {
+		t.Fatalf("expected target expression to be Fun (B), got %T %v", retExpr, retExpr)
+	}
+}
+
+// TestAnalyzeIdentityClosure_ParenConvert verifies parenthesized conversions
+// (T)(x) are still recognized as conversions.
+func TestAnalyzeIdentityClosure_ParenConvert(t *testing.T) {
+	src := `package test
+
+type A struct{}
+type B struct{}
+
+var f1 = func(p A) B { return (B)(p) }
+`
+	_, info, lits := typeInfoForClosure(t, src)
+	if len(lits) != 1 {
+		t.Fatalf("expected 1 func literal, got %d", len(lits))
+	}
+	retExpr, op := analyzeIdentityClosure(lits[0], nil, info)
+	if retExpr == nil {
+		t.Fatalf("parenthesized conversion should be an identity conversion, got nil")
+	}
+	if op != model.OpConvert {
+		t.Fatalf("expected OpConvert, got %q", op)
+	}
+}
+
+// TestAnalyzeIdentityClosure_NilTypeInfoConservative verifies that when TypesInfo
+// is unavailable the analyzer does NOT collapse a function-call closure (the
+// previous behavior guessed OpConvert and produced broken conversions).
+func TestAnalyzeIdentityClosure_NilTypeInfoConservative(t *testing.T) {
+	src := `package test
+
+type Store struct{}
+type LookupTool struct{}
+
+func NewLookupTool(s *Store) *LookupTool { return &LookupTool{} }
+
+var f1 = func(s *Store) *LookupTool { return NewLookupTool(s) }
+`
+	_, info, lits := typeInfoForClosure(t, src)
+	if len(lits) != 1 {
+		t.Fatalf("expected 1 func literal, got %d", len(lits))
+	}
+	// With real type info the function call is correctly NOT collapsed.
+	if retExpr, op := analyzeIdentityClosure(lits[0], nil, info); retExpr != nil {
+		t.Fatalf("function-call closure should NOT be an identity conversion, got op=%q", op)
+	}
+	// With nil type info the analyzer must be conservative and NOT collapse either.
+	if retExpr, op := analyzeIdentityClosure(lits[0], nil, nil); retExpr != nil {
+		t.Fatalf("nil-TypeInfo must not collapse function-call closure, got op=%q", op)
+	}
+}
