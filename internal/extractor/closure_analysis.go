@@ -253,7 +253,7 @@ func (e *Extractor) handleFuncLit(funcLit *ast.FuncLit, curPkg *packages.Package
 	// Identity closures are literal-equivalent type conversions (T(p), &p, *p,
 	// U(p)) with zero runtime semantic change, so collapsing them unconditionally
 	// is safe. Takes priority over regular IIFE inlining when both apply.
-	if retTypeExpr, opType := analyzeIdentityClosure(funcLit, freeVars); retTypeExpr != nil {
+	if retTypeExpr, opType := analyzeIdentityClosure(funcLit, freeVars, curPkg.TypesInfo); retTypeExpr != nil {
 		typeObj := curPkg.TypesInfo.TypeOf(retTypeExpr)
 		// 先确保返回类型所在包的别名已生成（buildClosureDef 中的 EnsureAlias 此时未执行），
 		// 否则 replacePkgPathWithAlias 找不到匹配项，会把包路径原样保留，
@@ -417,7 +417,7 @@ func analyzeClosureInlinability(funcLit *ast.FuncLit, freeVars []*ast.Ident, isC
 	return true
 }
 
-func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident) (ast.Expr, model.OpKind) {
+func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident, typeInfo *types.Info) (ast.Expr, model.OpKind) {
 	// 1. 参数检查：必须恰好一个参数
 	if funcLit.Type.Params == nil || len(funcLit.Type.Params.List) != 1 {
 		return nil, ""
@@ -480,7 +480,29 @@ func analyzeIdentityClosure(funcLit *ast.FuncLit, freeVars []*ast.Ident) (ast.Ex
 	case *ast.CallExpr:
 		if len(e.Args) == 1 {
 			if ident, ok := e.Args[0].(*ast.Ident); ok && ident.Name == paramName {
-				op = model.OpConvert
+				// Only treat `T(param)` as a conversion when Fun resolves to a TYPE.
+				// A function call like `return NewFoo(param)` has Fun resolving to a
+				// *types.Func and is NOT an identity conversion — collapsing it would
+				// emit `Foo(dvN)` and break compilation. (TypeInfo may be nil in some
+				// unit-test call paths; fall back to the previous lenient behavior.)
+				if typeInfo != nil {
+					var funIdent *ast.Ident
+					switch f := e.Fun.(type) {
+					case *ast.Ident:
+						funIdent = f
+					case *ast.SelectorExpr:
+						funIdent = f.Sel
+					}
+					if funIdent != nil {
+						if obj := typeInfo.ObjectOf(funIdent); obj != nil {
+							if _, ok := obj.(*types.TypeName); ok {
+								op = model.OpConvert
+							}
+						}
+					}
+				} else {
+					op = model.OpConvert
+				}
 			}
 		}
 	case *ast.TypeAssertExpr:
