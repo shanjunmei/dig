@@ -8,6 +8,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this p
 
 ---
 
+## [v1.0.23] - 2026-09-04
+
+### 🐛 Bug Fixes
+
+- **Identity closures no longer misread as type conversions** — closures like `T(p)`, `&p`, `*p` are now always recognized as identity conversions and collapsed correctly (e.g. interface/pointer wrapping).
+
+### ♻️ Internals
+
+- Closure-analysis code simplified and hardened with defensive checks; no runtime behavior change.
+
 ## [v1.0.22] - 2026-08-27
 
 ### 🔧 Changed

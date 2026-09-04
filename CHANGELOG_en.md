@@ -4,6 +4,18 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v1.0.23] - 2026-09-04
+
+## 🐛 Bug Fixes
+
+- **Identity-closure recognition fixed**
+  Fixed identity closures (literal-equivalent direct conversions such as `T(p)`, `&p`, `*p`) being misidentified as "type conversions". Rewrote the identity-conversion analysis so high-frequency cases like interface/pointer wrapping are always correctly recognized and collapsed.
+
+## ♻️ Refactor & Optimisation (internals)
+
+- **Closure analysis simplified with defensive checks**
+  Streamlined the closure-analysis implementation in `internal/extractor` and added defensive checks, reducing maintenance burden and improving robustness; no change in runtime behavior.
+
 ## [v1.0.22] - 2026-08-27
 
 ## 🐛 Bug Fixes
