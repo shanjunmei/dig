@@ -107,6 +107,34 @@ func (m *AliasManager) LoadImportAliases() {
 	}
 	var infos []importInfo
 
+	// The file digen generates always lives in the MAIN package, so its import
+	// block must use the names the main package itself uses for each package —
+	// never a name chosen by some unrelated dependency. A dependency's explicit
+	// alias (e.g. `gotime "time"`) must not leak into the generated file, or the
+	// verbatim package selectors copied from the main package's source (which use
+	// the main package's names) would desync from the aliased import and fail to
+	// type-check (this was the root cause of the digen-generated `time`/`gotime`
+	// "undefined: time / imported as gotime and not used" bug).
+	//
+	// Therefore the main package's own import is authoritative for a given path:
+	// if the main package imports a package at all (with or without an explicit
+	// alias), any dependency alias for that path is ignored. Only when the main
+	// package does NOT import the path do we fall back to a dependency's explicit
+	// alias (still needed for the rare cross-package closure that pulls in a
+	// package the main package itself never names).
+	mainImports := make(map[string]bool)
+	if mainPkg := m.pkgMap[m.mainPkgPath]; mainPkg != nil {
+		for _, f := range mainPkg.Syntax {
+			for _, imp := range f.Imports {
+				path := strings.Trim(imp.Path.Value, `"`)
+				if path == "" {
+					continue
+				}
+				mainImports[path] = true
+			}
+		}
+	}
+
 	// 1. 计算当前包的传递依赖闭包
 	closure := m.findTransitiveImportClosure()
 
@@ -143,6 +171,11 @@ func (m *AliasManager) LoadImportAliases() {
 		return infos[i].pkgPath < infos[j].pkgPath
 	})
 	for _, info := range infos {
+		// The main package's own import wins for this path; do not let a
+		// dependency alias leak in and desync the generated import block.
+		if mainImports[info.pkgPath] {
+			continue
+		}
 		if _, exists := m.importAliasMap[info.pkgPath]; !exists {
 			m.importAliasMap[info.pkgPath] = info.alias
 		}
@@ -209,4 +242,29 @@ func (m *AliasManager) GetPkgNameMap() map[string]string {
 
 func (m *AliasManager) GetMainPkgPath() string {
 	return m.mainPkgPath
+}
+
+// ForceAlias forces the import for pkgPath to use the given local name. This is
+// required when a package is referenced verbatim inside a closure body that digen
+// inlines into the main package — for example `time.Duration` in an inlined
+// external function body. The body uses the package name exactly as it appears in
+// the *source* package (e.g. `time`, or `gotime` if that package aliased it), and
+// the generated file's import block MUST use that same local name, otherwise the
+// verbatim selector desyncs from the (possibly aliased) import and the generated
+// file fails to type-check ("undefined: time" / "imported as gotime and not used").
+//
+// Because the body is copied verbatim and is NOT rewritten to an alias, this
+// method overrides any alias previously collected by LoadImportAliases (including
+// a dependency's explicit alias that would otherwise leak in). localName is the
+// name used in the body; realName is the package's declared name and is used to
+// decide whether the import is emitted unaliased (alias == realName).
+func (m *AliasManager) ForceAlias(pkgPath, localName, realName string) {
+	if pkgPath == "" || pkgPath == m.mainPkgPath {
+		return
+	}
+	m.importAliasMap[pkgPath] = localName
+	m.pkgAliasMap[pkgPath] = localName
+	if realName != "" {
+		m.pkgNameMap[pkgPath] = realName
+	}
 }

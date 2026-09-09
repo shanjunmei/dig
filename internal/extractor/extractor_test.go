@@ -298,6 +298,135 @@ var _ = helper.Closure
 	}
 }
 
+// TestLoadImportAliasesIgnoresDependencyAliasForMainImportedPkg is a regression
+// test for the digen-generated `time`/`gotime` desync bug.
+//
+// The generated file always lives in the MAIN package, so its import block must
+// use the names the main package itself uses. A dependency that imports `time`
+// as `gotime` must NOT leak that alias into the main package's generated imports;
+// otherwise the verbatim package selectors copied from the main package's source
+// (e.g. `time.Duration`) desync from the aliased import and the generated file
+// fails to type-check ("undefined: time" + "imported as gotime and not used").
+func TestLoadImportAliasesIgnoresDependencyAliasForMainImportedPkg(t *testing.T) {
+	fset := token.NewFileSet()
+
+	mainFile, err := parser.ParseFile(fset, "main.go", `package main
+
+import "time"
+
+var _ = time.Second
+`, 0)
+	if err != nil {
+		t.Fatalf("parse main: %v", err)
+	}
+	depFile, err := parser.ParseFile(fset, "dep.go", `package dep
+
+import gotime "time"
+
+var _ = gotime.Second
+`, 0)
+	if err != nil {
+		t.Fatalf("parse dep: %v", err)
+	}
+
+	depPkg := &packages.Package{
+		PkgPath: "example.com/dep",
+		Syntax:  []*ast.File{depFile},
+		Fset:    fset,
+	}
+	mainPkg := &packages.Package{
+		PkgPath: "testmod/main",
+		Syntax:  []*ast.File{mainFile},
+		Fset:    fset,
+		Imports: map[string]*packages.Package{depPkg.PkgPath: depPkg},
+	}
+
+	pkgMap := map[string]*packages.Package{
+		mainPkg.PkgPath: mainPkg,
+		depPkg.PkgPath:  depPkg,
+	}
+
+	am := NewAliasManager("testmod/main", alias.SimpleAliasStrategy{}, pkgMap, &logger.Logger{})
+	am.LoadImportAliases()
+
+	if got, ok := am.GetImportAliasMap()["time"]; ok {
+		t.Fatalf("dependency alias leaked into main package imports: importAliasMap[\"time\"] = %q (must stay unset so the generated file imports \"time\" under its default name)", got)
+	}
+}
+
+// TestForceAliasOverridesDependencyLeakForInlinedBody is the regression test for
+// the ACTUAL root cause of the `time`/`gotime` bug.
+//
+// The bug is NOT that the main package imports `time` with a different name. It is
+// that digen INLINES a function body from an EXTERNAL package (e.g.
+// `dig.Invoke(service.Start)`, where `service.Start` references `time.Duration`) —
+// the `time.Duration` selector is copied verbatim into the generated file. The `time`
+// package is never imported by the main package itself, so the main-import guard
+// cannot help. Yet some dependency in the transitive closure imports `time` as
+// `gotime`, and that alias leaks into importAliasMap.
+//
+// The PkgName branch must lock the import name to the local name used in the body
+// (`time`), overriding the leaked `gotime`; otherwise the generated file ends up
+// with `import gotime "time"` while the body still says `time.Duration`.
+func TestForceAliasOverridesDependencyLeakForInlinedBody(t *testing.T) {
+	fset := token.NewFileSet()
+
+	// A dependency that aliases time (the leak source).
+	depFile, err := parser.ParseFile(fset, "dep.go", `package dep
+
+import gotime "time"
+
+var _ = gotime.Second
+`, 0)
+	if err != nil {
+		t.Fatalf("parse dep: %v", err)
+	}
+	depPkg := &packages.Package{
+		PkgPath: "example.com/dep",
+		Syntax:  []*ast.File{depFile},
+		Fset:    fset,
+	}
+
+	// The main package does NOT import time itself.
+	mainFile, err := parser.ParseFile(fset, "main.go", `package main
+
+import "example.com/dep"
+`, 0)
+	if err != nil {
+		t.Fatalf("parse main: %v", err)
+	}
+	mainPkg := &packages.Package{
+		PkgPath: "testmod/main",
+		Syntax:  []*ast.File{mainFile},
+		Fset:    fset,
+		Imports: map[string]*packages.Package{depPkg.PkgPath: depPkg},
+	}
+
+	pkgMap := map[string]*packages.Package{
+		mainPkg.PkgPath: mainPkg,
+		depPkg.PkgPath:  depPkg,
+	}
+
+	am := NewAliasManager("testmod/main", alias.SimpleAliasStrategy{}, pkgMap, &logger.Logger{})
+	am.LoadImportAliases()
+
+	// Precondition: without ForceAlias the leak is present (this is what produced
+	// the original "undefined: time" / "imported as gotime and not used" error).
+	if got := am.GetImportAliasMap()["time"]; got != "gotime" {
+		t.Fatalf("precondition failed: expected dependency alias leak importAliasMap[\"time\"]=%q, got %q", "gotime", got)
+	}
+
+	// The inlined external body references `time.Duration` verbatim -> ForceAlias.
+	am.ForceAlias("time", "time", "time")
+
+	if got := am.GetImportAliasMap()["time"]; got != "time" {
+		t.Fatalf("ForceAlias did not override the leaked dependency alias: importAliasMap[\"time\"]=%q, want %q", got, "time")
+	}
+	if got := am.GetPkgNameMap()["time"]; got != "time" {
+		t.Fatalf("pkgNameMap[\"time\"]=%q, want %q (needed so the import is emitted unaliased as `import \"time\"`)", got, "time")
+	}
+}
+
 func writeTestFile(t *testing.T, dir, rel, content string) {
 	t.Helper()
 	p := filepath.Join(dir, rel)

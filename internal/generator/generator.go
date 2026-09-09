@@ -492,17 +492,15 @@ func writeImports(buf *bytes.Buffer, mainPkgPath string, importAliasMap map[stri
 		if defaultName == "" {
 			defaultName = alias
 		}
-		// 用户源码显式指定了 alias，必须保留
-		if _, ok := importAliasMap[path]; ok {
-			fmt.Fprintf(buf, "%s %q\n", alias, path)
-			continue
-		}
-
+		// 别名恰等于包的真实名时去别名输出（更干净）：例如 `import "time"` 而非
+		// `time "time"`。当内联外部函数体逐字拷贝了 `time.Duration` 这类包限定选择子时，
+		// ForceAlias 会把别名锁定为真实名，这里必须去别名，否则会残留冗余的 `time "time"`。
 		if alias == defaultName {
 			fmt.Fprintf(buf, "%q\n", path)
-		} else {
-			fmt.Fprintf(buf, "%s %q\n", alias, path)
+			continue
 		}
+		// 别名与真实名不同（含用户源码显式别名），保留 `alias "path"` 形式
+		fmt.Fprintf(buf, "%s %q\n", alias, path)
 	}
 	buf.WriteString(")\n\n")
 }

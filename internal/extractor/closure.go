@@ -160,11 +160,17 @@ func (e *Extractor) collectTypeNameAndUsedPkgs(body *ast.BlockStmt, pkg *package
 			return true
 		}
 
-		// 处理包名（如 alias.ParseAliasType 中的 alias）
+		// 处理包名（如 time.Duration 中的 time）
+		// 此类包选择器在闭包体内按源码包里的导入名被逐字拷贝（不会被改写为别名），
+		// 因此生成文件的导入块必须使用完全相同的本地名，否则会出现
+		// "undefined: time" / "imported as gotime and not used" 这类脱钩错误。
+		// 用 ForceAlias 把导入名锁定为 body 里实际出现的本地名，覆盖任何
+		// LoadImportAliases 泄漏进来的第三方别名（例如某依赖的 gotime "time"）。
 		if pkgName, ok := obj.(*types.PkgName); ok {
 			pkgPath := pkgName.Imported().Path()
 			if pkgPath != "" && pkgPath != e.mainPkgPath {
 				usedPkgs[pkgPath] = true
+				e.aliasManager.ForceAlias(pkgPath, pkgName.Name(), pkgName.Imported().Name())
 			}
 			return true
 		}
