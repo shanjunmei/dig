@@ -427,6 +427,116 @@ import "example.com/dep"
 	}
 }
 
+// TestReplacePkgPathWithAliasDoesNotDoubleAlias is a regression test for the
+// `gogotime` follow-up bug.
+//
+// When the SOURCE explicitly aliases a package (e.g. `import gotime "time"` and a
+// closure body written as `gotime.Duration`), the alias for path "time" is the
+// string "gotime", which itself CONTAINS the path "time". A naive
+// ReplaceAll("time.", "gotime.") therefore rewrites the already-aliased text once
+// more, producing `gogotime.Duration` in the generated file while the import block
+// still says `import gotime "time"` — i.e. "undefined: gogotime" +
+// `"time" imported as gotime and not used`.
+//
+// The replacement must be identifier-boundary aware so already-qualified text is
+// left alone, while plain qualifiers are still rewritten.
+func TestReplacePkgPathWithAliasDoesNotDoubleAlias(t *testing.T) {
+	am := NewAliasManager("testmod/main", alias.SimpleAliasStrategy{}, map[string]*packages.Package{}, &logger.Logger{})
+	// The source package wrote `gotime.Duration` via `import gotime "time"`.
+	am.ForceAlias("time", "gotime", "time")
+	e := &Extractor{aliasManager: am}
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "already-aliased body must stay untouched",
+			in:   "gotime.Duration(cfg.Sec)*gotime.Second",
+			want: "gotime.Duration(cfg.Sec)*gotime.Second",
+		},
+		{
+			name: "plain qualifier still rewritten",
+			in:   "time.Duration(1)",
+			want: "gotime.Duration(1)",
+		},
+		{
+			name: "pointer/slice prefix handled",
+			in:   "*time.Duration",
+			want: "*gotime.Duration",
+		},
+		{
+			name: "longer identifier not truncated",
+			in:   "mytimeUtil.Foo",
+			want: "mytimeUtil.Foo",
+		},
+	}
+	for _, c := range cases {
+		if got := e.replacePkgPathWithAlias(c.in); got != c.want {
+			t.Fatalf("%s:\n got  = %q\n want = %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestReplacePkgPathWithAliasUnicodeBoundary is a regression test for the
+// "unsafe byte access for multi-byte UTF-8 characters" issue.
+//
+// The boundary check inspects s[idx-1], i.e. the single BYTE preceding the
+// qualifier. Go identifiers may contain Unicode letters (e.g. 时, Ω, café), and
+// every byte of a multi-byte UTF-8 rune is >= 0x80, so a Unicode letter never
+// matches the ASCII identifier ranges. Consequence: `文time.Duration` (where
+// `文time` is ONE identifier) is wrongly treated as a package qualifier and
+// rewritten — corrupting string literals / comments in inlined bodies.
+//
+// The check must decode the preceding RUNE and treat Unicode letters/digits and
+// '_' as identifier characters, while still allowing replacement after Unicode
+// punctuation (e.g. （ ， “) which is not part of any identifier.
+func TestReplacePkgPathWithAliasUnicodeBoundary(t *testing.T) {
+	am := NewAliasManager("testmod/main", alias.SimpleAliasStrategy{}, map[string]*packages.Package{}, &logger.Logger{})
+	am.ForceAlias("time", "gotime", "time")
+	e := &Extractor{aliasManager: am}
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			// `用时time` is a single identifier (时 is a Unicode letter).
+			name: "identifier ending with a CJK letter must not be rewritten",
+			in:   "用时time.Duration(1)",
+			want: "用时time.Duration(1)",
+		},
+		{
+			name: "string literal after CJK letter must not be corrupted",
+			in:   `_ = "耗时time.Second"`,
+			want: `_ = "耗时time.Second"`,
+		},
+		{
+			name: "greek letter identifier must not be rewritten",
+			in:   "Ωtime.Duration(1)",
+			want: "Ωtime.Duration(1)",
+		},
+		{
+			// （ and ） are punctuation, not identifier characters.
+			name: "CJK punctuation before qualifier still rewritten",
+			in:   "（time.Duration）",
+			want: "（gotime.Duration）",
+		},
+		{
+			name: "start of input still rewritten",
+			in:   "time.Second",
+			want: "gotime.Second",
+		},
+	}
+	for _, c := range cases {
+		if got := e.replacePkgPathWithAlias(c.in); got != c.want {
+			t.Fatalf("%s:\n got  = %q\n want = %q", c.name, got, c.want)
+		}
+	}
+}
+
 func writeTestFile(t *testing.T, dir, rel, content string) {
 	t.Helper()
 	p := filepath.Join(dir, rel)

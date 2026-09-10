@@ -11,6 +11,8 @@ import (
 	"golang.org/x/tools/go/packages"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 func newExtractedArg(name string, typ types.Type, typeStr string, isConst bool, constVal string, isCtx bool) ExtractedArg {
@@ -424,12 +426,72 @@ func (e *Extractor) replacePkgPathWithAlias(typeStr string) string {
 		return len(pairs[i].path) > len(pairs[j].path)
 	})
 
-	// 单次遍历（无需循环，因为替换后不会产生新的包路径）
+	// 注意：替换必须「标识符边界敏感」，且幂等（不重扫新插入的文本）。
+	// 若沿用朴素 ReplaceAll("<path>.", "<alias>.")，当别名本身包含包路径时
+	// （例如源码写 `import gotime "time"` 且闭包体里已是 gotime.Duration），
+	// "gotime." 内部的 "time." 会被再替换一次，得到错误的 "gogotime."，
+	// 进而让生成文件出现 undefined: gogotime。
 	for _, p := range pairs {
-		typeStr = strings.ReplaceAll(typeStr, p.path+".", p.alias+".")
+		if p.path == p.alias {
+			continue
+		}
+		typeStr = replaceQualifierOnce(typeStr, p.path, p.alias)
 	}
 
 	return prefix.String() + typeStr
+}
+
+// replaceQualifierOnce 把形如 "<path>." 的包限定符替换为 "<alias>."，但仅当该
+// 出现位置的前一个字符**不是**标识符字符（字母/数字/下划线）时才替换。
+//
+// 这保证两件事：
+//  1. 幂等——已写成别名的文本不会被再替换一次（如 gotime.Duration 不会被改成
+//     gogotime.Duration，因为其中的 "time." 前置字符是 'o'）；
+//  2. 精确——不会把更长标识符中的子串当包限定符（如 mytimeUtil 中的 time.）。
+//
+// 前置字符必须按「符文」而非「字节」判断：Go 标识符允许 Unicode 字母/数字
+// （如 `时` `Ω`），而多字节 UTF-8 的每个字节都 >= 0x80，用字节比对会把它们
+// 一律当成非标识符字符，从而错误改写 `用时time.Duration` 这类标识符
+// （`用时time` 是同一个标识符）并污染字符串字面量与注释。
+func replaceQualifierOnce(s, path, alias string) string {
+	needle := path + "."
+	if !strings.Contains(s, needle) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	from := 0
+	for {
+		idx := strings.Index(s[from:], needle)
+		if idx < 0 {
+			break
+		}
+		idx += from
+		end := idx + len(needle)
+		if idx > 0 {
+			prev, _ := utf8.DecodeLastRuneInString(s[:idx])
+			if isIdentRune(prev) {
+				// 属于更长标识符的一部分，原样保留
+				b.WriteString(s[from:end])
+				from = end
+				continue
+			}
+		}
+		b.WriteString(s[from:idx])
+		b.WriteString(alias)
+		b.WriteString(".")
+		from = end
+	}
+	b.WriteString(s[from:])
+	return b.String()
+}
+
+// isIdentRune 判断 r 是否为可出现在 Go 标识符（非首字符位置）中的字符，依据
+// Go 规范：letter = unicode_letter | "_" ；unicode_digit = 类别 Nd 的 Unicode 字符。
+//
+// 非法 UTF-8 时 DecodeLastRuneInString 返回 utf8.RuneError，此处判为非标识符字符。
+func isIdentRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 func (e *Extractor) typePkg(typ types.Type) *types.Package {
