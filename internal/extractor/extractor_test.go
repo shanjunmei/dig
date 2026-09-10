@@ -354,6 +354,64 @@ var _ = gotime.Second
 	}
 }
 
+// TestLoadImportAliasesKeepsMainPackageOwnAlias is the regression test for the
+// golden regressions in example/context_alias and example/shadow_err.
+//
+// "The main package's import wins" must mean the main package's own EXPLICIT
+// alias is authoritative — NOT that every path the main package imports is
+// skipped wholesale. The previous implementation did the latter: it skipped any
+// path present in mainImports, which threw away the main package's own
+// `import ctx "context"` and emitted a bare `import "context"` while the closure
+// body still said `ctx.Context` — the very desync this guard was meant to
+// prevent.
+func TestLoadImportAliasesKeepsMainPackageOwnAlias(t *testing.T) {
+	fset := token.NewFileSet()
+
+	mainFile, err := parser.ParseFile(fset, "main.go", `package main
+
+import ctx "context"
+
+var _ = ctx.Background
+`, 0)
+	if err != nil {
+		t.Fatalf("parse main: %v", err)
+	}
+	depFile, err := parser.ParseFile(fset, "dep.go", `package dep
+
+import c "context"
+
+var _ = c.Background
+`, 0)
+	if err != nil {
+		t.Fatalf("parse dep: %v", err)
+	}
+
+	depPkg := &packages.Package{
+		PkgPath: "example.com/dep",
+		Syntax:  []*ast.File{depFile},
+		Fset:    fset,
+	}
+	mainPkg := &packages.Package{
+		PkgPath: "testmod/main",
+		Syntax:  []*ast.File{mainFile},
+		Fset:    fset,
+		Imports: map[string]*packages.Package{depPkg.PkgPath: depPkg},
+	}
+
+	pkgMap := map[string]*packages.Package{
+		mainPkg.PkgPath: mainPkg,
+		depPkg.PkgPath:  depPkg,
+	}
+
+	am := NewAliasManager("testmod/main", alias.SimpleAliasStrategy{}, pkgMap, &logger.Logger{})
+	am.LoadImportAliases()
+
+	// The main package's own alias must win over the dependency's.
+	if got := am.GetImportAliasMap()["context"]; got != "ctx" {
+		t.Fatalf("main package's own alias lost: importAliasMap[\"context\"] = %q, want %q", got, "ctx")
+	}
+}
+
 // TestForceAliasOverridesDependencyLeakForInlinedBody is the regression test for
 // the ACTUAL root cause of the `time`/`gotime` bug.
 //

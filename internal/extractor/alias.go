@@ -104,6 +104,7 @@ func (m *AliasManager) LoadImportAliases() {
 		filePath string
 		pkgPath  string
 		alias    string
+		fromMain bool
 	}
 	var infos []importInfo
 
@@ -156,6 +157,7 @@ func (m *AliasManager) LoadImportAliases() {
 							filePath: filePath,
 							pkgPath:  path,
 							alias:    alias,
+							fromMain: pkgPath == m.mainPkgPath,
 						})
 					}
 				}
@@ -170,10 +172,25 @@ func (m *AliasManager) LoadImportAliases() {
 		}
 		return infos[i].pkgPath < infos[j].pkgPath
 	})
+	// 两趟落库，区分「主包自己的别名」与「依赖的别名」：
+	//
+	// 第一趟只处理主包自己的显式别名，它们是权威值（生成文件就在主包里，
+	// 必须使用主包源码里的本地名，例如 `import ctx "context"` 必须是 ctx）。
+	// 第二趟才处理依赖的别名，且仅当主包根本没有导入该路径时才可以兜底；
+	// 主包导入过的路径一律不让依赖别名污染（否则逐字拷贝的包选择器会与
+	// 导入块脱钩，即 time/gotime 那个 bug）。
+	//
+	// 注意：不能用 "主包导入过就 continue" 一把筛掉 —— 那样会把主包自己的
+	// 显式别名也一起丢掉，生成 `import "context"` 而闭包体写 `ctx.Context`，
+	// 反而制造脱钩（example/context_alias 与 shadow_err 的 golden 回归即由此而来）。
 	for _, info := range infos {
-		// The main package's own import wins for this path; do not let a
-		// dependency alias leak in and desync the generated import block.
-		if mainImports[info.pkgPath] {
+		if !info.fromMain {
+			continue
+		}
+		m.importAliasMap[info.pkgPath] = info.alias
+	}
+	for _, info := range infos {
+		if info.fromMain || mainImports[info.pkgPath] {
 			continue
 		}
 		if _, exists := m.importAliasMap[info.pkgPath]; !exists {

@@ -164,54 +164,11 @@ func (e *Extractor) PackageNameMap() map[string]string {
 	return e.aliasManager.GetPkgNameMap()
 }
 
-func (e *Extractor) collectAssignDecls(assign *ast.AssignStmt, declSet map[string]bool) {
-	for _, lhs := range assign.Lhs {
-		if ident, ok := lhs.(*ast.Ident); ok && ident.Obj != nil && ident.Obj.Kind == ast.Var {
-			declSet[ident.Name] = true
-		}
-	}
-}
-
-func (e *Extractor) collectParamDecls(funcLit *ast.FuncLit, declSet map[string]bool) {
-	if funcLit.Type.Params != nil {
-		for _, field := range funcLit.Type.Params.List {
-			for _, name := range field.Names {
-				declSet[name.Name] = true
-			}
-		}
-	}
-}
-
-func (e *Extractor) collectGenDecls(decl *ast.DeclStmt, declSet map[string]bool) {
-	genDecl, ok := decl.Decl.(*ast.GenDecl)
-	if !ok {
-		return
-	}
-	for _, spec := range genDecl.Specs {
-		valSpec, ok := spec.(*ast.ValueSpec)
-		if !ok {
-			continue
-		}
-		for _, name := range valSpec.Names {
-			declSet[name.Name] = true
-		}
-	}
-}
-
-func (e *Extractor) collectDeclarations(funcLit *ast.FuncLit) map[string]bool {
-	declSet := make(map[string]bool)
-	e.collectParamDecls(funcLit, declSet)
-	ast.Inspect(funcLit.Body, func(n ast.Node) bool {
-		switch x := n.(type) {
-		case *ast.AssignStmt:
-			e.collectAssignDecls(x, declSet)
-		case *ast.DeclStmt:
-			e.collectGenDecls(x, declSet)
-		}
-		return true
-	})
-	return declSet
-}
+// 闭包内定义的符号由 collectFreeVarsFromBody 依据对象声明位置
+// （obj.Pos() 是否落在闭包字面量区间内）判定，不再依赖按名字的 declSet 白名单。
+// 旧实现（collectDeclarations / collectParamDecls / collectAssignDecls /
+// collectGenDecls）无法枚举 range 的 Key/Value 与嵌套 FuncLit 的参数，
+// 且按名字匹配会在同名遮蔽时误放行外层引用，已整体移除。
 
 func validateProvideSignature(sig *types.Signature, funcName string) error {
 	res := sig.Results()

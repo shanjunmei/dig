@@ -33,17 +33,32 @@ func (e *Extractor) extractClosureParams(funcLit *ast.FuncLit, curPkg *packages.
 	return names, typesList, typeStrs
 }
 
-func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *packages.Package, declSet map[string]bool) ([]*ast.Ident, []types.Type, []string, []bool, []string, error) {
+// collectFreeVarsFromBody 收集闭包体引用到的、但**不是在闭包内定义**的符号。
+//
+// 「定义在闭包内」的判据是对象声明位置（obj.Pos()）是否落在闭包字面量的源码
+// 区间 [funcLit.Pos(), funcLit.End()) 内，而不是按标识符名字匹配。这样一次性
+// 覆盖：闭包参数、命名返回值、range 的 Key/Value、type switch guard、嵌套
+// FuncLit 的参数与结果、以及 := 与 var 声明 —— 这些声明随闭包体一起被搬移到
+// 生成文件，在生成文件里同样可解析，因此不是自由变量。
+//
+// 按名字匹配（旧的 declSet 方案）有两个致命缺陷，这里一并消除：
+//  1. 收集不全：range 的 Key/Value 与嵌套 FuncLit 的参数无法被枚举，会被误报为
+//     "cannot capture local variable"；
+//  2. 名字碰撞：内层声明与外层变量同名时，外层的非法引用会被误放行，生成出
+//     undefined 的代码却报告生成成功。
+func (e *Extractor) collectFreeVarsFromBody(funcLit *ast.FuncLit, curPkg *packages.Package) ([]*ast.Ident, []types.Type, []string, []bool, []string, error) {
 	var freeVars []*ast.Ident
 	var freeTypes []types.Type
 	var freeTypeStrs []string
 	var isConst []bool
 	var litValues []string
-	seen := make(map[string]bool)
+	seen := make(map[types.Object]bool)
 	pkgScope := curPkg.Types.Scope()
 
+	closureLo, closureHi := funcLit.Pos(), funcLit.End()
+
 	var err error
-	ast.Inspect(body, func(n ast.Node) bool {
+	ast.Inspect(funcLit.Body, func(n ast.Node) bool {
 		ident, ok := n.(*ast.Ident)
 		if !ok {
 			return true
@@ -52,12 +67,27 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 		if obj == nil {
 			return true
 		}
-		if _, isDecl := declSet[ident.Name]; isDecl {
+		// 声明落在闭包内 → 随闭包一起搬移，不是自由变量。
+		if p := obj.Pos(); p.IsValid() && p >= closureLo && p < closureHi {
 			return true
 		}
 
 		switch o := obj.(type) {
 		case *types.Var:
+			// context must come from the runtime (the ctx passed to the function
+			// returned by dig.Build), never from a package-level variable or the
+			// container — regardless of how the symbol would otherwise be
+			// referenced. Check it before the reference-kind branches below so
+			// that a main-package context variable cannot slip through via
+			// "reference it directly".
+			//
+			// Identifiers defined inside the closure (params, locals) are already
+			// excluded by the obj.Pos() range check above, so this only fires on
+			// genuine captures.
+			if isContextType(obj.Type()) {
+				reportContextCapture(&err, curPkg, ident.Pos(), ident.Name)
+				return false
+			}
 			// Skip the capture check ONLY for cross-package exported symbols
 			// (e.g. pkg.ExportedVar). A same-package exported variable already
 			// has o.Parent() == pkgScope, so it falls through to the
@@ -75,13 +105,40 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 				if o.Pkg() == nil || o.Parent() == nil {
 					return true
 				}
-				err = fmt.Errorf("at %s: cannot capture local variable %q defined in InitApp scope; pass it as a parameter to the function (preferred) or move it to package level", curPkg.Fset.Position(ident.Pos()), ident.Name)
+				reportCaptureErr(&err, curPkg, ident.Pos(), "variable", ident.Name)
 				return false
 			}
-			if seen[ident.Name] {
+
+			symPkg := o.Pkg()
+			if symPkg != nil && symPkg.Path() == e.mainPkgPath {
+				// Main-package variable: the generated file lives in the main
+				// package, so the symbol is directly visible — reference it by
+				// its bare name.
+				//
+				// Promoting it to a parameter (the previous behaviour) silently
+				// changed semantics: `&Thing{Name: defaultName}` became
+				// `dig_provider_N(defaultName string)`, so the value came from the
+				// container instead of the package-level variable. That compiled
+				// cleanly and produced wrong runtime behaviour, or — with no
+				// provider for that type — a misleading
+				// "no provider for type string with name \"defaultName\"".
+				//
+				// (If the variable is declared inside a //go:build digen file,
+				// checkContractVisibility rejects it before anything is written.)
 				return true
 			}
-			seen[ident.Name] = true
+
+			// Package-level variable of ANOTHER package, referenced from a
+			// closure defined in that same package (a cross-package Module).
+			// The main package cannot see it — exported ones are already
+			// whitelisted above as <alias>.<Name>, so what reaches here is
+			// unexported. Promote it to a parameter so the container supplies
+			// the value; this is the mechanism example/shadow_freevar relies on
+			// (a Module's closure captured variable resolved via dig.Supply).
+			if seen[obj] {
+				return true
+			}
+			seen[obj] = true
 			freeVars = append(freeVars, ident)
 			freeTypes = append(freeTypes, obj.Type())
 			freeTypeStrs = append(freeTypeStrs, e.getTypeFullName(obj.Type()))
@@ -104,14 +161,14 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 				if o.Pkg() == nil || o.Parent() == nil {
 					return true
 				}
-				err = fmt.Errorf("at %s: cannot capture local constant %q defined in InitApp scope; pass it as a parameter to the function (preferred) or move it to package level", curPkg.Fset.Position(ident.Pos()), ident.Name)
+				reportCaptureErr(&err, curPkg, ident.Pos(), "constant", ident.Name)
 				return false
 			}
 			constVal := e.extractConstLiteral(o)
-			if seen[ident.Name] {
+			if seen[obj] {
 				return true
 			}
-			seen[ident.Name] = true
+			seen[obj] = true
 			freeVars = append(freeVars, ident)
 			freeTypes = append(freeTypes, obj.Type())
 			freeTypeStrs = append(freeTypeStrs, e.getTypeFullName(obj.Type()))
@@ -130,9 +187,36 @@ func (e *Extractor) collectFreeVarsFromBody(body *ast.BlockStmt, curPkg *package
 	return freeVars, freeTypes, freeTypeStrs, isConst, litValues, nil
 }
 
+// reportCaptureErr 只保留首个捕获错误。
+//
+// ast.Inspect 的 return false 仅跳过当前子树、不会中止整体遍历，因此每次都覆盖
+// err 会让最终报出的是**最后一个**错误，与源码出现顺序不符、不利于定位。
+//
+// 措辞不再硬编码 "InitApp"：触发这一分支的可以是任何位于闭包之外的定义
+// （外层函数局部变量、外层函数参数、嵌套闭包的外层局部变量等），
+// 统一描述为「定义在闭包之外，生成文件看不到它」。
+func reportCaptureErr(dst *error, curPkg *packages.Package, pos token.Pos, kind, name string) {
+	if *dst != nil {
+		return
+	}
+	*dst = fmt.Errorf("at %s: cannot capture %s %q: it is defined outside the closure, so the generated file cannot see it; pass it as a function parameter (preferred) or move it to package level",
+		curPkg.Fset.Position(pos), kind, name)
+}
+
+// reportContextCapture rejects capturing a context.Context variable. digen
+// resolves context at runtime (it is passed to the function returned by
+// dig.Build), so a context taken from a package-level variable or from the
+// container would silently be the wrong one.
+func reportContextCapture(dst *error, curPkg *packages.Package, pos token.Pos, name string) {
+	if *dst != nil {
+		return
+	}
+	*dst = fmt.Errorf("at %s: cannot capture context variable %q: context is resolved at runtime and must be passed as a function parameter, not taken from a package-level variable or the container",
+		curPkg.Fset.Position(pos), name)
+}
+
 func (e *Extractor) collectFreeVarsWithConst(funcLit *ast.FuncLit, curPkg *packages.Package) ([]*ast.Ident, []types.Type, []string, []bool, []string, error) {
-	declSet := e.collectDeclarations(funcLit)
-	freeVars, freeTypes, freeTypeStrs, isConst, litValues, err := e.collectFreeVarsFromBody(funcLit.Body, curPkg, declSet)
+	freeVars, freeTypes, freeTypeStrs, isConst, litValues, err := e.collectFreeVarsFromBody(funcLit, curPkg)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

@@ -42,9 +42,10 @@ type fixtureCfg struct {
 // with its di.go, then add an entry below with the expected error substring.
 var fixtures = map[string]fixtureCfg{
 	"ambiguous":                {"", `with name "s" required by`},
-	"capture_const":            {"", `cannot capture local variable "maxRetries"`},
+	"capture_const":            {"", `cannot capture variable "maxRetries"`},
 	"capture_ctx":              {"", `cannot capture context variable "globalCtx"`},
-	"closure_capture":          {"", `cannot capture local variable "cfg"`},
+	"closure_capture":          {"", `cannot capture variable "cfg"`},
+	"closure_shadow_outer":     {"", `cannot capture variable "x"`},
 	"closure_private_fn":       {"", `func "buildAuditAuthorizer" is private in package`},
 	"control_flow":             {"", `contains dig.Module inside control flow`},
 	"cycle":                    {"", `circular dependency detected`},
