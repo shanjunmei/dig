@@ -4,6 +4,26 @@ All notable changes to `github.com/shanjunmei/dig` are documented in this file. 
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v1.0.24] - 2026-09-14
+
+## 🐛 Bug Fixes
+
+- **Import-alias leak fixed (`time` / `gotime` error)**
+  Fixed `LoadImportAliases` letting an explicit import alias from somewhere in the dependency closure (e.g. `import gotime "time"`) leak into the main package's generated import block: the main package's own import name now takes highest priority. Added `ForceAlias` to lock the generated import name to the package name actually used in the inlined body, keeping the import block and body references consistent. Regression test `TestLoadImportAliasesKeepsMainPackageOwnAlias`.
+- **Double substitution & UTF-8 boundary fix in package-alias replacement (`gogotime`)**
+  `replacePkgPathWithAlias` previously used a naive `strings.ReplaceAll(path+".", alias+"."`; when the alias contained the package path itself (e.g. `gotime` contains `time`) it re-replaced the already-written `gotime.` into `gogotime.`. Rewrote as a boundary-aware, idempotent replacement: `utf8.DecodeLastRuneInString` reads the full preceding rune and `unicode.IsLetter` / `unicode.IsDigit` decide whether it is an identifier character, so multi-byte UTF-8 characters (CJK identifiers, string literals, etc.) are no longer over-replaced. Regression tests `TestReplacePkgPathWithAliasDoesNotDoubleAlias` / `TestReplacePkgPathWithAliasUnicodeBoundary`.
+- **Closure variable-capture logic corrected**
+  - "Defined inside the closure" is now decided by an object-position interval (`obj.Pos()` ∈ `[funcLit.Pos(), funcLit.End())`) instead of a name-based `declSet` whitelist. This removes false-positive "capturing a local variable" errors for `range` Key/Value, nested `FuncLit` parameters, type-switch guards, if-init variables, and named results; and fixes a dangerous false NEGATIVE where a name-shadowed outer-variable reference was silently allowed, producing `undefined: x` in the generated file.
+  - `seen` dedup is now keyed by `types.Object` instead of the identifier name, avoiding wrongly deduping distinct objects that share a name.
+  - Error reporting now keeps the FIRST capture error (earlier errors were previously overwritten), and the wording no longer hardcodes "InitApp scope" — it describes the actual scope.
+  - A **main-package package-level variable** referenced inside a closure is now emitted as a direct bare reference (e.g. `defaultName`) instead of being promoted to a parameter — eliminating the silent semantic change where the value came from the DI container. Cross-package unexported package-level variables keep the existing "promote to parameter + Supply" behavior (preserved for `example/shadow_freevar`).
+  - The `context.Context` check now also covers package-level `context.Context` variables (previously only symbols that reached the free-var set were checked), so a package-level `globalCtx` is still rejected with a clear error.
+
+## 📦 Examples and Documentation Updates
+
+- Added success example `example/closure_scope_locals/` (covers every in-closure variable form including nested scopes: `:=` declarations, range Key/Value, nested `FuncLit` parameters and their inner `:=`, type-switch guards, if-init vars, named results) and failure example `example/gen_failures/closure_shadow_outer/` (name shadowing must be reported), with regression tests.
+- Docs site updated to v1.0.24; example counts synced (29 success example packages, 36 gen_failures negative-test packages).
+
 ## [v1.0.23] - 2026-09-04
 
 ## 🐛 Bug Fixes

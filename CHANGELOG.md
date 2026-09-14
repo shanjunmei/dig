@@ -4,6 +4,26 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.0.24] - 2026-09-14
+
+## 🐛 修复
+
+- **导入别名泄漏修复（`time` / `gotime` 报错）**
+  修复 `LoadImportAliases` 把依赖闭包中某处的显式导入别名（如 `import gotime "time"`）泄漏进主包生成文件导入块的问题：主包自身的导入名现在具有最高优先级；并新增 `ForceAlias`，以内联函数体里实际出现的包名锁定生成文件的导入名，确保导入块与函数体引用一致。配套回归测试 `TestLoadImportAliasesKeepsMainPackageOwnAlias`。
+- **包路径别名替换的二次替换与 UTF-8 边界修复（`gogotime`）**
+  `replacePkgPathWithAlias` 原先使用朴素 `strings.ReplaceAll(path+".", alias+".")`，当别名包含包路径本身（如 `gotime` 含 `time`）时会把已写好的 `gotime.` 再替换一次，产生 `gogotime.`。改写为边界敏感、幂等的替换：用 `utf8.DecodeLastRuneInString` 取前置完整符文，结合 `unicode.IsLetter` / `unicode.IsDigit` 判断是否为标识符字符，多字节 UTF-8 字符（中文标识符、字符串字面量等）不再被误替换。配套回归测试 `TestReplacePkgPathWithAliasDoesNotDoubleAlias` / `TestReplacePkgPathWithAliasUnicodeBoundary`。
+- **闭包变量捕获逻辑修正**
+  - 判定「变量是否定义在闭包内」由按名字的 `declSet` 白名单改为按对象声明位置的区间判据（`obj.Pos()` ∈ `[funcLit.Pos(), funcLit.End())`）。消除了对 `range` 的 Key/Value、嵌套 `FuncLit` 参数、type switch guard、if 初始化变量、命名返回值等的误报「捕获局部变量」；并修复了一个危险的漏报——同名遮蔽时外层变量的非法引用曾被放行，生成文件里出现 `undefined: x`。
+  - `seen` 去重键由标识符名字改为 `types.Object`，避免不同对象同名被错误去重。
+  - 错误报告改为保留首个捕获错误（此前后续错误会覆盖前面的），措辞不再硬编码 "InitApp scope"，而是描述实际作用域。
+  - 闭包内引用的**主包包级变量**现直接裸写引用（如 `defaultName`），不再被提升为形参——消除了「值改由 DI 容器注入」的静默语义变更。跨包未导出包级变量保持既有「提升为形参 + Supply」行为（为 `example/shadow_freevar` 保留）。
+  - context 检查扩展覆盖包级 `context.Context` 变量（此前仅检查进入自由变量集合的符号），包级 `globalCtx` 仍被清晰拒绝。
+
+## 📦 示例与文档更新
+
+- 新增成功示例 `example/closure_scope_locals/`（覆盖闭包体内含嵌套作用域的各类变量定义：`:=` 声明、range Key/Value、嵌套 `FuncLit` 参数与其内部 `:=`、type switch guard、if 初始化、命名返回值）与失败示例 `example/gen_failures/closure_shadow_outer/`（同名遮蔽必须报错），并补对应回归测试。
+- 文档站更新至 v1.0.24，示例计数同步（成功示例包 29、gen_failures 负向包 36）。
+
 ## [v1.0.23] - 2026-09-04
 
 ## 🐛 修复

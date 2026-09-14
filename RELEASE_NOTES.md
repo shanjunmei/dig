@@ -8,6 +8,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this p
 
 ---
 
+## [v1.0.24] - 2026-09-14
+
+### 🐛 Bug Fixes
+
+- **Generated code type-checks again when a dependency re-aliases a stdlib package** — a dependency's `import gotime "time"` no longer leaks into your generated file's imports, and `ForceAlias` keeps the import name in sync with what the inlined closures actually reference. This resolves the `undefined: time` / `"time" imported as gotime` failure.
+- **No more `gogotime` from alias self-substitution** — package-alias rewriting is now boundary-aware and idempotent; aliases that contain the package path (e.g. `gotime` ⊃ `time`) are not re-substituted, and multi-byte UTF-8 identifiers/string literals are handled correctly.
+- **Closures can use in-scope variables without false errors** — `range` Key/Value, nested closure parameters, type-switch guards, if-init vars, and named results are no longer wrongly reported as "capturing a local variable". A subtle false negative (name-shadowed outer variable slipping through, generating `undefined: x`) is also fixed.
+- **Package-level variables referenced in wiring keep their real value** — a main-package package-level variable is now referenced directly instead of being silently promoted to a DI-injected parameter, so the generated code no longer accidentally pulls the value from the container. Package-level `context.Context` variables are still rejected with a clear message.
+
+### 📦 Examples
+
+- New `example/closure_scope_locals/` (every in-closure variable form) and `example/gen_failures/closure_shadow_outer/` (name-shadowing must error), with regression tests.
+
+### ♻️ Internals
+
+- Capture detection switched from a name set to an object-position interval; `seen` dedup keyed by `types.Object`; error reporting keeps the first capture error.
+
 ## [v1.0.23] - 2026-09-04
 
 ### 🐛 Bug Fixes

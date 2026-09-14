@@ -56,7 +56,7 @@
         <img src="https://pkg.go.dev/badge/github.com/shanjunmei/dig.svg" alt="Go Reference">
       </a>
       <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
-      <img src="https://img.shields.io/badge/version-v1.0.23-00ADD8.svg" alt="v1.0.23">
+      <img src="https://img.shields.io/badge/version-v1.0.24-00ADD8.svg" alt="v1.0.24">
       <img src="https://img.shields.io/badge/Go-1.22+-00ADD8.svg" alt="Go 1.22+">
     </div>
     <h1 class="hero-title">
@@ -573,7 +573,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
           </thead>
           <tbody>
             <tr><td><strong data-en="Maintenance status">维护状态</strong></td><td class="col-dig" data-en="✅ Active">✅ 活跃</td><td data-en="⚠️ Archived">⚠️ 已归档</td><td data-en="✅ Active">✅ 活跃</td></tr>
-            <tr><td data-en="Latest version">最新版本</td><td class="col-dig">v1.0.23</td><td>v0.7.0 (beta)</td><td>v1.24.0</td></tr>
+            <tr><td data-en="Latest version">最新版本</td><td class="col-dig">v1.0.24</td><td>v0.7.0 (beta)</td><td>v1.24.0</td></tr>
             <tr><td data-en="Go version requirement">Go 版本要求</td><td class="col-dig">1.22+</td><td data-en="Standard">标准</td><td>1.22+</td></tr>
             <tr><td data-en="Refactor friendliness">重构友好度</td><td class="col-dig" data-en="High">高</td><td data-en="Low">低</td><td data-en="Medium">中</td></tr>
           </tbody>
@@ -591,7 +591,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
 
     <div class="examples-grid">
       <div class="example-category">
-        <h3 data-en-html="✅ Success examples (12)">✅ 成功示例（12 个）</h3>
+        <h3 data-en-html="✅ Success examples (13)">✅ 成功示例（13 个）</h3>
         <ul class="example-list">
           <li data-en-html="<strong>app</strong> — Full app: cross-package deps, generics, named instances, closures"><strong>app</strong> — 完整应用：跨包依赖、泛型、命名实例、闭包</li>
           <li data-en-html="<strong>app_basic</strong> — Basics: Provide + Supply + Invoke"><strong>app_basic</strong> — 基础用法：Provide + Supply + Invoke</li>
@@ -601,6 +601,7 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
           <li data-en-html="<strong>app_runtime_err</strong> — Runtime error propagation paths"><strong>app_runtime_err</strong> — 运行时错误传播路径</li>
           <li data-en-html="<strong>app_gen_test</strong> — Generated-code tests"><strong>app_gen_test</strong> — 生成代码测试</li>
           <li data-en-html="<strong>closure_param</strong> — Closure parameters &amp; local variables (allowed inside lifted closures)"><strong>closure_param</strong> — 闭包参数与局部变量（提升闭包中允许使用）</li>
+          <li data-en-html="<strong>closure_scope_locals</strong> — In-closure variable definitions of every form (range Key/Value, nested FuncLit params, type-switch guard, if-init, named results)"><strong>closure_scope_locals</strong> — 闭包内各类变量定义（range Key/Value、嵌套 FuncLit 参数、type switch guard、if 初始化、命名返回值）</li>
           <li data-en-html="<strong>context_alias</strong> — context alias injection"><strong>context_alias</strong> — context 别名注入</li>
           <li data-en-html="<strong>shadow_err</strong> — Variable-shadowing error scenario"><strong>shadow_err</strong> — 变量遮蔽报错场景</li>
           <li data-en-html="<strong>shadow_freevar</strong> — Free-variable shadowing"><strong>shadow_freevar</strong> — 自由变量遮蔽</li>
@@ -608,11 +609,12 @@ dig.<span class="c-func">Invoke</span>(<span class="c-keyword">func</span>(repor
         </ul>
       </div>
       <div class="example-category">
-        <h3 data-en-html="❌ Failure examples (35 negative-test packages under gen_failures/; incl. build-tag variants; representative subset listed below)">❌ 失败示例（gen_failures/ 下 35 个负向测试包；含 build-tag 变体，以下列举代表性子集）</h3>
+        <h3 data-en-html="❌ Failure examples (36 negative-test packages under gen_failures/; incl. build-tag variants; representative subset listed below)">❌ 失败示例（gen_failures/ 下 36 个负向测试包；含 build-tag 变体，以下列举代表性子集）</h3>
         <ul class="example-list example-list-fail">
           <li data-en-html="<strong>ambiguous</strong> — Named-instance ambiguity"><strong>ambiguous</strong> — 命名实例歧义</li>
           <li data-en-html="<strong>capture_const</strong> / <strong>capture_ctx</strong> — Closure capture violations"><strong>capture_const</strong> / <strong>capture_ctx</strong> — 闭包捕获违规</li>
           <li data-en-html="<strong>closure_capture</strong> — Local-variable capture forbidden"><strong>closure_capture</strong> — 局部变量捕获禁止</li>
+          <li data-en-html="<strong>closure_shadow_outer</strong> — Name shadowing: the outer variable reference must still be reported"><strong>closure_shadow_outer</strong> — 同名遮蔽：外层的非法引用仍必须报错</li>
           <li data-en-html="<strong>closure_private_fn</strong> — Unexported cross-package call inside a lifted closure"><strong>closure_private_fn</strong> — 提升闭包中的未导出跨包调用</li>
           <li data-en-html="<strong>control_flow</strong> — Control flow inside Module forbidden"><strong>control_flow</strong> — Module 内控制流禁止</li>
           <li data-en-html="<strong>cycle</strong> — Cycle detection"><strong>cycle</strong> — 循环依赖检测</li>
@@ -692,6 +694,19 @@ flowchart TD
   <div class="container">
     <h2 class="section-title" data-en="Release highlights">版本亮点</h2>
     <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-version">v1.0.24</div>
+        <div class="timeline-date">2026-09-14</div>
+        <div class="timeline-content">
+          <h3 data-en="Generated-code type-check &amp; closure-capture fixes">生成代码类型检查与闭包捕获修复</h3>
+          <ul>
+            <li data-en="Import-alias leak fixed: a dependency's import gotime &quot;time&quot; no longer leaks into the generated imports (resolves undefined: time)">修复导入别名泄漏：依赖的 import gotime &quot;time&quot; 不再泄漏进生成文件导入块（解决 undefined: time）</li>
+            <li data-en="No more gogotime from alias self-substitution; multi-byte UTF-8 identifiers handled correctly">消除别名自替换产生的 gogotime；多字节 UTF-8 标识符处理正确</li>
+            <li data-en="Closures can use in-scope variables (range Key/Value, nested params, type-switch guard, named results) without false errors; name-shadowing false negative fixed">闭包可正常使用作用域内变量（range Key/Value、嵌套参数、type switch guard、命名返回值）不再误报；同名遮蔽漏报已修复</li>
+            <li data-en="Main-package package-level variables referenced in wiring keep their real value (no silent promotion to a DI parameter)">闭包内引用的主包包级变量保留真实值（不再静默提升为 DI 形参）</li>
+          </ul>
+        </div>
+      </div>
       <div class="timeline-item">
         <div class="timeline-version">v1.0.23</div>
         <div class="timeline-date">2026-09-04</div>
